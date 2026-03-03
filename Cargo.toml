@@ -1,0 +1,32 @@
+[package]
+name = "commitbook"
+version = "0.1.0"
+edition = "2021"
+description = "CLI to manage automated git commits for markdown notebooks"
+license = "MIT"
+authors = ["ZAAI"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+git2 = "0.19"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+colored = "2.1"
+log = "0.4"
+env_logger = "0.11"
+which = "7"
+sha2 = "0.10"
+hex = "0.4"
+fs2 = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"
