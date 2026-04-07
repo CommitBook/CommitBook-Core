@@ -1,6 +1,9 @@
 # Binary
 commitbook
 
+# Rust
+target/
+
 # Go
 *.exe
 *.test
