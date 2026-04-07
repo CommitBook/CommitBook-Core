@@ -1,0 +1,35 @@
+version: 2
+project_name: commitbook
+
+builds:
+  - main: .
+    binary: commitbook
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+brews:
+  - repository:
+      owner: ZAAI-com
+      name: homebrew-tap
+    homepage: https://github.com/ZAAI-com/CommitBook
+    description: "Automated git commits for markdown notebooks"
+    license: MIT
+    install: |
+      bin.install "commitbook"
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+changelog:
+  sort: asc
+
+release:
+  github:
+    owner: ZAAI-com
+    name: CommitBook
