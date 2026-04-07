@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var setScheduleCmd = &cobra.Command{
+var scheduleCmd = &cobra.Command{
 	Use:   "schedule [expression]",
 	Short: "Set the auto-commit schedule",
 	Long: `Set the auto-commit schedule using a preset or cron expression.
@@ -19,14 +19,14 @@ var setScheduleCmd = &cobra.Command{
 
 Custom: any valid 5-field cron expression (e.g., "*/10 * * * *")`,
 	Args: cobra.ExactArgs(1),
-	RunE: runSetSchedule,
+	RunE: runSchedule,
 }
 
 func init() {
-	setCmd.AddCommand(setScheduleCmd)
+	rootCmd.AddCommand(scheduleCmd)
 }
 
-func runSetSchedule(cmd *cobra.Command, args []string) error {
+func runSchedule(cmd *cobra.Command, args []string) error {
 	repoDir, err := config.ResolveRepoPath(repoPath)
 	if err != nil {
 		return fmt.Errorf("resolving repo path: %w", err)
