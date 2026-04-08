@@ -126,3 +126,116 @@ pub(crate) fn clean_message(raw: &str) -> String {
 
     msg
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clean_message_passthrough() {
+        assert_eq!(clean_message("Fix login bug"), "Fix login bug");
+    }
+
+    #[test]
+    fn test_clean_message_strips_fences() {
+        assert_eq!(clean_message("```Update README```"), "Update README");
+    }
+
+    #[test]
+    fn test_clean_message_strips_quotes() {
+        assert_eq!(clean_message("\"Add tests\""), "Add tests");
+        assert_eq!(clean_message("'Add tests'"), "Add tests");
+        assert_eq!(clean_message("`Add tests`"), "Add tests");
+    }
+
+    #[test]
+    fn test_clean_message_first_line_only() {
+        assert_eq!(
+            clean_message("First line\nSecond line\nThird line"),
+            "First line"
+        );
+    }
+
+    #[test]
+    fn test_clean_message_truncates_to_72() {
+        let long = "A".repeat(100);
+        let result = clean_message(&long);
+        assert_eq!(result.len(), 72);
+    }
+
+    #[test]
+    fn test_truncate_short_passthrough() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_long_appends_ellipsis() {
+        assert_eq!(truncate("hello world", 5), "hello...");
+    }
+
+    // --- MockProvider + ProviderChain async tests ---
+
+    struct MockProvider {
+        name: &'static str,
+        key: &'static str,
+        available: bool,
+        response: Option<&'static str>,
+    }
+
+    #[async_trait]
+    impl CommitMessageProvider for MockProvider {
+        fn name(&self) -> &str { self.name }
+        fn key(&self) -> &str { self.key }
+        fn is_available(&self) -> bool { self.available }
+
+        async fn generate(&self, _summary: &ChangesSummary, _repo_path: &Path) -> Result<String> {
+            match self.response {
+                Some(msg) => Ok(msg.to_string()),
+                None => anyhow::bail!("mock error"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_chain_skips_unavailable() {
+        let chain = ProviderChain {
+            providers: vec![
+                Box::new(MockProvider { name: "Unavail", key: "unavail", available: false, response: Some("nope") }),
+                Box::new(MockProvider { name: "Avail", key: "avail", available: true, response: Some("good msg") }),
+            ],
+        };
+        let summary = ChangesSummary { new_files: vec!["a.txt".into()], ..Default::default() };
+        let (msg, provider) = chain.generate(&summary, &["unavail".into(), "avail".into()], Path::new("/tmp")).await;
+        assert_eq!(msg, "good msg");
+        assert_eq!(provider, "Avail");
+    }
+
+    #[tokio::test]
+    async fn test_chain_all_fail_uses_fallback() {
+        let chain = ProviderChain {
+            providers: vec![
+                Box::new(MockProvider { name: "Bad", key: "bad", available: true, response: None }),
+                Box::new(fallback::FallbackProvider),
+            ],
+        };
+        let summary = ChangesSummary { new_files: vec!["a.txt".into()], ..Default::default() };
+        let (msg, provider) = chain.generate(&summary, &["bad".into()], Path::new("/tmp")).await;
+        assert_eq!(provider, "Fallback");
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn test_check_availability() {
+        let chain = ProviderChain {
+            providers: vec![
+                Box::new(MockProvider { name: "Yes", key: "yes", available: true, response: None }),
+                Box::new(MockProvider { name: "No", key: "no", available: false, response: None }),
+            ],
+        };
+        let result = chain.check_availability(&["yes".into(), "no".into(), "missing".into()]);
+        assert_eq!(result.len(), 3);
+        assert!(result[0].2);          // "yes" is available
+        assert!(!result[1].2);         // "no" is not
+        assert!(!result[2].2);         // "missing" is not
+    }
+}

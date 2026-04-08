@@ -192,4 +192,25 @@ mod tests {
         let output = "# Some header\n? prompt\nSuggestion from copilot\nFix login bug";
         assert_eq!(extract_message(output), "Fix login bug");
     }
+
+    // --- Phase 2a: 3 new tests ---
+
+    #[test]
+    fn test_extract_message_single_quotes() {
+        let output = "git commit -m 'Refactor auth module'";
+        assert_eq!(extract_message(output), "Refactor auth module");
+    }
+
+    #[test]
+    fn test_extract_message_copilot_meta_skipped() {
+        let output = "Powered by GitHub Copilot\nSuggestion:\nAdd error handling";
+        assert_eq!(extract_message(output), "Add error handling");
+    }
+
+    #[test]
+    fn test_extract_message_long_truncated() {
+        let long_line = "A".repeat(100);
+        let result = extract_message(&long_line);
+        assert!(result.len() <= 72);
+    }
 }

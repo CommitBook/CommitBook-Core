@@ -153,3 +153,123 @@ impl FileLogger {
         &self.logs_dir
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_logger() -> (tempfile::TempDir, FileLogger) {
+        let tmp = tempfile::tempdir().unwrap();
+        let logger = FileLogger::new(tmp.path(), 10).unwrap();
+        (tmp, logger)
+    }
+
+    #[test]
+    fn test_creates_logs_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _logger = FileLogger::new(tmp.path(), 10).unwrap();
+        assert!(tmp.path().join(".CommitBook").join("logs").exists());
+    }
+
+    #[test]
+    fn test_writes_valid_json() {
+        let (_tmp, logger) = make_logger();
+        logger.info("test message").unwrap();
+
+        let lines = logger.read_recent(10).unwrap();
+        assert_eq!(lines.len(), 1);
+
+        let entry: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(entry["level"], "INFO");
+        assert_eq!(entry["msg"], "test message");
+        assert!(entry["ts"].is_string());
+    }
+
+    #[test]
+    fn test_all_log_levels() {
+        let (_tmp, logger) = make_logger();
+        logger.info("i").unwrap();
+        logger.warn("w").unwrap();
+        logger.error("e").unwrap();
+        logger.debug("d").unwrap();
+
+        let lines = logger.read_recent(10).unwrap();
+        assert_eq!(lines.len(), 4);
+
+        let levels: Vec<String> = lines.iter().map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).unwrap();
+            v["level"].as_str().unwrap().to_string()
+        }).collect();
+        // read_recent returns reversed (most recent first)
+        assert!(levels.contains(&"INFO".to_string()));
+        assert!(levels.contains(&"WARN".to_string()));
+        assert!(levels.contains(&"ERROR".to_string()));
+        assert!(levels.contains(&"DEBUG".to_string()));
+    }
+
+    #[test]
+    fn test_extra_fields() {
+        let (_tmp, logger) = make_logger();
+        logger.log_with("INFO", "commit done", Some(&[("provider", "Claude"), ("hash", "abc1234")])).unwrap();
+
+        let lines = logger.read_recent(10).unwrap();
+        let entry: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(entry["provider"], "Claude");
+        assert_eq!(entry["hash"], "abc1234");
+    }
+
+    #[test]
+    fn test_read_recent_empty() {
+        let (_tmp, logger) = make_logger();
+        let lines = logger.read_recent(10).unwrap();
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn test_read_recent_limits() {
+        let (_tmp, logger) = make_logger();
+        for i in 0..5 {
+            logger.info(&format!("msg {}", i)).unwrap();
+        }
+        let lines = logger.read_recent(3).unwrap();
+        assert_eq!(lines.len(), 3);
+    }
+
+    #[test]
+    fn test_cleanup_removes_old_files() {
+        let (_tmp, logger) = make_logger();
+        // Create an old log file (10+ days old)
+        let old_date = (chrono::Local::now() - chrono::Duration::days(15))
+            .format("%Y-%m-%d")
+            .to_string();
+        let old_path = logger.logs_dir().join(format!("{}.log", old_date));
+        fs::write(&old_path, "old entry\n").unwrap();
+
+        logger.cleanup_old_logs().unwrap();
+        assert!(!old_path.exists());
+    }
+
+    #[test]
+    fn test_cleanup_keeps_recent_files() {
+        let (_tmp, logger) = make_logger();
+        // Create a recent log file (2 days old)
+        let recent_date = (chrono::Local::now() - chrono::Duration::days(2))
+            .format("%Y-%m-%d")
+            .to_string();
+        let recent_path = logger.logs_dir().join(format!("{}.log", recent_date));
+        fs::write(&recent_path, "recent entry\n").unwrap();
+
+        logger.cleanup_old_logs().unwrap();
+        assert!(recent_path.exists());
+    }
+
+    #[test]
+    fn test_cleanup_ignores_non_log_files() {
+        let (_tmp, logger) = make_logger();
+        let txt_path = logger.logs_dir().join("notes.txt");
+        fs::write(&txt_path, "not a log\n").unwrap();
+
+        logger.cleanup_old_logs().unwrap();
+        assert!(txt_path.exists());
+    }
+}
