@@ -1,0 +1,22 @@
+{% if entries.is_empty() %}
+<p style="color: var(--text-muted);">No log entries yet.</p>
+{% else %}
+<table>
+    <thead>
+        <tr>
+            <th>Level</th>
+            <th>Time</th>
+            <th>Message</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in entries %}
+        <tr>
+            <td><span class="level-{{ entry.level }}">{{ entry.level }}</span></td>
+            <td class="ts">{{ entry.timestamp }}</td>
+            <td>{{ entry.message }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}

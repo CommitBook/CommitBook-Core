@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Config{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Configuration</h2>
+    <div id="config-flash"></div>
+    <form hx-post="/api/config" hx-target="#config-flash" hx-swap="innerHTML">
+        <div class="form-row">
+            <label for="schedule">Schedule</label>
+            <select name="schedule" id="schedule">
+                <option value="*/5 * * * *" {% if schedule == "*/5 * * * *" %}selected{% endif %}>Every 5 minutes</option>
+                <option value="*/15 * * * *" {% if schedule == "*/15 * * * *" %}selected{% endif %}>Every 15 minutes</option>
+                <option value="*/30 * * * *" {% if schedule == "*/30 * * * *" %}selected{% endif %}>Every 30 minutes</option>
+                <option value="0 * * * *" {% if schedule == "0 * * * *" %}selected{% endif %}>Every hour</option>
+                <option value="0 */2 * * *" {% if schedule == "0 */2 * * *" %}selected{% endif %}>Every 2 hours</option>
+                <option value="0 */4 * * *" {% if schedule == "0 */4 * * *" %}selected{% endif %}>Every 4 hours</option>
+                <option value="0 9 * * *" {% if schedule == "0 9 * * *" %}selected{% endif %}>Daily at 9:00 AM</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label for="branch">Branch</label>
+            <input type="text" name="branch" id="branch" value="{{ branch }}">
+        </div>
+        <div class="form-row">
+            <label for="auto_push">Auto Push</label>
+            <select name="auto_push" id="auto_push">
+                <option value="true" {% if auto_push %}selected{% endif %}>Yes</option>
+                <option value="false" {% if !auto_push %}selected{% endif %}>No</option>
+            </select>
+        </div>
+        <div class="actions">
+            <button type="submit">Save</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

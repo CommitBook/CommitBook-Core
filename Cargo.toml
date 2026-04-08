@@ -2,6 +2,8 @@
 members = [
     "crates/commitbook-core",
     "crates/commitbook-cli",
+    "crates/commitbook-tui",
+    "crates/commitbook-web",
 ]
 resolver = "2"
 

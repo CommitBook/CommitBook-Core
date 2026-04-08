@@ -6,15 +6,37 @@ use commitbook_core::config::LocalConfig;
 use commitbook_core::cron;
 use commitbook_core::git::remote;
 
-pub fn run(repo_path: &Path) -> Result<()> {
+pub fn run(repo_path: &Path, json: bool) -> Result<()> {
     if !LocalConfig::exists(repo_path) {
-        println!("{}", "CommitBook is not configured for this repository.".yellow());
-        println!("Run {} to initialize.", "commitbook setup".bold());
+        if json {
+            println!(r#"{{"configured":false}}"#);
+        } else {
+            println!("{}", "CommitBook is not configured for this repository.".yellow());
+            println!("Run {} to initialize.", "commitbook setup".bold());
+        }
         return Ok(());
     }
 
     let config = LocalConfig::load(repo_path)?;
     let running = cron::is_loaded(repo_path);
+
+    if json {
+        let remote_url = remote::get_remote_url(repo_path, "origin").ok();
+        let output = serde_json::json!({
+            "configured": true,
+            "running": running,
+            "enabled": config.enabled,
+            "schedule": config.schedule,
+            "schedule_desc": cron::describe_schedule(&config.schedule),
+            "branch": config.git.branch,
+            "auto_push": config.git.auto_push,
+            "last_commit": config.last_commit,
+            "repo_path": repo_path.display().to_string(),
+            "remote": remote_url,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
 
     println!("{}", "CommitBook Status".bold().cyan());
     println!();

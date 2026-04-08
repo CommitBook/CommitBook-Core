@@ -148,6 +148,50 @@ impl FileLogger {
         Ok(lines)
     }
 
+    /// Read log entries across all log files with pagination.
+    ///
+    /// Returns lines in reverse chronological order (newest first).
+    /// `offset` skips the first N entries, `limit` caps the result size.
+    pub fn read_entries(&self, limit: usize, offset: usize) -> Result<Vec<String>> {
+        let mut log_files: Vec<PathBuf> = fs::read_dir(&self.logs_dir)
+            .with_context(|| "Failed to read logs directory")?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|ext| ext == "log").unwrap_or(false))
+            .filter(|p| {
+                p.file_stem()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                    .is_some()
+            })
+            .collect();
+
+        // Sort by filename descending (newest date first)
+        log_files.sort_by(|a, b| b.cmp(a));
+
+        let mut all_lines = Vec::new();
+        for file in &log_files {
+            let content = fs::read_to_string(file)
+                .with_context(|| format!("Failed to read log file: {}", file.display()))?;
+            let mut lines: Vec<String> = content
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+            // Reverse so newest entries within a file come first
+            lines.reverse();
+            all_lines.extend(lines);
+        }
+
+        let result = all_lines
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect();
+
+        Ok(result)
+    }
+
     /// Returns the path to the logs directory.
     pub fn logs_dir(&self) -> &Path {
         &self.logs_dir
@@ -155,121 +199,5 @@ impl FileLogger {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_logger() -> (tempfile::TempDir, FileLogger) {
-        let tmp = tempfile::tempdir().unwrap();
-        let logger = FileLogger::new(tmp.path(), 10).unwrap();
-        (tmp, logger)
-    }
-
-    #[test]
-    fn test_creates_logs_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        let _logger = FileLogger::new(tmp.path(), 10).unwrap();
-        assert!(tmp.path().join(".CommitBook").join("logs").exists());
-    }
-
-    #[test]
-    fn test_writes_valid_json() {
-        let (_tmp, logger) = make_logger();
-        logger.info("test message").unwrap();
-
-        let lines = logger.read_recent(10).unwrap();
-        assert_eq!(lines.len(), 1);
-
-        let entry: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
-        assert_eq!(entry["level"], "INFO");
-        assert_eq!(entry["msg"], "test message");
-        assert!(entry["ts"].is_string());
-    }
-
-    #[test]
-    fn test_all_log_levels() {
-        let (_tmp, logger) = make_logger();
-        logger.info("i").unwrap();
-        logger.warn("w").unwrap();
-        logger.error("e").unwrap();
-        logger.debug("d").unwrap();
-
-        let lines = logger.read_recent(10).unwrap();
-        assert_eq!(lines.len(), 4);
-
-        let levels: Vec<String> = lines.iter().map(|l| {
-            let v: serde_json::Value = serde_json::from_str(l).unwrap();
-            v["level"].as_str().unwrap().to_string()
-        }).collect();
-        // read_recent returns reversed (most recent first)
-        assert!(levels.contains(&"INFO".to_string()));
-        assert!(levels.contains(&"WARN".to_string()));
-        assert!(levels.contains(&"ERROR".to_string()));
-        assert!(levels.contains(&"DEBUG".to_string()));
-    }
-
-    #[test]
-    fn test_extra_fields() {
-        let (_tmp, logger) = make_logger();
-        logger.log_with("INFO", "commit done", Some(&[("provider", "Claude"), ("hash", "abc1234")])).unwrap();
-
-        let lines = logger.read_recent(10).unwrap();
-        let entry: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
-        assert_eq!(entry["provider"], "Claude");
-        assert_eq!(entry["hash"], "abc1234");
-    }
-
-    #[test]
-    fn test_read_recent_empty() {
-        let (_tmp, logger) = make_logger();
-        let lines = logger.read_recent(10).unwrap();
-        assert!(lines.is_empty());
-    }
-
-    #[test]
-    fn test_read_recent_limits() {
-        let (_tmp, logger) = make_logger();
-        for i in 0..5 {
-            logger.info(&format!("msg {}", i)).unwrap();
-        }
-        let lines = logger.read_recent(3).unwrap();
-        assert_eq!(lines.len(), 3);
-    }
-
-    #[test]
-    fn test_cleanup_removes_old_files() {
-        let (_tmp, logger) = make_logger();
-        // Create an old log file (10+ days old)
-        let old_date = (chrono::Local::now() - chrono::Duration::days(15))
-            .format("%Y-%m-%d")
-            .to_string();
-        let old_path = logger.logs_dir().join(format!("{}.log", old_date));
-        fs::write(&old_path, "old entry\n").unwrap();
-
-        logger.cleanup_old_logs().unwrap();
-        assert!(!old_path.exists());
-    }
-
-    #[test]
-    fn test_cleanup_keeps_recent_files() {
-        let (_tmp, logger) = make_logger();
-        // Create a recent log file (2 days old)
-        let recent_date = (chrono::Local::now() - chrono::Duration::days(2))
-            .format("%Y-%m-%d")
-            .to_string();
-        let recent_path = logger.logs_dir().join(format!("{}.log", recent_date));
-        fs::write(&recent_path, "recent entry\n").unwrap();
-
-        logger.cleanup_old_logs().unwrap();
-        assert!(recent_path.exists());
-    }
-
-    #[test]
-    fn test_cleanup_ignores_non_log_files() {
-        let (_tmp, logger) = make_logger();
-        let txt_path = logger.logs_dir().join("notes.txt");
-        fs::write(&txt_path, "not a log\n").unwrap();
-
-        logger.cleanup_old_logs().unwrap();
-        assert!(txt_path.exists());
-    }
-}
+#[path = "file_logger_tests.rs"]
+mod tests;

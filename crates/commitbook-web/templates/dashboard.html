@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div hx-get="/htmx/status" hx-trigger="every 5s" hx-swap="innerHTML" id="status-section">
+    {% include "partials/status.html" %}
+</div>
+
+<div class="grid-2">
+    <div class="card" hx-get="/htmx/providers" hx-trigger="every 30s" hx-swap="innerHTML">
+        {% include "partials/providers.html" %}
+    </div>
+    <div class="card">
+        <h2>Quick Actions</h2>
+        {% if running %}
+        <button class="btn-danger" hx-post="/api/stop" hx-swap="none"
+                hx-on::after-request="htmx.trigger('#status-section','htmx:trigger')">
+            Stop Scheduler
+        </button>
+        {% else %}
+        <button hx-post="/api/start" hx-swap="none"
+                hx-on::after-request="htmx.trigger('#status-section','htmx:trigger')">
+            Start Scheduler
+        </button>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

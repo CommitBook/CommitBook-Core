@@ -5,7 +5,7 @@ use std::path::Path;
 use commitbook_core::config::LocalConfig;
 use commitbook_core::logger::FileLogger;
 
-pub fn run(repo_path: &Path, max_lines: usize) -> Result<()> {
+pub fn run(repo_path: &Path, max_lines: usize, json: bool) -> Result<()> {
     if !LocalConfig::exists(repo_path) {
         bail!("CommitBook is not set up in this repository.\nRun {} first.", "commitbook setup".bold());
     }
@@ -14,6 +14,15 @@ pub fn run(repo_path: &Path, max_lines: usize) -> Result<()> {
     let logger = FileLogger::new(repo_path, config.logging.max_log_files)?;
 
     let lines = logger.read_recent(max_lines)?;
+
+    if json {
+        let entries: Vec<serde_json::Value> = lines
+            .iter()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&entries)?);
+        return Ok(());
+    }
 
     if lines.is_empty() {
         println!("{}", "No log entries found.".dimmed());

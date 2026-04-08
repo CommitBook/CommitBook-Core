@@ -1,7 +1,7 @@
 mod commands;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use std::path::PathBuf;
 
 /// CommitBook — Automated git commits for your markdown notebooks.
@@ -19,6 +19,10 @@ struct Cli {
     /// Path to the git repository (defaults to current directory)
     #[arg(long, global = true)]
     repo: Option<PathBuf>,
+
+    /// Output as JSON (for status, doctor, log)
+    #[arg(long, global = true)]
+    json: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -69,6 +73,20 @@ enum Commands {
     /// Run a single auto-commit cycle (used internally by scheduler)
     #[command(hide = true)]
     AutoCommit,
+
+    /// Remove CommitBook from this repository
+    Uninstall {
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[tokio::main]
@@ -86,18 +104,27 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Setup => commands::setup::run(&repo_path)?,
-        Commands::Doctor => commands::doctor::run(&repo_path)?,
+        Commands::Doctor => commands::doctor::run(&repo_path, cli.json)?,
         Commands::Start => commands::start::run(&repo_path)?,
         Commands::Stop => commands::stop::run(&repo_path)?,
-        Commands::Status => commands::status::run(&repo_path)?,
+        Commands::Status => commands::status::run(&repo_path, cli.json)?,
         Commands::SetSchedule { expression } => {
             commands::schedule::run(&repo_path, &expression)?;
         }
         Commands::Commit { dry_run, message } => {
             commands::commit::run(&repo_path, dry_run, message.as_deref()).await?;
         }
-        Commands::Log { lines } => commands::log::run(&repo_path, lines)?,
+        Commands::Log { lines } => commands::log::run(&repo_path, lines, cli.json)?,
         Commands::AutoCommit => commands::auto_commit::run(&repo_path).await?,
+        Commands::Uninstall { force } => commands::uninstall::run(&repo_path, force)?,
+        Commands::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "commitbook",
+                &mut std::io::stdout(),
+            );
+        }
     }
 
     Ok(())

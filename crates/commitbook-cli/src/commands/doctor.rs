@@ -48,23 +48,16 @@ impl Check {
     }
 }
 
-pub fn run(repo_path: &Path) -> Result<()> {
-    println!("{}", "CommitBook Doctor".bold().cyan());
-
+pub fn run(repo_path: &Path, json: bool) -> Result<()> {
     // Core checks
-    println!();
-    println!("  {}", "Core".bold());
     let core_checks = vec![
         check_git(),
         check_git_repo(repo_path),
         check_git_remote(repo_path),
         check_scheduler(),
     ];
-    for c in &core_checks { c.display(); }
 
     // AI provider checks
-    println!();
-    println!("  {}", "AI Providers".bold());
     let global = GlobalConfig::load().unwrap_or_default();
     let chain = ProviderChain::new();
     let ai_checks: Vec<Check> = chain
@@ -78,23 +71,55 @@ pub fn run(repo_path: &Path) -> Result<()> {
             }
         })
         .collect();
-    for c in &ai_checks { c.display(); }
 
     // CommitBook checks
-    println!();
-    println!("  {}", "CommitBook".bold());
     let cb_checks = vec![
         check_commitbook_config(repo_path),
         check_logs_writable(repo_path),
         check_binary_path(repo_path),
     ];
-    for c in &cb_checks { c.display(); }
 
-    // Summary
     let all_checks: Vec<&Check> = core_checks.iter()
         .chain(ai_checks.iter())
         .chain(cb_checks.iter())
         .collect();
+
+    if json {
+        let checks_json: Vec<serde_json::Value> = all_checks
+            .iter()
+            .map(|c| serde_json::json!({
+                "name": c.name,
+                "passed": c.passed,
+                "detail": c.detail,
+                "required": c.required,
+            }))
+            .collect();
+        let passed = all_checks.iter().filter(|c| c.passed).count();
+        let failed = all_checks.iter().filter(|c| !c.passed && c.required).count();
+        let output = serde_json::json!({
+            "checks": checks_json,
+            "passed": passed,
+            "total": all_checks.len(),
+            "required_failed": failed,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    println!("{}", "CommitBook Doctor".bold().cyan());
+
+    println!();
+    println!("  {}", "Core".bold());
+    for c in &core_checks { c.display(); }
+
+    println!();
+    println!("  {}", "AI Providers".bold());
+    for c in &ai_checks { c.display(); }
+
+    println!();
+    println!("  {}", "CommitBook".bold());
+    for c in &cb_checks { c.display(); }
+
     let passed = all_checks.iter().filter(|c| c.passed).count();
     let required_failed = all_checks.iter().filter(|c| !c.passed && c.required).count();
 
