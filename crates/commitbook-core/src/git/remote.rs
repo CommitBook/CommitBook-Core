@@ -47,3 +47,7 @@ pub fn get_remote_url(repo_path: &Path, remote: &str) -> Result<String> {
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
+
+#[cfg(test)]
+#[path = "remote_tests.rs"]
+mod tests;

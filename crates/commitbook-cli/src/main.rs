@@ -87,6 +87,10 @@ enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+
+    /// Generate man page
+    #[command(hide = true)]
+    Manpage,
 }
 
 #[tokio::main]
@@ -124,6 +128,9 @@ async fn main() -> Result<()> {
                 "commitbook",
                 &mut std::io::stdout(),
             );
+        }
+        Commands::Manpage => {
+            clap_mangen::Man::new(Cli::command()).render(&mut std::io::stdout())?;
         }
     }
 

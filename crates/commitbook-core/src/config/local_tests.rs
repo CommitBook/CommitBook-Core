@@ -78,3 +78,34 @@ fn test_init_creates_structure() {
     assert!(gitignore.contains(".CommitBook/logs/"));
     assert!(gitignore.contains(".CommitBook/.lock"));
 }
+
+#[test]
+fn test_new_has_config_version() {
+    let cfg = LocalConfig::new("hourly");
+    assert_eq!(cfg.config_version, "1");
+}
+
+#[test]
+fn test_load_without_version_defaults() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let dir = repo.join(".CommitBook");
+    fs::create_dir_all(&dir).unwrap();
+
+    // Write TOML without config_version field
+    let toml_content = r#"
+enabled = true
+schedule = "0 * * * *"
+created_at = "2026-04-07T00:00:00Z"
+"#;
+    fs::write(dir.join("config.toml"), toml_content).unwrap();
+
+    let loaded = LocalConfig::load(repo).unwrap();
+    assert_eq!(loaded.config_version, "1");
+}
+
+#[test]
+fn test_migrate_returns_false_when_current() {
+    let mut cfg = LocalConfig::new("hourly");
+    assert!(!cfg.migrate());
+}

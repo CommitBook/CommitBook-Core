@@ -66,6 +66,12 @@ impl GlobalConfig {
         Ok(Self::config_dir()?.join("config.toml"))
     }
 
+    /// Migrate config to the latest version. Returns true if migration occurred.
+    pub fn migrate(&mut self) -> bool {
+        // Currently at version "1.0.0" — no migrations needed yet.
+        false
+    }
+
     /// Load global config from disk. Creates default if not found.
     pub fn load() -> Result<Self> {
         let path = Self::config_path()?;
@@ -78,8 +84,12 @@ impl GlobalConfig {
         let content = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read global config: {}", path.display()))?;
 
-        let config: Self = toml::from_str(&content)
+        let mut config: Self = toml::from_str(&content)
             .with_context(|| "Failed to parse global config")?;
+
+        if config.migrate() {
+            config.save()?;
+        }
 
         Ok(config)
     }

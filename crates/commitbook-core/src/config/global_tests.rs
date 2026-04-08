@@ -37,3 +37,19 @@ fn test_toml_roundtrip() {
     assert_eq!(deserialized.ai.providers, original.ai.providers);
     assert!(deserialized.repos.is_empty());
 }
+
+#[test]
+fn test_migrate_returns_false_current() {
+    let mut cfg = GlobalConfig::default();
+    assert!(!cfg.migrate());
+}
+
+#[test]
+fn test_toml_without_version_field() {
+    // GlobalConfig requires version field, but repos/ai have defaults
+    let toml_content = r#"version = "1.0.0""#;
+    let cfg: GlobalConfig = toml::from_str(toml_content).unwrap();
+    assert_eq!(cfg.version, "1.0.0");
+    assert!(cfg.repos.is_empty());
+    assert_eq!(cfg.ai.providers.len(), 4);
+}

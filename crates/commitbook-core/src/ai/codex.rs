@@ -63,6 +63,10 @@ impl CommitMessageProvider for CodexProvider {
     }
 }
 
+#[cfg(test)]
+#[path = "codex_tests.rs"]
+mod tests;
+
 /// Wait for a child process with a timeout.
 fn wait_with_timeout(
     child: std::process::Child,

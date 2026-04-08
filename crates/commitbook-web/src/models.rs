@@ -57,3 +57,7 @@ pub struct ActionResponse {
     pub success: bool,
     pub message: String,
 }
+
+#[cfg(test)]
+#[path = "models_tests.rs"]
+mod tests;

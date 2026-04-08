@@ -5,43 +5,22 @@ use std::process::{Command, Stdio};
 
 const CRON_COMMENT_PREFIX: &str = "# CommitBook: ";
 
-/// Install a crontab entry for the repo. Returns "crontab:<repo_path>" as scheduler_id.
-pub fn install(
+/// Build the comment and crontab entry lines for a repo.
+pub(super) fn build_crontab_entry(
     repo_path: &Path,
     schedule: &str,
     commitbook_bin: &Path,
-) -> Result<String> {
+) -> (String, String) {
     let repo_str = repo_path.to_string_lossy();
     let bin_str = commitbook_bin.to_string_lossy();
-
-    // Remove any existing entry first
-    let _ = uninstall(repo_path);
-
-    let current = get_current_crontab().unwrap_or_default();
-
     let comment = format!("{}{}", CRON_COMMENT_PREFIX, repo_str);
     let entry = format!("{} {} auto-commit --repo {}", schedule, bin_str, repo_str);
-
-    let new_crontab = if current.is_empty() {
-        format!("{}\n{}\n", comment, entry)
-    } else {
-        format!("{}\n{}\n{}\n", current.trim_end(), comment, entry)
-    };
-
-    set_crontab(&new_crontab)?;
-
-    Ok(format!("crontab:{}", repo_str))
+    (comment, entry)
 }
 
-/// Remove the crontab entry for the repo.
-pub fn uninstall(repo_path: &Path) -> Result<()> {
+/// Filter out crontab lines belonging to the given repo.
+pub(super) fn filter_crontab_lines(current: &str, repo_path: &Path) -> String {
     let repo_str = repo_path.to_string_lossy();
-    let current = get_current_crontab().unwrap_or_default();
-
-    if current.is_empty() {
-        return Ok(());
-    }
-
     let marker = format!("{}{}", CRON_COMMENT_PREFIX, repo_str);
     let lines: Vec<&str> = current.lines().collect();
     let mut new_lines = Vec::new();
@@ -62,7 +41,41 @@ pub fn uninstall(repo_path: &Path) -> Result<()> {
         new_lines.push(line);
     }
 
-    let new_crontab = new_lines.join("\n");
+    new_lines.join("\n")
+}
+
+/// Install a crontab entry for the repo. Returns "crontab:<repo_path>" as scheduler_id.
+pub fn install(
+    repo_path: &Path,
+    schedule: &str,
+    commitbook_bin: &Path,
+) -> Result<String> {
+    // Remove any existing entry first
+    let _ = uninstall(repo_path);
+
+    let current = get_current_crontab().unwrap_or_default();
+    let (comment, entry) = build_crontab_entry(repo_path, schedule, commitbook_bin);
+
+    let new_crontab = if current.is_empty() {
+        format!("{}\n{}\n", comment, entry)
+    } else {
+        format!("{}\n{}\n{}\n", current.trim_end(), comment, entry)
+    };
+
+    set_crontab(&new_crontab)?;
+
+    Ok(format!("crontab:{}", repo_path.to_string_lossy()))
+}
+
+/// Remove the crontab entry for the repo.
+pub fn uninstall(repo_path: &Path) -> Result<()> {
+    let current = get_current_crontab().unwrap_or_default();
+
+    if current.is_empty() {
+        return Ok(());
+    }
+
+    let new_crontab = filter_crontab_lines(&current, repo_path);
     if new_crontab.trim().is_empty() {
         let _ = Command::new("crontab").arg("-r").output();
     } else {
@@ -126,3 +139,7 @@ fn set_crontab(content: &str) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "linux_tests.rs"]
+mod tests;

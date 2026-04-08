@@ -44,9 +44,15 @@ impl Default for LoggingSettings {
     }
 }
 
+fn default_config_version() -> String {
+    "1".to_string()
+}
+
 /// Local configuration stored at <repo>/.CommitBook/config.toml
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalConfig {
+    #[serde(default = "default_config_version")]
+    pub config_version: String,
     pub enabled: bool,
     pub schedule: String,
     pub last_commit: Option<String>,
@@ -64,6 +70,7 @@ impl LocalConfig {
     /// Create a new default local config.
     pub fn new(schedule: &str) -> Self {
         Self {
+            config_version: "1".to_string(),
             enabled: true,
             schedule: schedule.to_string(),
             last_commit: None,
@@ -100,14 +107,25 @@ impl LocalConfig {
         Self::config_path(repo_path).exists()
     }
 
+    /// Migrate config to the latest version. Returns true if migration occurred.
+    pub fn migrate(&mut self) -> bool {
+        // Currently at version "1" — no migrations needed yet.
+        // Future versions will match on self.config_version and apply upgrades.
+        false
+    }
+
     /// Load local config from a repo.
     pub fn load(repo_path: &Path) -> Result<Self> {
         let path = Self::config_path(repo_path);
         let content = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read local config: {}", path.display()))?;
 
-        let config: Self = toml::from_str(&content)
+        let mut config: Self = toml::from_str(&content)
             .with_context(|| "Failed to parse local config")?;
+
+        if config.migrate() {
+            config.save(repo_path)?;
+        }
 
         Ok(config)
     }

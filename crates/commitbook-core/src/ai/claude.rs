@@ -63,6 +63,10 @@ impl CommitMessageProvider for ClaudeProvider {
     }
 }
 
+#[cfg(test)]
+#[path = "claude_tests.rs"]
+mod tests;
+
 /// Wait for a child process with a timeout.
 fn wait_with_timeout(
     child: std::process::Child,
