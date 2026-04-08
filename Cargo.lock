@@ -437,6 +437,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "clap",
  "commitbook-core",
  "crossterm",
  "ratatui",
@@ -453,6 +454,7 @@ dependencies = [
  "askama_axum",
  "axum",
  "chrono",
+ "clap",
  "commitbook-core",
  "serde",
  "serde_json",

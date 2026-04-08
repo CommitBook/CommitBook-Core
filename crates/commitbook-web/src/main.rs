@@ -4,47 +4,30 @@ mod routes;
 use anyhow::{bail, Context, Result};
 use axum::routing::{get, post};
 use axum::Router;
+use clap::Parser;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use routes::AppState;
 
-fn parse_args() -> Result<(PathBuf, u16)> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut repo_path: Option<PathBuf> = None;
-    let mut port: u16 = 9847;
+/// CommitBook Web — Browser dashboard for monitoring CommitBook.
+#[derive(Parser)]
+#[command(name = "commitbook-web", version, about)]
+struct Cli {
+    /// Path to the git repository (defaults to current directory)
+    #[arg(long)]
+    repo: Option<PathBuf>,
 
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--repo" => {
-                i += 1;
-                if i >= args.len() {
-                    bail!("--repo requires a path argument");
-                }
-                repo_path = Some(PathBuf::from(&args[i]));
-            }
-            "--port" => {
-                i += 1;
-                if i >= args.len() {
-                    bail!("--port requires a number");
-                }
-                port = args[i]
-                    .parse()
-                    .context("--port must be a valid port number")?;
-            }
-            _ => bail!("Unknown argument: {}", args[i]),
-        }
-        i += 1;
-    }
-
-    let repo = commitbook_core::config::resolve_repo_path(repo_path.as_deref())?;
-    Ok((repo, port))
+    /// Port for the web server
+    #[arg(long, default_value = "9847")]
+    port: u16,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (repo_path, port) = parse_args()?;
+    let cli = Cli::parse();
+    let repo_path = commitbook_core::config::resolve_repo_path(cli.repo.as_deref())?;
+    let port = cli.port;
 
     if !commitbook_core::config::local::LocalConfig::exists(&repo_path) {
         bail!(

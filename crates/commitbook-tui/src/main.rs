@@ -2,32 +2,21 @@ mod app;
 mod ui;
 
 use anyhow::{bail, Context, Result};
+use clap::Parser;
 use std::path::PathBuf;
 
-fn parse_args() -> Result<PathBuf> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut repo_path: Option<PathBuf> = None;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--repo" => {
-                i += 1;
-                if i >= args.len() {
-                    bail!("--repo requires a path argument");
-                }
-                repo_path = Some(PathBuf::from(&args[i]));
-            }
-            _ => bail!("Unknown argument: {}", args[i]),
-        }
-        i += 1;
-    }
-
-    commitbook_core::config::resolve_repo_path(repo_path.as_deref())
+/// CommitBook TUI — Terminal dashboard for monitoring CommitBook.
+#[derive(Parser)]
+#[command(name = "commitbook-tui", version, about)]
+struct Cli {
+    /// Path to the git repository (defaults to current directory)
+    #[arg(long)]
+    repo: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
-    let repo_path = parse_args()?;
+    let cli = Cli::parse();
+    let repo_path = commitbook_core::config::resolve_repo_path(cli.repo.as_deref())?;
 
     // Verify the repo has CommitBook initialized
     if !commitbook_core::config::local::LocalConfig::exists(&repo_path) {
