@@ -4,11 +4,6 @@ commitbook
 # Rust
 target/
 
-# Go
-*.exe
-*.test
-*.out
-
 # IDE
 .idea/
 .vscode/
