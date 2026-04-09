@@ -85,7 +85,7 @@ fn test_add_existing_repo_custom_name() {
 
 #[test]
 fn test_add_ssh_derives_name() {
-    // add_ssh needs init::commitbook_dir() which returns ~/.commitbook
+    // add_ssh needs init::commitbook_dir() which returns ~/.CommitBook
     // We test the name derivation logic directly instead
     let conn = db::open_in_memory().unwrap();
     let result = add_ssh(&conn, "git@github.com:user/my-notes.git", None, "main");
@@ -95,7 +95,7 @@ fn test_add_ssh_derives_name() {
         let workspaces = commitbook_core::storage::workspace_repo::list(&conn).unwrap();
         assert_eq!(workspaces[0].name, "my-notes");
     } else {
-        // If it fails because ~/.commitbook can't be created, check the derivation logic manually
+        // If it fails because ~/.CommitBook can't be created, check the derivation logic manually
         let name: String = "git@github.com:user/my-notes.git"
             .rsplit('/')
             .next()

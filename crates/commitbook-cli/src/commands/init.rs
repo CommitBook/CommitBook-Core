@@ -31,10 +31,10 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-/// Get the CommitBook config directory (~/.commitbook).
+/// Get the CommitBook config directory (~/.CommitBook).
 pub fn commitbook_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().context("Could not determine home directory")?;
-    Ok(home.join(".commitbook"))
+    Ok(home.join(".CommitBook"))
 }
 
 /// Get the database path.

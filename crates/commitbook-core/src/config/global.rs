@@ -34,7 +34,7 @@ impl Default for AiConfig {
     }
 }
 
-/// Global configuration stored at ~/.commitbook/config.toml
+/// Global configuration stored at ~/.CommitBook/config.toml
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub version: String,
@@ -58,7 +58,7 @@ impl GlobalConfig {
     /// Returns the path to the global config directory.
     pub fn config_dir() -> Result<PathBuf> {
         let home = dirs::home_dir().context("Could not determine home directory")?;
-        Ok(home.join(".commitbook"))
+        Ok(home.join(".CommitBook"))
     }
 
     /// Returns the path to the global config file.

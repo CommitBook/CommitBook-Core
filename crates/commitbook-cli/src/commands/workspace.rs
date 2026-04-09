@@ -191,7 +191,7 @@ fn add_ssh(
             .to_string()
     });
 
-    // Clone path under ~/.commitbook/workspaces/
+    // Clone path under ~/.CommitBook/workspaces/
     let config_dir = init::commitbook_dir()?;
     let ws_id = Workspace::new_id();
     let clone_path = config_dir.join("workspaces").join(&ws_id);

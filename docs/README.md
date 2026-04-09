@@ -97,7 +97,7 @@ Run `commitbook doctor` to see which providers are available on your system.
 
 ## Configuration
 
-### Global Config (`~/.commitbook/config.toml`)
+### Global Config (`~/.CommitBook/config.toml`)
 
 Stores the registry of all managed repositories and AI provider settings.
 
