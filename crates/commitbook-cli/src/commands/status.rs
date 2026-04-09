@@ -124,3 +124,7 @@ fn format_until(seconds: i64) -> String {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "status_tests.rs"]
+mod tests;

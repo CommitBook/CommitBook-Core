@@ -229,3 +229,7 @@ fn check_binary_path(repo_path: &Path) -> Check {
         Check::optional_pass("Binary path", "N/A (non-macOS)")
     }
 }
+
+#[cfg(test)]
+#[path = "doctor_tests.rs"]
+mod tests;

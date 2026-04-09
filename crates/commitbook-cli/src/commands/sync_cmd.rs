@@ -99,3 +99,7 @@ fn create_transport(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "sync_cmd_tests.rs"]
+mod tests;

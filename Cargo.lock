@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "commitbook-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "commitbook-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "commitbook-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "commitbook-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "askama",
@@ -497,9 +497,12 @@ dependencies = [
  "chrono",
  "clap",
  "commitbook-core",
+ "http-body-util",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
+ "tower",
  "tower-http",
 ]
 

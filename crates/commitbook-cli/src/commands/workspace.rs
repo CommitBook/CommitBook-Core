@@ -240,3 +240,7 @@ pub fn remove(id: &str, _keep_files: bool) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "workspace_tests.rs"]
+mod tests;

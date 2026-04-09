@@ -330,3 +330,7 @@ pub async fn api_stop(State(state): State<Arc<AppState>>) -> Json<ActionResponse
 pub async fn api_providers() -> Json<Vec<ProviderInfo>> {
     Json(load_providers())
 }
+
+#[cfg(test)]
+#[path = "routes_tests.rs"]
+mod tests;

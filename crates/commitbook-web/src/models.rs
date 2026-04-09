@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub running: bool,
     pub enabled: bool,
@@ -14,7 +14,7 @@ pub struct StatusResponse {
     pub changes_summary: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LogEntry {
     pub timestamp: String,
     pub level: String,
@@ -23,7 +23,7 @@ pub struct LogEntry {
     pub provider: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LogsResponse {
     pub entries: Vec<LogEntry>,
     pub total: usize,
@@ -45,14 +45,14 @@ pub struct ConfigUpdate {
     pub branch: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ProviderInfo {
     pub key: String,
     pub name: String,
     pub available: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
     pub success: bool,
     pub message: String,
