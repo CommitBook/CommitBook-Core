@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::Connection;
 
-use crate::domain::conflict::{Conflict, ConflictStatus, ConflictType};
+use crate::domain::conflict::{Conflict, ConflictStatus};
 use crate::domain::document::Document;
 use crate::domain::sync_plan::{SyncCheckpoint, SyncMode, SyncPlan};
 use crate::domain::transport::{RemoteTransport, WriteFileInput};
@@ -103,7 +103,7 @@ async fn pull_documents(
             .unwrap_or_default();
 
             let local_doc = document_repo::get(conn, &workspace.id, &doc_plan.path)?;
-            let local_content = if let Some(ref ld) = local_doc {
+            let local_content = if local_doc.is_some() {
                 // Read current local content from the latest version.
                 document_repo::get_version(
                     conn,

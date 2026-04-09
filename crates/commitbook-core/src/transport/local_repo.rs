@@ -1,6 +1,6 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
-use git2::{Repository, Signature, StatusOptions};
+use git2::{Repository, Signature};
 use std::path::{Path, PathBuf};
 
 use crate::domain::transport::{

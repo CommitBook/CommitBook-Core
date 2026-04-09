@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 
 use crate::domain::sync_plan::{
-    DocumentState, PlannedDocumentSync, SyncCheckpoint, SyncMode, SyncPlan,
+    DocumentState, PlannedDocumentSync, SyncMode, SyncPlan,
 };
 use crate::domain::transport::RemoteTransport;
 use crate::domain::workspace::Workspace;
@@ -50,9 +50,6 @@ pub async fn create_sync_plan(
 
     let mut planned_docs = Vec::new();
 
-    // Build a set of local document paths.
-    let local_paths: std::collections::HashSet<String> =
-        local_docs.iter().map(|d| d.path.clone()).collect();
     let remote_paths: std::collections::HashSet<String> =
         remote_files.iter().cloned().collect();
 

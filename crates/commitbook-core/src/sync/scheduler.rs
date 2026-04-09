@@ -1,16 +1,12 @@
 use anyhow::Result;
 use rusqlite::Connection;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
-use crate::domain::sync_plan::SyncJobType;
 use crate::domain::transport::RemoteTransport;
 use crate::domain::workspace::Workspace;
 use crate::storage::workspace_repo;
 
 use super::pipeline;
 use super::planner;
-use super::queue;
 
 /// Run a single sync cycle for a workspace.
 pub async fn sync_workspace(
@@ -18,16 +14,12 @@ pub async fn sync_workspace(
     transport: &dyn RemoteTransport,
     conn: &Connection,
 ) -> Result<pipeline::SyncResult> {
-    // Create a sync plan.
     let plan = planner::create_sync_plan(workspace, transport, conn).await?;
-
-    // Execute the plan.
     let result = pipeline::execute_sync(&plan, workspace, transport, conn).await?;
-
     Ok(result)
 }
 
-/// Run sync for all workspaces that have auto_sync enabled and are due.
+/// Run sync for all workspaces that have auto_sync enabled.
 pub async fn sync_all_due(
     conn: &Connection,
     transport_factory: &dyn Fn(&Workspace) -> Option<Box<dyn RemoteTransport>>,

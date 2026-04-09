@@ -1,5 +1,4 @@
 use super::*;
-use crate::domain::section::Section;
 
 #[test]
 fn test_single_heading() {

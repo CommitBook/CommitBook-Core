@@ -10,7 +10,6 @@ use super::github_api;
 /// GitHub PAT transport — direct API access with a personal access token.
 /// No backend dependency.
 pub struct GithubPatTransport {
-    token: String,
     owner: String,
     repo: String,
     client: reqwest::Client,
@@ -20,7 +19,6 @@ impl GithubPatTransport {
     pub fn new(token: String, owner: String, repo: String) -> Result<Self> {
         let client = github_api::github_client(&token)?;
         Ok(Self {
-            token,
             owner,
             repo,
             client,

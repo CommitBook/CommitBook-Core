@@ -1,0 +1,102 @@
+namespace commitbook {};
+
+[Error]
+enum CommitBookError {
+    "DatabaseError",
+    "TransportError",
+    "MergeError",
+    "AuthError",
+    "NotFound",
+    "InvalidInput",
+};
+
+dictionary WorkspaceInput {
+    string name;
+    string mode;
+    string provider;
+    string? remote_url;
+    string? owner;
+    string? repo_name;
+    string branch;
+    string local_root;
+};
+
+dictionary WorkspaceSummary {
+    string id;
+    string name;
+    string mode;
+    string provider;
+    string branch;
+    boolean auto_sync;
+    u64 doc_count;
+    u64 conflict_count;
+};
+
+dictionary DocumentSummary {
+    string path;
+    boolean dirty;
+    boolean has_conflicts;
+    string checksum;
+};
+
+dictionary DocumentContent {
+    string path;
+    string content;
+    string? revision;
+};
+
+dictionary SyncResultSummary {
+    u32 pulled;
+    u32 pushed;
+    u32 conflicts;
+    sequence<string> errors;
+};
+
+dictionary ConflictSummary {
+    string id;
+    string path;
+    string? section_path;
+    string conflict_type;
+    string status;
+    string local_content;
+    string remote_content;
+    string opened_at;
+};
+
+dictionary ResolveConflictInput {
+    string conflict_id;
+    string resolution_type;
+    string? manual_content;
+};
+
+interface CommitBookEngine {
+    [Throws=CommitBookError]
+    constructor(string db_path, string workspaces_root);
+
+    [Throws=CommitBookError]
+    WorkspaceSummary create_workspace(WorkspaceInput input);
+
+    [Throws=CommitBookError]
+    sequence<WorkspaceSummary> list_workspaces();
+
+    [Throws=CommitBookError]
+    WorkspaceSummary get_workspace(string workspace_id);
+
+    [Throws=CommitBookError]
+    void delete_workspace(string workspace_id);
+
+    [Throws=CommitBookError]
+    sequence<DocumentSummary> list_documents(string workspace_id);
+
+    [Throws=CommitBookError]
+    DocumentContent read_document(string workspace_id, string path);
+
+    [Throws=CommitBookError]
+    void save_document(string workspace_id, string path, string content);
+
+    [Throws=CommitBookError]
+    sequence<ConflictSummary> list_conflicts(string workspace_id);
+
+    [Throws=CommitBookError]
+    void resolve_conflict(ResolveConflictInput input);
+};

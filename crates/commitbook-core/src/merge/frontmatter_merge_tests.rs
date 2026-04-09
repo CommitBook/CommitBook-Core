@@ -130,7 +130,7 @@ fn test_key_added_both_different_values() {
     let local = make_fm(&[("title", "Local")]);
     let remote = make_fm(&[("title", "Remote")]);
 
-    let (result, conflicts) = merge_frontmatter(&base, &local, &remote);
+    let (_result, conflicts) = merge_frontmatter(&base, &local, &remote);
     assert_eq!(conflicts.len(), 1);
 }
 
@@ -152,7 +152,7 @@ fn test_key_deleted_locally_changed_remotely() {
     let local = make_fm(&[("title", "Hello")]); // author deleted
     let remote = make_fm(&[("title", "Hello"), ("author", "New Author")]); // author changed
 
-    let (result, conflicts) = merge_frontmatter(&base, &local, &remote);
+    let (_result, conflicts) = merge_frontmatter(&base, &local, &remote);
     assert_eq!(conflicts.len(), 1);
     assert!(conflicts[0].local_content.contains("(deleted)"));
 }

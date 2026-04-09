@@ -2,6 +2,7 @@ pub mod ai;
 pub mod config;
 pub mod cron;
 pub mod domain;
+pub mod engine;
 pub mod git;
 pub mod logger;
 pub mod markdown;
