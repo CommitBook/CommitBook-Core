@@ -1,0 +1,10 @@
+pub mod auto_commit;
+pub mod commit;
+pub mod doctor;
+pub mod log;
+pub mod schedule;
+pub mod setup;
+pub mod start;
+pub mod status;
+pub mod stop;
+pub mod uninstall;

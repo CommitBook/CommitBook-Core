@@ -1,0 +1,18 @@
+# Binary
+commitbook
+
+# Rust
+target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Conductor
+.context/

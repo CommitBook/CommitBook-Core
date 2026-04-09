@@ -1,0 +1,16 @@
+<h2>AI Providers</h2>
+{% for p in providers %}
+<div class="provider-row">
+    {% if p.available %}
+    <span class="dot dot-green"></span>
+    {% else %}
+    <span class="dot dot-red"></span>
+    {% endif %}
+    <span>{{ p.name }}</span>
+    {% if p.available %}
+    <span class="badge badge-green" style="margin-left:auto">OK</span>
+    {% else %}
+    <span class="badge badge-gray" style="margin-left:auto">N/A</span>
+    {% endif %}
+</div>
+{% endfor %}
