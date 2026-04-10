@@ -78,3 +78,7 @@ fn detect_provider(repo_root: &Path) -> String {
     }
     "generic".to_string()
 }
+
+#[cfg(test)]
+#[path = "login_tests.rs"]
+mod tests;

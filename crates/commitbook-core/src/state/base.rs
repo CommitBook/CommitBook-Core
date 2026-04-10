@@ -63,3 +63,7 @@ fn walk_dir(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "base_tests.rs"]
+mod tests;

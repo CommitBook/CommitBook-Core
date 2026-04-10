@@ -130,3 +130,7 @@ pub fn repo_root(commitbook_dir: &Path) -> PathBuf {
         .expect(".CommitBook must have a parent")
         .to_path_buf()
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

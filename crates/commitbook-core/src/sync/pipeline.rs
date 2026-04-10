@@ -200,3 +200,7 @@ async fn push_documents(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "pipeline_tests.rs"]
+mod tests;

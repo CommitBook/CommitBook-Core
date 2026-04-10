@@ -29,3 +29,7 @@ impl SyncState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "sync_state_tests.rs"]
+mod tests;

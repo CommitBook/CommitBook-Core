@@ -155,7 +155,7 @@ pub async fn create_sync_plan(
 }
 
 /// List tracked files in the repo (markdown files matching patterns).
-fn list_tracked_files(
+pub(crate) fn list_tracked_files(
     repo_root: &Path,
     patterns: &[String],
 ) -> Result<Vec<String>> {
@@ -186,7 +186,7 @@ fn list_tracked_files(
     Ok(files)
 }
 
-fn collect_markdown_files(
+pub(crate) fn collect_markdown_files(
     root: &Path,
     dir: &Path,
     files: &mut Vec<String>,
@@ -214,3 +214,7 @@ fn collect_markdown_files(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "planner_tests.rs"]
+mod tests;

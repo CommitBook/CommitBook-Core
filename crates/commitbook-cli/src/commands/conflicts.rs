@@ -79,3 +79,7 @@ fn scan_for_conflicts(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "conflicts_tests.rs"]
+mod tests;

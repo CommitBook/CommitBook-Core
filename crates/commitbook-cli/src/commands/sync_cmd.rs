@@ -200,3 +200,7 @@ fn create_transport(
         config.git.branch.clone(),
     )))
 }
+
+#[cfg(test)]
+#[path = "sync_cmd_tests.rs"]
+mod tests;

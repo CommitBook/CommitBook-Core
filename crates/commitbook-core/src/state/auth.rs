@@ -58,3 +58,7 @@ impl AuthConfig {
         self.auth.provider.as_deref()
     }
 }
+
+#[cfg(test)]
+#[path = "auth_tests.rs"]
+mod tests;
