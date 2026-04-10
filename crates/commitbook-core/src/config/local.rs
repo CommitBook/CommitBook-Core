@@ -55,7 +55,6 @@ pub struct LocalConfig {
     pub config_version: String,
     pub enabled: bool,
     pub schedule: String,
-    pub last_commit: Option<String>,
     pub created_at: String,
     #[serde(default)]
     pub git: GitSettings,
@@ -73,7 +72,6 @@ impl LocalConfig {
             config_version: "1".to_string(),
             enabled: true,
             schedule: schedule.to_string(),
-            last_commit: None,
             created_at: crate::utils::datetime::now_iso(),
             git: GitSettings::default(),
             files: FileSettings::default(),
@@ -172,10 +170,16 @@ impl LocalConfig {
         Ok(config)
     }
 
-    /// Ensure .CommitBook/logs/ and .CommitBook/.lock are in .gitignore.
+    /// Ensure CommitBook entries are in .gitignore.
     fn update_gitignore(repo_path: &Path) -> Result<()> {
         let gitignore_path = repo_path.join(".gitignore");
-        let entries = [".CommitBook/logs/", ".CommitBook/.lock"];
+        let entries = [
+            ".CommitBook/auth.toml",
+            ".CommitBook/state.toml",
+            ".CommitBook/base/",
+            ".CommitBook/logs/",
+            ".CommitBook/.lock",
+        ];
 
         let content = if gitignore_path.exists() {
             fs::read_to_string(&gitignore_path)

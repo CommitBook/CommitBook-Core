@@ -1,31 +1,44 @@
 use anyhow::Result;
-use rusqlite::Connection;
+use std::path::Path;
 
 use crate::domain::sync_plan::{
     DocumentState, PlannedDocumentSync, SyncMode, SyncPlan,
 };
 use crate::domain::transport::RemoteTransport;
-use crate::domain::workspace::Workspace;
-use crate::storage::{document_repo, sync_repo};
+use crate::state::{base, sync_state::SyncState};
 
 /// Create a sync plan by comparing local state against the remote.
 pub async fn create_sync_plan(
-    workspace: &Workspace,
+    commitbook_dir: &Path,
+    repo_root: &Path,
+    branch: &str,
     transport: &dyn RemoteTransport,
-    conn: &Connection,
+    tracked_patterns: &[String],
 ) -> Result<SyncPlan> {
-    let checkpoint = sync_repo::get_checkpoint(conn, &workspace.id)?;
-    let remote_head = transport.get_head(&workspace.branch).await?;
-    let local_dirty = document_repo::list_dirty(conn, &workspace.id)?;
-    let local_docs = document_repo::list_by_workspace(conn, &workspace.id)?;
+    let state = SyncState::load(commitbook_dir)?;
+    let remote_head = transport.get_head(branch).await?;
 
-    let remote_changed = match &checkpoint {
-        Some(cp) => cp.remote_head != remote_head,
+    let remote_changed = match &state.remote_head {
+        Some(head) => *head != remote_head,
         None => true, // No checkpoint = first sync, always pull.
     };
-    let has_dirty = !local_dirty.is_empty();
 
-    // Determine sync mode.
+    // Find dirty local files by comparing working tree vs base/.
+    let tracked_files = list_tracked_files(repo_root, tracked_patterns)?;
+    let base_files = base::list(commitbook_dir)?;
+
+    let mut dirty_files = Vec::new();
+    for path in &tracked_files {
+        let working_path = repo_root.join(path);
+        let working_content = std::fs::read_to_string(&working_path)?;
+        match base::read(commitbook_dir, path)? {
+            Some(base_content) if base_content == working_content => {} // unchanged
+            _ => dirty_files.push(path.clone()), // new or modified
+        }
+    }
+
+    let has_dirty = !dirty_files.is_empty();
+
     let mode = match (remote_changed, has_dirty) {
         (false, false) => SyncMode::Noop,
         (true, false) => SyncMode::PullOnly,
@@ -35,7 +48,6 @@ pub async fn create_sync_plan(
 
     if mode == SyncMode::Noop {
         return Ok(SyncPlan {
-            workspace_id: workspace.id.clone(),
             mode,
             documents: Vec::new(),
         });
@@ -43,7 +55,7 @@ pub async fn create_sync_plan(
 
     // List remote files to compare.
     let remote_files = if remote_changed {
-        transport.list_files(&workspace.branch).await?
+        transport.list_files(branch).await?
     } else {
         Vec::new()
     };
@@ -52,59 +64,59 @@ pub async fn create_sync_plan(
 
     let remote_paths: std::collections::HashSet<String> =
         remote_files.iter().cloned().collect();
+    let dirty_set: std::collections::HashSet<&str> =
+        dirty_files.iter().map(|s| s.as_str()).collect();
 
     // For each remote file, determine what action is needed.
     for remote_path in &remote_files {
-        let local_doc = local_docs.iter().find(|d| &d.path == remote_path);
+        let is_dirty = dirty_set.contains(remote_path.as_str());
+        let exists_locally = tracked_files.contains(remote_path)
+            || base_files.contains(remote_path);
 
-        match local_doc {
-            Some(doc) if doc.dirty => {
-                // Both local dirty and remote exists → needs merge.
-                planned_docs.push(PlannedDocumentSync {
-                    path: remote_path.clone(),
-                    local_state: DocumentState::Modified,
-                    remote_state: DocumentState::Modified,
-                    requires_merge: true,
-                    requires_conflict: false, // merge will determine
-                    requires_upload: true,
-                    requires_download: true,
-                    requires_delete: false,
-                });
-            }
-            Some(_doc) => {
-                // Local exists but not dirty → download if changed.
-                planned_docs.push(PlannedDocumentSync {
-                    path: remote_path.clone(),
-                    local_state: DocumentState::Unchanged,
-                    remote_state: DocumentState::Modified,
-                    requires_merge: false,
-                    requires_conflict: false,
-                    requires_upload: false,
-                    requires_download: true,
-                    requires_delete: false,
-                });
-            }
-            None => {
-                // New file on remote.
-                planned_docs.push(PlannedDocumentSync {
-                    path: remote_path.clone(),
-                    local_state: DocumentState::Unknown,
-                    remote_state: DocumentState::Added,
-                    requires_merge: false,
-                    requires_conflict: false,
-                    requires_upload: false,
-                    requires_download: true,
-                    requires_delete: false,
-                });
-            }
+        if is_dirty {
+            // Both local dirty and remote exists -> needs merge.
+            planned_docs.push(PlannedDocumentSync {
+                path: remote_path.clone(),
+                local_state: DocumentState::Modified,
+                remote_state: DocumentState::Modified,
+                requires_merge: true,
+                requires_conflict: false,
+                requires_upload: true,
+                requires_download: true,
+                requires_delete: false,
+            });
+        } else if exists_locally {
+            // Local exists but not dirty -> download if changed.
+            planned_docs.push(PlannedDocumentSync {
+                path: remote_path.clone(),
+                local_state: DocumentState::Unchanged,
+                remote_state: DocumentState::Modified,
+                requires_merge: false,
+                requires_conflict: false,
+                requires_upload: false,
+                requires_download: true,
+                requires_delete: false,
+            });
+        } else {
+            // New file on remote.
+            planned_docs.push(PlannedDocumentSync {
+                path: remote_path.clone(),
+                local_state: DocumentState::Unknown,
+                remote_state: DocumentState::Added,
+                requires_merge: false,
+                requires_conflict: false,
+                requires_upload: false,
+                requires_download: true,
+                requires_delete: false,
+            });
         }
     }
 
     // For dirty local files not on remote.
-    for dirty_doc in &local_dirty {
-        if !remote_paths.contains(&dirty_doc.path) {
+    for dirty_path in &dirty_files {
+        if !remote_paths.contains(dirty_path) {
             planned_docs.push(PlannedDocumentSync {
-                path: dirty_doc.path.clone(),
+                path: dirty_path.clone(),
                 local_state: DocumentState::Modified,
                 remote_state: DocumentState::Unknown,
                 requires_merge: false,
@@ -116,14 +128,14 @@ pub async fn create_sync_plan(
         }
     }
 
-    // For local files deleted on remote.
-    for local_doc in &local_docs {
-        if !remote_paths.contains(&local_doc.path) && !local_doc.deleted && remote_changed {
-            // Only mark for deletion if we had a previous checkpoint
-            // (otherwise we don't know if the file was ever on remote).
-            if checkpoint.is_some() {
+    // For base files deleted on remote (only if we had a previous checkpoint).
+    if state.remote_head.is_some() {
+        for base_path in &base_files {
+            if !remote_paths.contains(base_path)
+                && !dirty_set.contains(base_path.as_str())
+            {
                 planned_docs.push(PlannedDocumentSync {
-                    path: local_doc.path.clone(),
+                    path: base_path.clone(),
                     local_state: DocumentState::Unchanged,
                     remote_state: DocumentState::Deleted,
                     requires_merge: false,
@@ -137,12 +149,68 @@ pub async fn create_sync_plan(
     }
 
     Ok(SyncPlan {
-        workspace_id: workspace.id.clone(),
         mode,
         documents: planned_docs,
     })
 }
 
-#[cfg(test)]
-#[path = "planner_tests.rs"]
-mod tests;
+/// List tracked files in the repo (markdown files matching patterns).
+fn list_tracked_files(
+    repo_root: &Path,
+    patterns: &[String],
+) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+
+    if patterns.is_empty() {
+        // Default: all .md files
+        collect_markdown_files(repo_root, repo_root, &mut files)?;
+    } else {
+        // Use glob patterns from config
+        for pattern in patterns {
+            for entry in glob::glob(
+                &repo_root.join(pattern).to_string_lossy(),
+            )
+            .unwrap_or_else(|_| glob::glob("").unwrap())
+            {
+                if let Ok(path) = entry {
+                    if path.is_file() {
+                        if let Ok(rel) = path.strip_prefix(repo_root) {
+                            files.push(rel.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+fn collect_markdown_files(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<String>,
+) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // Skip hidden directories and .CommitBook/
+        if name_str.starts_with('.') {
+            continue;
+        }
+
+        if path.is_dir() {
+            collect_markdown_files(root, &path, files)?;
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext == "md" || ext == "markdown")
+        {
+            let rel = path.strip_prefix(root)?.to_string_lossy().to_string();
+            files.push(rel);
+        }
+    }
+    Ok(())
+}

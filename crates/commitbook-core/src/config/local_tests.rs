@@ -5,7 +5,6 @@ fn test_default_field_values() {
     let cfg = LocalConfig::new("0 * * * *");
     assert!(cfg.enabled);
     assert_eq!(cfg.schedule, "0 * * * *");
-    assert!(cfg.last_commit.is_none());
     assert!(cfg.scheduler_id.is_none());
     assert!(cfg.git.auto_push);
     assert_eq!(cfg.git.branch, "main");

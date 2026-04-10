@@ -7,7 +7,6 @@ use std::sync::Arc;
 use askama::Template;
 
 use commitbook_core::ai::ProviderChain;
-use commitbook_core::config::global::GlobalConfig;
 use commitbook_core::config::local::LocalConfig;
 use commitbook_core::cron;
 use commitbook_core::git::GitRepo;
@@ -86,7 +85,7 @@ fn load_status(repo_path: &Path) -> StatusResponse {
             cron::describe_schedule(&c.schedule),
             c.git.auto_push,
             c.git.branch.clone(),
-            c.last_commit.clone(),
+            None::<String>, // last_commit moved to state.toml
         ),
         None => (
             String::new(),
@@ -123,10 +122,14 @@ fn load_status(repo_path: &Path) -> StatusResponse {
 }
 
 fn load_providers() -> Vec<ProviderInfo> {
-    let global = GlobalConfig::load().unwrap_or_default();
     let chain = ProviderChain::new();
+    let default_keys = vec![
+        "gh-copilot".to_string(),
+        "claude-cli".to_string(),
+        "codex-cli".to_string(),
+    ];
     chain
-        .check_availability(&global.ai.providers)
+        .check_availability(&default_keys)
         .into_iter()
         .map(|(key, name, available)| ProviderInfo {
             key,

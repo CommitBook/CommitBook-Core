@@ -1,42 +1,31 @@
 use anyhow::Result;
-use rusqlite::Connection;
+use std::path::Path;
 
 use crate::domain::transport::RemoteTransport;
-use crate::domain::workspace::Workspace;
-use crate::storage::workspace_repo;
 
 use super::pipeline;
 use super::planner;
 
-/// Run a single sync cycle for a workspace.
-pub async fn sync_workspace(
-    workspace: &Workspace,
+/// Run a single sync cycle for a repository.
+pub async fn sync_repository(
+    commitbook_dir: &Path,
+    repo_root: &Path,
+    branch: &str,
     transport: &dyn RemoteTransport,
-    conn: &Connection,
+    tracked_patterns: &[String],
 ) -> Result<pipeline::SyncResult> {
-    let plan = planner::create_sync_plan(workspace, transport, conn).await?;
-    let result = pipeline::execute_sync(&plan, workspace, transport, conn).await?;
+    let plan = planner::create_sync_plan(
+        commitbook_dir,
+        repo_root,
+        branch,
+        transport,
+        tracked_patterns,
+    )
+    .await?;
+
+    let result =
+        pipeline::execute_sync(&plan, commitbook_dir, repo_root, branch, transport)
+            .await?;
+
     Ok(result)
-}
-
-/// Run sync for all workspaces that have auto_sync enabled.
-pub async fn sync_all_due(
-    conn: &Connection,
-    transport_factory: &dyn Fn(&Workspace) -> Option<Box<dyn RemoteTransport>>,
-) -> Result<Vec<(String, Result<pipeline::SyncResult>)>> {
-    let workspaces = workspace_repo::list(conn)?;
-    let mut results = Vec::new();
-
-    for ws in &workspaces {
-        if !ws.auto_sync {
-            continue;
-        }
-
-        if let Some(transport) = transport_factory(ws) {
-            let result = sync_workspace(ws, transport.as_ref(), conn).await;
-            results.push((ws.id.clone(), result));
-        }
-    }
-
-    Ok(results)
 }

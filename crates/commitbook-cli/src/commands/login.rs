@@ -1,60 +1,80 @@
 use anyhow::{bail, Result};
 use colored::Colorize;
+use std::io::{self, Write};
+use std::path::Path;
 
-/// Authenticate with a personal access token.
-pub async fn pat() -> Result<()> {
-    println!("{}", "PAT Authentication".bold());
-    println!();
-    println!("Create a personal access token at:");
-    println!("  https://github.com/settings/tokens/new");
-    println!();
-    println!("Required scopes: repo");
-    println!();
+use commitbook_core::state::auth::{AuthConfig, AuthEntry};
 
-    // Read token from stdin.
-    println!("Paste your token:");
-    let mut token = String::new();
-    std::io::stdin().read_line(&mut token)?;
-    let token = token.trim().to_string();
-
-    if token.is_empty() {
-        bail!("No token provided.");
-    }
-
-    // Validate the token by calling GitHub API.
-    let client = commitbook_core::transport::github_api::github_client(&token)?;
-    match commitbook_core::transport::github_api::validate_token(&client).await {
-        Ok(()) => {
-            println!("{}", "Token validated successfully.".green().bold());
-            println!();
-            println!("To create a workspace with this token:");
-            println!("  commitbook workspace add --pat --owner <owner> --repo <repo>");
-            println!();
-            println!(
-                "{}",
-                "Note: Token storage will be implemented with Keychain integration."
-                    .dimmed()
-            );
+pub async fn run(
+    cb_dir: &Path,
+    repo_root: &Path,
+    token: Option<String>,
+    provider: Option<String>,
+) -> Result<()> {
+    let token = match token {
+        Some(t) => t,
+        None => {
+            // Prompt for token interactively.
+            print!("  Enter personal access token: ");
+            io::stdout().flush()?;
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            let t = input.trim().to_string();
+            if t.is_empty() {
+                bail!("Token cannot be empty.");
+            }
+            t
         }
-        Err(e) => {
-            bail!("Token validation failed: {e}");
-        }
-    }
+    };
+
+    // Auto-detect provider from remote URL if not specified.
+    let provider = match provider {
+        Some(p) => p,
+        None => detect_provider(repo_root),
+    };
+
+    let auth = AuthConfig {
+        auth: AuthEntry {
+            provider: Some(provider.clone()),
+            token: Some(token),
+        },
+    };
+
+    auth.save(cb_dir)?;
+
+    println!(
+        "  {} Authenticated with {} provider.",
+        "OK".green().bold(),
+        provider.cyan()
+    );
+    println!(
+        "  {}",
+        "Token stored in .CommitBook/auth.toml (gitignored).".dimmed()
+    );
 
     Ok(())
 }
 
-/// Authenticate with GitHub via the CommitBook backend.
-pub async fn github() -> Result<()> {
-    println!("{}", "GitHub Login".bold());
-    println!();
-    println!(
-        "{}",
-        "GitHub App login requires the CommitBook backend to be running.".yellow()
-    );
-    println!("This feature will be available when the backend is deployed.");
-    println!();
-    println!("Alternative: use `commitbook login pat` for now.");
-
-    Ok(())
+/// Detect git provider from remote URL.
+fn detect_provider(repo_root: &Path) -> String {
+    // Try to detect from git remote URL.
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(repo_root)
+        .output()
+    {
+        if output.status.success() {
+            let url = String::from_utf8_lossy(&output.stdout);
+            if url.contains("github.com") {
+                return "github".to_string();
+            }
+            if url.contains("gitlab.com") || url.contains("gitlab") {
+                return "gitlab".to_string();
+            }
+            if url.contains("codeberg.org") {
+                return "codeberg".to_string();
+            }
+        }
+    }
+    "generic".to_string()
 }

@@ -1,55 +1,39 @@
-use anyhow::{bail, Result};
-use colored::*;
+use anyhow::Result;
+use colored::Colorize;
 use std::path::Path;
 
-use commitbook_core::config::{GlobalConfig, LocalConfig};
+use commitbook_core::config::LocalConfig;
 use commitbook_core::cron;
 
-pub fn run(repo_path: &Path, expression: &str) -> Result<()> {
-    println!("{}", "CommitBook Set Schedule".bold().cyan());
-    println!();
+pub fn run(_cb_dir: &Path, repo_root: &Path, expression: &str) -> Result<()> {
+    let mut config = LocalConfig::load(repo_root)?;
 
-    if !LocalConfig::exists(repo_path) {
-        bail!("CommitBook is not set up in this repository.\nRun {} first.", "commitbook setup".bold());
-    }
-
-    let schedule = cron::resolve_schedule(expression);
-    cron::validate_cron_expression(&schedule)?;
-
-    let mut config = LocalConfig::load(repo_path)?;
-    let old_schedule = config.schedule.clone();
-
-    if old_schedule == schedule {
-        println!("  {} Schedule is already set to {}.", "!".yellow().bold(), cron::describe_schedule(&schedule).cyan());
-        return Ok(());
-    }
+    // Resolve and validate.
+    let schedule = match expression {
+        "hourly" | "daily" | "every-30m" | "every-4h" => {
+            cron::resolve_schedule(expression)
+        }
+        _ => {
+            cron::validate_cron_expression(expression)?;
+            expression.to_string()
+        }
+    };
 
     config.schedule = schedule.clone();
-    config.save(repo_path)?;
+    config.save(repo_root)?;
 
-    let repo_str = repo_path
-        .canonicalize()
-        .unwrap_or_else(|_| repo_path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    let mut global = GlobalConfig::load()?;
-    global.set_repo_schedule(&repo_str, &schedule)?;
-
-    // If running, reinstall the scheduler with new interval
-    if config.enabled && cron::is_loaded(repo_path) {
-        print!("  Updating scheduler... ");
-        cron::uninstall(repo_path, config.scheduler_id.as_deref())?;
-        let commitbook_bin = std::env::current_exe()?;
-        let scheduler_id = cron::install(repo_path, &schedule, &commitbook_bin)?;
-        config.scheduler_id = Some(scheduler_id);
-        config.save(repo_path)?;
-        println!("{}", "OK".green().bold());
+    // Reinstall scheduler if it's currently running.
+    if cron::is_loaded(repo_root) {
+        let binary =
+            std::env::current_exe().unwrap_or_else(|_| "commitbook".into());
+        cron::install(repo_root, &schedule, &binary)?;
     }
 
-    println!();
-    println!("  {} Schedule updated.", "OK".green().bold());
-    println!("  Old: {}", cron::describe_schedule(&old_schedule).dimmed());
-    println!("  New: {}", cron::describe_schedule(&schedule).cyan());
+    println!(
+        "  {} Schedule updated: {}",
+        "OK".green().bold(),
+        cron::describe_schedule(&schedule).cyan()
+    );
 
     Ok(())
 }

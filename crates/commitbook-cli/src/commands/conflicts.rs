@@ -1,89 +1,81 @@
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
 use colored::Colorize;
+use std::path::Path;
 
-use commitbook_core::storage::{conflict_repo, db, workspace_repo};
+/// Show open conflicts by scanning for conflict markers in tracked files.
+pub fn run(_cb_dir: &Path, repo_root: &Path) -> Result<()> {
+    let mut conflict_files = Vec::new();
 
-use super::init;
+    scan_for_conflicts(repo_root, repo_root, &mut conflict_files)?;
 
-pub fn run(workspace_id: Option<&str>, json: bool) -> Result<()> {
-    let db_path = init::db_path()?;
-    if !db_path.exists() {
-        bail!("CommitBook not initialized. Run `commitbook init` first.");
-    }
-    let conn = db::open_database(&db_path)?;
-
-    let workspaces = if let Some(id) = workspace_id {
-        let ws = workspace_repo::get(&conn, id)?
-            .with_context(|| format!("Workspace '{id}' not found"))?;
-        vec![ws]
-    } else {
-        workspace_repo::list(&conn)?
-    };
-
-    let mut all_conflicts = Vec::new();
-
-    for ws in &workspaces {
-        let conflicts = conflict_repo::list_open(&conn, &ws.id)?;
-        if !conflicts.is_empty() {
-            all_conflicts.push((&ws.name, &ws.id, conflicts));
-        }
-    }
-
-    if json {
-        let output: Vec<serde_json::Value> = all_conflicts
-            .iter()
-            .flat_map(|(_, _, conflicts)| {
-                conflicts.iter().map(|c| {
-                    serde_json::json!({
-                        "id": c.id,
-                        "workspace_id": c.workspace_id,
-                        "path": c.path,
-                        "section_path": c.section_path,
-                        "conflict_type": c.conflict_type.as_str(),
-                        "status": c.status.as_str(),
-                        "opened_at": c.opened_at,
-                    })
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&output)?);
+    if conflict_files.is_empty() {
+        println!("{}", "No conflicts found.".green());
         return Ok(());
     }
 
-    if all_conflicts.is_empty() {
-        println!("{}", "No open conflicts.".green());
-        return Ok(());
-    }
-
-    for (ws_name, ws_id, conflicts) in &all_conflicts {
-        println!(
-            "{} {} ({})",
-            "Workspace:".bold(),
-            ws_name,
-            ws_id.dimmed()
-        );
-        for c in conflicts {
-            let section_info = c
-                .section_path
-                .as_deref()
-                .unwrap_or("(file-level)");
-            println!(
-                "  {} {} {} {}",
-                c.id.dimmed(),
-                c.path.bold(),
-                section_info.cyan(),
-                c.conflict_type.as_str().yellow(),
-            );
-        }
-        println!();
-    }
-
-    let total: usize = all_conflicts.iter().map(|(_, _, c)| c.len()).sum();
     println!(
-        "{} open conflict{}.",
-        total.to_string().red().bold(),
-        if total == 1 { "" } else { "s" }
+        "{}",
+        format!("{} file(s) with conflicts:", conflict_files.len())
+            .yellow()
+            .bold()
+    );
+    println!();
+
+    for (path, count) in &conflict_files {
+        println!(
+            "  {} {} ({} conflict marker(s))",
+            "CONFLICT".red().bold(),
+            path,
+            count
+        );
+    }
+
+    println!();
+    println!(
+        "{}",
+        "Resolve conflicts in the files above, then run `commitbook sync`.".dimmed()
     );
 
+    Ok(())
+}
+
+/// Scan for conflict markers (<<<<<<< LOCAL) in markdown files.
+fn scan_for_conflicts(
+    root: &Path,
+    dir: &Path,
+    results: &mut Vec<(String, usize)>,
+) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // Skip hidden dirs and .CommitBook/
+        if name_str.starts_with('.') {
+            continue;
+        }
+
+        if path.is_dir() {
+            scan_for_conflicts(root, &path, results)?;
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext == "md" || ext == "markdown")
+        {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let count = content
+                    .lines()
+                    .filter(|line| line.starts_with("<<<<<<< LOCAL"))
+                    .count();
+                if count > 0 {
+                    let rel = path
+                        .strip_prefix(root)?
+                        .to_string_lossy()
+                        .to_string();
+                    results.push((rel, count));
+                }
+            }
+        }
+    }
     Ok(())
 }
