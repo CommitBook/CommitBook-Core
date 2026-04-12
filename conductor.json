@@ -1,0 +1,24 @@
+{
+  "name": "CommitBook",
+  "description": "Automated git commits and sync scheduling for markdown notebooks",
+  "scripts": {
+    "setup": "./toolkit/Conductor/setup.sh",
+    "run": "./toolkit/Conductor/run.sh",
+    "archive": "./toolkit/Conductor/archive.sh"
+  },
+  "runScriptMode": "nonconcurrent",
+  "stack": {
+    "language": "Rust 2021",
+    "cli": "Clap v4",
+    "async": "Tokio",
+    "workspace": "Cargo workspace (4 crates)"
+  },
+  "commands": {
+    "build": "cargo build -p commitbook-cli",
+    "test": "cargo test",
+    "run": "./target/debug/commitbook",
+    "sync": "./target/debug/commitbook sync",
+    "status": "./target/debug/commitbook status",
+    "doctor": "./target/debug/commitbook doctor"
+  }
+}
