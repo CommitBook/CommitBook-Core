@@ -75,6 +75,13 @@ struct LogsPartial {
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 fn load_status(repo_path: &Path) -> StatusResponse {
     let config = LocalConfig::load(repo_path).ok();
     let running = cron::is_loaded(repo_path);
@@ -178,12 +185,12 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse 
         changes_summary: status.changes_summary,
         providers,
     };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 pub async fn logs_page(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let tpl = LogsTemplate {};
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -198,7 +205,7 @@ pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoRespons
         branch,
         auto_push,
     };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 // ---------------------------------------------------------------------------
@@ -216,19 +223,19 @@ pub async fn htmx_status(State(state): State<Arc<AppState>>) -> impl IntoRespons
         changes_total: status.changes_total,
         changes_summary: status.changes_summary,
     };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 pub async fn htmx_providers(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let providers = load_providers();
     let tpl = ProvidersPartial { providers };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 pub async fn htmx_logs(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let entries = load_log_entries(&state.repo_path, 50, 0);
     let tpl = LogsPartial { entries };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 // ---------------------------------------------------------------------------
@@ -246,13 +253,14 @@ pub async fn api_logs(
     let limit = query.limit.unwrap_or(50);
     let offset = query.offset.unwrap_or(0);
 
-    let mut entries = load_log_entries(&state.repo_path, limit, offset);
+    let mut entries = load_log_entries(&state.repo_path, usize::MAX, 0);
 
     if let Some(ref level) = query.level {
         entries.retain(|e| e.level == *level);
     }
 
     let total = entries.len();
+    let entries: Vec<_> = entries.into_iter().skip(offset).take(limit).collect();
     Json(LogsResponse {
         entries,
         total,
@@ -287,21 +295,25 @@ pub async fn api_config(
         Ok(()) => Html(
             r#"<div class="flash flash-success">Configuration saved.</div>"#.to_string(),
         ),
-        Err(e) => Html(format!(
-            r#"<div class="flash flash-error">Error: {}</div>"#,
-            e
-        )),
+        Err(e) => {
+            let msg = escape_html(&e.to_string());
+            Html(format!(
+                r#"<div class="flash flash-error">Error: {}</div>"#,
+                msg
+            ))
+        }
     }
 }
 
 pub async fn api_start(State(state): State<Arc<AppState>>) -> Json<ActionResponse> {
     let result = (|| -> anyhow::Result<String> {
         let config = LocalConfig::load(&state.repo_path)?;
-        let bin = std::env::current_exe()?;
-        let commitbook_bin = bin
-            .parent()
-            .map(|p| p.join("commitbook"))
-            .unwrap_or(bin);
+        let commitbook_bin = which::which("commitbook").unwrap_or_else(|_| {
+            let bin = std::env::current_exe().expect("cannot determine current exe");
+            bin.parent()
+                .map(|p| p.join("commitbook"))
+                .unwrap_or(bin)
+        });
         cron::install(&state.repo_path, &config.schedule, &commitbook_bin)
     })();
 

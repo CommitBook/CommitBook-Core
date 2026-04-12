@@ -17,7 +17,7 @@ impl ConflictType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "section_conflict" => Some(Self::SectionConflict),
             "frontmatter_conflict" => Some(Self::FrontmatterConflict),

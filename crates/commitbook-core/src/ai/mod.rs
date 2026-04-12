@@ -100,7 +100,11 @@ pub(crate) fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len])
+        let mut end = max_len;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &s[..end])
     }
 }
 
@@ -116,12 +120,20 @@ pub(crate) fn clean_message(raw: &str) -> String {
 
     // Take only the first line
     if let Some(idx) = msg.find('\n') {
-        msg.truncate(idx);
+        let mut end = idx;
+        while end > 0 && !msg.is_char_boundary(end) {
+            end -= 1;
+        }
+        msg.truncate(end);
     }
 
     // Truncate to 72 chars
     if msg.len() > 72 {
-        msg.truncate(72);
+        let mut end = 72;
+        while end > 0 && !msg.is_char_boundary(end) {
+            end -= 1;
+        }
+        msg.truncate(end);
     }
 
     msg

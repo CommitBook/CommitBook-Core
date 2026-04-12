@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
 
     if !commitbook_core::config::local::LocalConfig::exists(&repo_path) {
         bail!(
-            "CommitBook not initialized in {}. Run `commitbook init` first.",
+            "CommitBook not initialized in {}. Run `commitbook sync` first.",
             repo_path.display()
         );
     }

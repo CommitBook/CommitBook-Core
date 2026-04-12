@@ -169,8 +169,15 @@ impl FileLogger {
         // Sort by filename descending (newest date first)
         log_files.sort_by(|a, b| b.cmp(a));
 
-        let mut all_lines = Vec::new();
+        let mut skipped = 0usize;
+        let mut collected = Vec::new();
+        let needed = offset + limit;
+
         for file in &log_files {
+            if collected.len() >= limit {
+                break;
+            }
+
             let content = fs::read_to_string(file)
                 .with_context(|| format!("Failed to read log file: {}", file.display()))?;
             let mut lines: Vec<String> = content
@@ -180,16 +187,21 @@ impl FileLogger {
                 .collect();
             // Reverse so newest entries within a file come first
             lines.reverse();
-            all_lines.extend(lines);
+
+            for line in lines {
+                if skipped < offset {
+                    skipped += 1;
+                    continue;
+                }
+                collected.push(line);
+                if collected.len() >= limit {
+                    break;
+                }
+            }
         }
 
-        let result = all_lines
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect();
-
-        Ok(result)
+        let _ = needed; // suppress unused warning
+        Ok(collected)
     }
 
     /// Returns the path to the logs directory.

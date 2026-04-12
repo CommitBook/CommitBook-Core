@@ -29,8 +29,23 @@ fn main() -> Result<()> {
         );
     }
 
+    // RAII guard ensures terminal is restored even on panic or early return
+    struct TerminalGuard;
+    impl Drop for TerminalGuard {
+        fn drop(&mut self) {
+            let _ = crossterm::terminal::disable_raw_mode();
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                crossterm::terminal::LeaveAlternateScreen,
+                crossterm::event::DisableMouseCapture
+            );
+        }
+    }
+
     // Set up terminal
     crossterm::terminal::enable_raw_mode().context("Failed to enable raw mode")?;
+    let _guard = TerminalGuard;
+
     let mut stdout = std::io::stdout();
     crossterm::execute!(
         stdout,
@@ -44,7 +59,7 @@ fn main() -> Result<()> {
 
     let result = app::run(&mut terminal, &repo_path);
 
-    // Restore terminal
+    // Restore terminal (happy path — guard handles failure/panic paths)
     crossterm::terminal::disable_raw_mode().ok();
     crossterm::execute!(
         terminal.backend_mut(),

@@ -216,6 +216,52 @@ async fn test_api_stop_returns_action_response() {
     assert!(!action.message.is_empty());
 }
 
+#[test]
+fn test_escape_html_special_chars() {
+    assert_eq!(escape_html("<script>alert('xss')</script>"), "&lt;script&gt;alert('xss')&lt;/script&gt;");
+    assert_eq!(escape_html("a&b"), "a&amp;b");
+    assert_eq!(escape_html(r#"he said "hi""#), "he said &quot;hi&quot;");
+    assert_eq!(escape_html("no special chars"), "no special chars");
+}
+
+#[tokio::test]
+async fn test_api_config_error_is_escaped() {
+    let (_tmp, app) = setup_test_app();
+    let (_, body) = post_json(
+        app,
+        "/api/config",
+        serde_json::json!({"schedule": "<script>alert(1)</script>"}),
+    )
+    .await;
+    assert!(body.contains("&lt;script&gt;"), "error should be HTML-escaped, got: {}", body);
+    assert!(!body.contains("<script>"), "raw <script> should not appear in response");
+}
+
+#[tokio::test]
+async fn test_api_logs_filter_then_paginate() {
+    let (tmp, app) = setup_test_app();
+
+    let logs_dir = tmp.path().join(".CommitBook").join("logs");
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let log_file = logs_dir.join(format!("{}.log", today));
+    let mut entries = String::new();
+    for i in 0..6 {
+        let level = if i % 2 == 0 { "INFO" } else { "ERROR" };
+        entries.push_str(&format!(
+            r#"{{"ts":"2026-04-09 10:{:02}:00","level":"{}","msg":"entry {}"}}"#,
+            i, level, i
+        ));
+        entries.push('\n');
+    }
+    std::fs::write(&log_file, entries).unwrap();
+
+    // 3 ERROR entries total; request limit=2 — should get exactly 2
+    let (_, body): (_, LogsResponse) = get_json(app, "/api/logs?level=ERROR&limit=2").await;
+    assert_eq!(body.entries.len(), 2);
+    assert!(body.entries.iter().all(|e| e.level == "ERROR"));
+    assert_eq!(body.total, 3); // total filtered count, not just page
+}
+
 #[tokio::test]
 async fn test_dashboard_returns_html() {
     let (_tmp, app) = setup_test_app();

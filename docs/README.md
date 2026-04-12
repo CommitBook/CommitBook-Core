@@ -145,7 +145,7 @@ exclude = ["draft-*", "*.tmp"]
 
 [logging]
 level = "info"
-max_log_files = 30
+max_log_days = 30
 ```
 
 ### `auth.toml` (gitignored)

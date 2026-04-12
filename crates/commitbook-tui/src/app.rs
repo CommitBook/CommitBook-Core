@@ -165,13 +165,14 @@ impl App {
     fn toggle_scheduler(&mut self) {
         if self.running {
             let _ = cron::uninstall(&self.repo_path, None);
-        } else if let Ok(bin) = std::env::current_exe() {
-            // Use commitbook binary, not commitbook-tui
-            let commitbook_bin = bin
-                .parent()
-                .map(|p| p.join("commitbook"))
-                .unwrap_or(bin);
-            let _ = cron::install(&self.repo_path, &self.schedule, &commitbook_bin);
+        } else {
+            let commitbook_bin = which::which("commitbook")
+                .or_else(|_| std::env::current_exe().map(|bin|
+                    bin.parent().map(|p| p.join("commitbook")).unwrap_or(bin)
+                ));
+            if let Ok(bin) = commitbook_bin {
+                let _ = cron::install(&self.repo_path, &self.schedule, &bin);
+            }
         }
         self.refresh();
     }

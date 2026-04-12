@@ -471,6 +471,7 @@ dependencies = [
  "ratatui",
  "serde_json",
  "tempfile",
+ "which",
 ]
 
 [[package]]
@@ -491,6 +492,7 @@ dependencies = [
  "tokio",
  "tower",
  "tower-http",
+ "which",
 ]
 
 [[package]]

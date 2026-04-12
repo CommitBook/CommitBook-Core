@@ -88,9 +88,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.verbose {
-        unsafe { std::env::set_var("RUST_LOG", "debug") };
+        std::env::set_var("RUST_LOG", "debug");
     } else if !cli.quiet {
-        unsafe { std::env::set_var("RUST_LOG", "info") };
+        std::env::set_var("RUST_LOG", "info");
     }
     env_logger::init();
 

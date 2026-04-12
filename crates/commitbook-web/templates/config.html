@@ -10,6 +10,9 @@
         <div class="form-row">
             <label for="schedule">Schedule</label>
             <select name="schedule" id="schedule">
+                {% if schedule != "*/5 * * * *" && schedule != "*/15 * * * *" && schedule != "*/30 * * * *" && schedule != "0 * * * *" && schedule != "0 */2 * * *" && schedule != "0 */4 * * *" && schedule != "0 9 * * *" %}
+                <option value="{{ schedule }}" selected>Custom ({{ schedule }})</option>
+                {% endif %}
                 <option value="*/5 * * * *" {% if schedule == "*/5 * * * *" %}selected{% endif %}>Every 5 minutes</option>
                 <option value="*/15 * * * *" {% if schedule == "*/15 * * * *" %}selected{% endif %}>Every 15 minutes</option>
                 <option value="*/30 * * * *" {% if schedule == "*/30 * * * *" %}selected{% endif %}>Every 30 minutes</option>

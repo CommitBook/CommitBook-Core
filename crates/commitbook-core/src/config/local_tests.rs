@@ -9,7 +9,7 @@ fn test_default_field_values() {
     assert!(cfg.git.auto_push);
     assert_eq!(cfg.git.branch, "main");
     assert_eq!(cfg.logging.level, "info");
-    assert_eq!(cfg.logging.max_log_files, 30);
+    assert_eq!(cfg.logging.max_log_days, 30);
 }
 
 #[test]
@@ -107,4 +107,28 @@ created_at = "2026-04-07T00:00:00Z"
 fn test_migrate_returns_false_when_current() {
     let mut cfg = LocalConfig::new("hourly");
     assert!(!cfg.migrate());
+}
+
+#[test]
+fn test_max_log_files_alias_backwards_compat() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let dir = repo.join(".CommitBook");
+    fs::create_dir_all(&dir).unwrap();
+
+    // Old config using the legacy field name
+    let toml_content = r#"
+enabled = true
+schedule = "0 * * * *"
+created_at = "2026-04-07T00:00:00Z"
+config_version = "1"
+
+[logging]
+level = "info"
+max_log_files = 14
+"#;
+    fs::write(dir.join("config.toml"), toml_content).unwrap();
+
+    let loaded = LocalConfig::load(repo).unwrap();
+    assert_eq!(loaded.logging.max_log_days, 14);
 }

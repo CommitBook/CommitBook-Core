@@ -32,14 +32,15 @@ pub struct FileSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingSettings {
     pub level: String,
-    pub max_log_files: u32,
+    #[serde(alias = "max_log_files")]
+    pub max_log_days: u32,
 }
 
 impl Default for LoggingSettings {
     fn default() -> Self {
         Self {
             level: "info".to_string(),
-            max_log_files: 30,
+            max_log_days: 30,
         }
     }
 }

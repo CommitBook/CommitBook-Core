@@ -1,4 +1,4 @@
-use chrono::Local;
+use chrono::{Local, Utc};
 
 /// Returns the current timestamp formatted for commit messages.
 /// Example: "2026-02-15 14:30:02"
@@ -14,7 +14,7 @@ pub fn today_date() -> String {
 
 /// Returns the current timestamp in ISO 8601 format for config storage.
 pub fn now_iso() -> String {
-    Local::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 /// Format a duration as a human-readable relative time.

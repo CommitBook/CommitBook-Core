@@ -27,6 +27,17 @@ fn test_now_iso_pattern() {
 }
 
 #[test]
+fn test_now_iso_is_utc() {
+    let before = chrono::Utc::now();
+    let iso = now_iso();
+    let after = chrono::Utc::now();
+    let parsed = chrono::NaiveDateTime::parse_from_str(&iso, "%Y-%m-%dT%H:%M:%SZ").unwrap();
+    let parsed_utc = parsed.and_utc();
+    assert!(parsed_utc >= before - chrono::Duration::seconds(1));
+    assert!(parsed_utc <= after + chrono::Duration::seconds(1));
+}
+
+#[test]
 fn test_format_relative_seconds() {
     assert_eq!(format_relative(45), "45s ago");
 }

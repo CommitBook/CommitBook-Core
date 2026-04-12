@@ -263,7 +263,7 @@ fn merge_preamble(
 }
 
 /// Build a HashMap from section path -> &Section for quick lookup.
-fn section_map<'a>(sections: &'a [Section]) -> HashMap<&'a str, &'a Section> {
+fn section_map(sections: &[Section]) -> HashMap<&str, &Section> {
     sections.iter().map(|s| (s.path.as_str(), s)).collect()
 }
 

@@ -22,7 +22,7 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, _json: bool) -> Resul
         })
         .collect();
 
-    log_files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    log_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
 
     if log_files.is_empty() {
         println!("{}", "No log entries found.".dimmed());

@@ -89,7 +89,7 @@ pub fn build_sections(raw_sections: Vec<(u8, String, String)>) -> Vec<Section> {
         }
     }
 
-    for (key, _) in &needs_retroactive {
+    for key in needs_retroactive.keys() {
         let parts: Vec<&str> = key.splitn(2, '|').collect();
         if parts.len() == 2 {
             let parent = parts[0];

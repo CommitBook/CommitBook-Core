@@ -167,16 +167,15 @@ pub(crate) fn list_tracked_files(
     } else {
         // Use glob patterns from config
         for pattern in patterns {
-            for entry in glob::glob(
+            for path in glob::glob(
                 &repo_root.join(pattern).to_string_lossy(),
             )
             .unwrap_or_else(|_| glob::glob("").unwrap())
+            .flatten()
             {
-                if let Ok(path) = entry {
-                    if path.is_file() {
-                        if let Ok(rel) = path.strip_prefix(repo_root) {
-                            files.push(rel.to_string_lossy().to_string());
-                        }
+                if path.is_file() {
+                    if let Ok(rel) = path.strip_prefix(repo_root) {
+                        files.push(rel.to_string_lossy().to_string());
                     }
                 }
             }
