@@ -108,3 +108,19 @@ fn test_parse_frontmatter_and_preamble_and_sections() {
     assert_eq!(tree.sections.len(), 1);
     assert_eq!(tree.sections[0].path, "/Heading");
 }
+
+#[test]
+fn test_find_heading_start_duplicate_heading_text() {
+    // Regression: find_heading_start must return the position of the *nth* heading,
+    // not always the first occurrence when the same text appears multiple times.
+    let body = "# Notes\n\nFirst section.\n\n# Notes\n\nSecond section.\n";
+    //           ^0                        ^25 (second "# Notes")
+
+    // From offset 0, searching for the first H1 "Notes" should find byte 0.
+    let first = find_heading_start(body, 0, "Notes", 1);
+    assert_eq!(first, 0, "first heading should be at byte 0");
+
+    // From a position past the first heading (e.g., byte 1), we should find the second.
+    let second = find_heading_start(body, 1, "Notes", 1);
+    assert_eq!(second, 25, "second heading should start at byte 25");
+}

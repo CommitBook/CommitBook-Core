@@ -169,11 +169,48 @@ impl FileLogger {
         // Sort by filename descending (newest date first)
         log_files.sort_by(|a, b| b.cmp(a));
 
+        self.collect_entries(&log_files, limit, offset, None)
+    }
+
+    /// Read log entries filtered by level, with pagination.
+    ///
+    /// Returns lines in reverse chronological order (newest first).
+    /// Only lines whose JSON `"level"` field matches `level` (case-sensitive) are included.
+    /// `offset` and `limit` apply after filtering.
+    pub fn read_entries_filtered(
+        &self,
+        limit: usize,
+        offset: usize,
+        level: Option<&str>,
+    ) -> Result<Vec<String>> {
+        let mut log_files: Vec<PathBuf> = fs::read_dir(&self.logs_dir)
+            .with_context(|| "Failed to read logs directory")?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|ext| ext == "log").unwrap_or(false))
+            .filter(|p| {
+                p.file_stem()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                    .is_some()
+            })
+            .collect();
+
+        log_files.sort_by(|a, b| b.cmp(a));
+        self.collect_entries(&log_files, limit, offset, level)
+    }
+
+    fn collect_entries(
+        &self,
+        log_files: &[PathBuf],
+        limit: usize,
+        offset: usize,
+        level_filter: Option<&str>,
+    ) -> Result<Vec<String>> {
         let mut skipped = 0usize;
         let mut collected = Vec::new();
-        let needed = offset + limit;
 
-        for file in &log_files {
+        for file in log_files {
             if collected.len() >= limit {
                 break;
             }
@@ -183,6 +220,16 @@ impl FileLogger {
             let mut lines: Vec<String> = content
                 .lines()
                 .filter(|l| !l.is_empty())
+                .filter(|l| {
+                    if let Some(filter) = level_filter {
+                        serde_json::from_str::<serde_json::Value>(l)
+                            .ok()
+                            .and_then(|v| v["level"].as_str().map(|s| s == filter))
+                            .unwrap_or(false)
+                    } else {
+                        true
+                    }
+                })
                 .map(|s| s.to_string())
                 .collect();
             // Reverse so newest entries within a file come first
@@ -200,7 +247,6 @@ impl FileLogger {
             }
         }
 
-        let _ = needed; // suppress unused warning
         Ok(collected)
     }
 

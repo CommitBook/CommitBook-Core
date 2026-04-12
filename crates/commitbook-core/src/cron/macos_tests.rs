@@ -48,3 +48,27 @@ fn test_generate_plist_escapes_paths() {
     assert!(plist.contains("commit&lt;book"));
     assert!(!plist.contains("my&repo"));
 }
+
+#[test]
+fn test_generate_plist_uses_run_subcommand() {
+    let plist = generate_plist(
+        Path::new("/tmp/repo"),
+        "0 * * * *",
+        Path::new("/usr/bin/commitbook"),
+    );
+    assert!(plist.contains("<string>run</string>"));
+    assert!(!plist.contains("auto-commit"));
+    assert!(!plist.contains("--repo"));
+}
+
+#[test]
+fn test_generate_plist_has_working_directory() {
+    let plist = generate_plist(
+        Path::new("/tmp/my&repo"),
+        "0 * * * *",
+        Path::new("/usr/bin/commitbook"),
+    );
+    assert!(plist.contains("<key>WorkingDirectory</key>"));
+    // The repo path should appear escaped as WorkingDirectory value
+    assert!(plist.contains("my&amp;repo"));
+}

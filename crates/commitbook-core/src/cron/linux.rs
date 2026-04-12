@@ -14,7 +14,7 @@ pub(super) fn build_crontab_entry(
     let repo_str = repo_path.to_string_lossy();
     let bin_str = commitbook_bin.to_string_lossy();
     let comment = format!("{}{}", CRON_COMMENT_PREFIX, repo_str);
-    let entry = format!("{} \"{}\" auto-commit --repo \"{}\"", schedule, bin_str, repo_str);
+    let entry = format!("{} cd \"{}\" && \"{}\" run", schedule, repo_str, bin_str);
     (comment, entry)
 }
 
@@ -22,7 +22,7 @@ pub(super) fn build_crontab_entry(
 pub(super) fn filter_crontab_lines(current: &str, repo_path: &Path) -> String {
     let repo_str = repo_path.to_string_lossy();
     let marker = format!("{}{}", CRON_COMMENT_PREFIX, repo_str);
-    let repo_arg = format!("--repo \"{}\"", repo_str);
+    let cd_arg = format!("cd \"{}\"", repo_str);
     let lines: Vec<&str> = current.lines().collect();
     let mut new_lines = Vec::new();
     let mut skip_next = false;
@@ -36,7 +36,7 @@ pub(super) fn filter_crontab_lines(current: &str, repo_path: &Path) -> String {
             skip_next = true;
             continue;
         }
-        if line.contains(&repo_arg) && line.contains("commitbook") {
+        if line.contains(&cd_arg) && line.contains("commitbook") {
             continue;
         }
         new_lines.push(line);
@@ -98,11 +98,11 @@ pub fn is_accessible() -> bool {
 /// Check if a crontab entry is loaded for the given repo.
 pub fn is_loaded(repo_path: &Path) -> bool {
     let repo_str = repo_path.to_string_lossy();
-    let repo_arg = format!("--repo \"{}\"", repo_str);
+    let cd_arg = format!("cd \"{}\"", repo_str);
     get_current_crontab()
         .map(|crontab| {
             crontab.lines().any(|line| {
-                line.contains(&repo_arg) && line.contains("commitbook")
+                line.contains(&cd_arg) && line.contains("commitbook")
             })
         })
         .unwrap_or(false)

@@ -92,17 +92,23 @@ pub fn parse_document(content: &str) -> SectionTree {
 fn find_heading_start(body: &str, search_from: usize, heading_text: &str, level: u8) -> usize {
     let prefix = "#".repeat(level as usize);
     let search_area = &body[search_from..];
+    let mut line_start = 0usize;
 
     for line in search_area.lines() {
         let trimmed = line.trim_start();
         if trimmed.starts_with(&prefix) {
             let after_hashes = trimmed[prefix.len()..].trim_start();
             if after_hashes.starts_with(heading_text.trim()) {
-                // Find this line's byte position in the search area.
-                if let Some(line_offset) = search_area.find(line) {
-                    return search_from + line_offset;
-                }
+                return search_from + line_start;
             }
+        }
+        // Advance past this line's bytes plus its line terminator.
+        line_start += line.len();
+        let after = &search_area[line_start..];
+        if after.starts_with("\r\n") {
+            line_start += 2;
+        } else if after.starts_with('\n') {
+            line_start += 1;
         }
     }
 

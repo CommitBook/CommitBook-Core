@@ -4,7 +4,7 @@ use std::path::Path;
 
 use commitbook_core::config::LocalConfig;
 
-pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, _json: bool) -> Result<()> {
+pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, json: bool) -> Result<()> {
     let logs_dir = LocalConfig::logs_dir(repo_root);
 
     if !logs_dir.exists() {
@@ -45,18 +45,11 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, _json: bool) -> Resul
                 continue;
             }
 
-            // Colorize log levels.
-            let colored = if line.contains("[ERROR]") {
-                line.replace("[ERROR]", &"[ERROR]".red().to_string())
-            } else if line.contains("[WARN]") {
-                line.replace("[WARN]", &"[WARN]".yellow().to_string())
-            } else if line.contains("[INFO]") {
-                line.replace("[INFO]", &"[INFO]".green().to_string())
+            if json {
+                println!("{}", line);
             } else {
-                line.to_string()
-            };
-
-            println!("  {}", colored);
+                println!("  {}", format_log_line(line));
+            }
             shown += 1;
         }
     }
@@ -67,3 +60,32 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, _json: bool) -> Resul
 
     Ok(())
 }
+
+/// Format a JSON log line for human-readable output with colorized level.
+fn format_log_line(line: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+        let ts = v["ts"].as_str().unwrap_or("");
+        let level = v["level"].as_str().unwrap_or("INFO");
+        let msg = v["msg"].as_str().unwrap_or(line);
+
+        let level_colored = match level {
+            "ERROR" => format!("[{}]", level).red().to_string(),
+            "WARN"  => format!("[{}]", level).yellow().to_string(),
+            "INFO"  => format!("[{}]", level).green().to_string(),
+            other   => format!("[{}]", other),
+        };
+
+        if ts.is_empty() {
+            format!("{} {}", level_colored, msg)
+        } else {
+            format!("{} {} {}", ts, level_colored, msg)
+        }
+    } else {
+        // Not JSON — print as-is.
+        line.to_string()
+    }
+}
+
+#[cfg(test)]
+#[path = "log_tests.rs"]
+mod tests;

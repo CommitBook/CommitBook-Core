@@ -63,10 +63,10 @@ fn generate_plist(
     <key>ProgramArguments</key>
     <array>
         <string>{bin}</string>
-        <string>auto-commit</string>
-        <string>--repo</string>
-        <string>{repo}</string>
+        <string>run</string>
     </array>
+    <key>WorkingDirectory</key>
+    <string>{repo}</string>
     <key>StartInterval</key>
     <integer>{interval}</integer>
     <key>StandardOutPath</key>

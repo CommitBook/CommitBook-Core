@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::domain::sync_plan::{
@@ -167,11 +167,10 @@ pub(crate) fn list_tracked_files(
     } else {
         // Use glob patterns from config
         for pattern in patterns {
-            for path in glob::glob(
-                &repo_root.join(pattern).to_string_lossy(),
-            )
-            .unwrap_or_else(|_| glob::glob("").unwrap())
-            .flatten()
+            let full = repo_root.join(pattern).to_string_lossy().into_owned();
+            for path in glob::glob(&full)
+                .with_context(|| format!("Invalid glob pattern: {pattern}"))?
+                .flatten()
             {
                 if path.is_file() {
                     if let Ok(rel) = path.strip_prefix(repo_root) {

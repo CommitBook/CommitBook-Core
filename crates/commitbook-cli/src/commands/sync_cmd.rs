@@ -187,11 +187,8 @@ fn create_transport(
 ) -> Result<Box<dyn commitbook_core::domain::transport::RemoteTransport>> {
     let auth = AuthConfig::load(cb_dir)?;
 
-    if let Some(_token) = auth.token() {
-        // TODO: Use PAT transport when available.
-        anyhow::bail!(
-            "PAT transport not yet implemented for sync. Use local repo transport."
-        );
+    if auth.has_token() {
+        log::warn!("PAT token found in auth.toml; PAT transport not yet wired — using local git transport.");
     }
 
     // Default: local repo transport (direct git operations).

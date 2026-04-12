@@ -242,3 +242,13 @@ async fn test_plan_deleted_on_remote() {
     let doc = plan.documents.iter().find(|d| d.path == "deleted.md").unwrap();
     assert!(doc.requires_delete);
 }
+
+#[test]
+fn test_list_tracked_files_invalid_glob_returns_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    // "[invalid" is an unclosed bracket — glob::glob returns PatternError for it.
+    let result = list_tracked_files(tmp.path(), &["[invalid".to_string()]);
+    assert!(result.is_err(), "expected Err for invalid glob pattern, got Ok");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("Invalid glob pattern"), "unexpected error message: {msg}");
+}

@@ -147,12 +147,23 @@ fn load_providers() -> Vec<ProviderInfo> {
 }
 
 fn load_log_entries(repo_path: &Path, limit: usize, offset: usize) -> Vec<LogEntry> {
+    load_log_entries_filtered(repo_path, limit, offset, None)
+}
+
+fn load_log_entries_filtered(
+    repo_path: &Path,
+    limit: usize,
+    offset: usize,
+    level: Option<&str>,
+) -> Vec<LogEntry> {
     let logger = match FileLogger::new(repo_path, 30) {
         Ok(l) => l,
         Err(_) => return Vec::new(),
     };
 
-    let lines = logger.read_entries(limit, offset).unwrap_or_default();
+    let lines = logger
+        .read_entries_filtered(limit, offset, level)
+        .unwrap_or_default();
     lines
         .iter()
         .filter_map(|line| {
@@ -252,15 +263,13 @@ pub async fn api_logs(
 ) -> Json<LogsResponse> {
     let limit = query.limit.unwrap_or(50);
     let offset = query.offset.unwrap_or(0);
+    let level = query.level.as_deref();
 
-    let mut entries = load_log_entries(&state.repo_path, usize::MAX, 0);
+    // Count total matching entries (no limit/offset applied).
+    let total = load_log_entries_filtered(&state.repo_path, usize::MAX, 0, level).len();
+    // Fetch the requested page.
+    let entries = load_log_entries_filtered(&state.repo_path, limit, offset, level);
 
-    if let Some(ref level) = query.level {
-        entries.retain(|e| e.level == *level);
-    }
-
-    let total = entries.len();
-    let entries: Vec<_> = entries.into_iter().skip(offset).take(limit).collect();
     Json(LogsResponse {
         entries,
         total,
