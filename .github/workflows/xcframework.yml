@@ -1,10 +1,16 @@
 name: Build XCFramework
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build from
+        required: true
+        default: main
+      release_tag:
+        description: Existing tag to upload the XCFramework to
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -16,6 +22,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -53,7 +61,9 @@ jobs:
           path: CommitBookCore.xcframework.zip
 
       - name: Upload to release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: ${{ inputs.release_tag != '' }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag }}
+          target_commitish: ${{ inputs.ref }}
           files: CommitBookCore.xcframework.zip
