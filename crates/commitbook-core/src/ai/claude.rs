@@ -36,16 +36,21 @@ impl CommitMessageProvider for ClaudeProvider {
             truncate(&diff_summary, 500)
         );
 
-        let child = Command::new("claude")
-            .args(["-p", &prompt])
-            .current_dir(repo_path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("Failed to start claude CLI")?;
+        let repo_path = repo_path.to_path_buf();
+        let output = tokio::task::spawn_blocking(move || {
+            let child = Command::new("claude")
+                .args(["-p", &prompt])
+                .current_dir(&repo_path)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .context("Failed to start claude CLI")?;
 
-        let output = wait_with_timeout(child, CLAUDE_TIMEOUT)
-            .context("claude CLI timed out")?;
+            wait_with_timeout(child, CLAUDE_TIMEOUT)
+                .context("claude CLI timed out")
+        })
+        .await
+        .context("spawn_blocking panicked")??;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -85,6 +90,7 @@ fn wait_with_timeout(
             Ok(None) => {
                 if start.elapsed() > timeout {
                     let _ = child.kill();
+                    let _ = child.wait();
                     bail!("Process timed out after {:?}", timeout);
                 }
                 std::thread::sleep(Duration::from_millis(100));

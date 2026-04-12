@@ -7,7 +7,6 @@ use std::sync::Arc;
 use askama::Template;
 
 use commitbook_core::ai::ProviderChain;
-use commitbook_core::config::global::GlobalConfig;
 use commitbook_core::config::local::LocalConfig;
 use commitbook_core::cron;
 use commitbook_core::git::GitRepo;
@@ -76,6 +75,13 @@ struct LogsPartial {
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 fn load_status(repo_path: &Path) -> StatusResponse {
     let config = LocalConfig::load(repo_path).ok();
     let running = cron::is_loaded(repo_path);
@@ -86,7 +92,7 @@ fn load_status(repo_path: &Path) -> StatusResponse {
             cron::describe_schedule(&c.schedule),
             c.git.auto_push,
             c.git.branch.clone(),
-            c.last_commit.clone(),
+            None::<String>, // last_commit moved to state.toml
         ),
         None => (
             String::new(),
@@ -123,10 +129,14 @@ fn load_status(repo_path: &Path) -> StatusResponse {
 }
 
 fn load_providers() -> Vec<ProviderInfo> {
-    let global = GlobalConfig::load().unwrap_or_default();
     let chain = ProviderChain::new();
+    let default_keys = vec![
+        "gh-copilot".to_string(),
+        "claude-cli".to_string(),
+        "codex-cli".to_string(),
+    ];
     chain
-        .check_availability(&global.ai.providers)
+        .check_availability(&default_keys)
         .into_iter()
         .map(|(key, name, available)| ProviderInfo {
             key,
@@ -137,12 +147,23 @@ fn load_providers() -> Vec<ProviderInfo> {
 }
 
 fn load_log_entries(repo_path: &Path, limit: usize, offset: usize) -> Vec<LogEntry> {
+    load_log_entries_filtered(repo_path, limit, offset, None)
+}
+
+fn load_log_entries_filtered(
+    repo_path: &Path,
+    limit: usize,
+    offset: usize,
+    level: Option<&str>,
+) -> Vec<LogEntry> {
     let logger = match FileLogger::new(repo_path, 30) {
         Ok(l) => l,
         Err(_) => return Vec::new(),
     };
 
-    let lines = logger.read_entries(limit, offset).unwrap_or_default();
+    let lines = logger
+        .read_entries_filtered(limit, offset, level)
+        .unwrap_or_default();
     lines
         .iter()
         .filter_map(|line| {
@@ -175,12 +196,12 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse 
         changes_summary: status.changes_summary,
         providers,
     };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 pub async fn logs_page(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let tpl = LogsTemplate {};
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -195,7 +216,7 @@ pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoRespons
         branch,
         auto_push,
     };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 // ---------------------------------------------------------------------------
@@ -213,19 +234,19 @@ pub async fn htmx_status(State(state): State<Arc<AppState>>) -> impl IntoRespons
         changes_total: status.changes_total,
         changes_summary: status.changes_summary,
     };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 pub async fn htmx_providers(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let providers = load_providers();
     let tpl = ProvidersPartial { providers };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 pub async fn htmx_logs(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let entries = load_log_entries(&state.repo_path, 50, 0);
     let tpl = LogsPartial { entries };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", e)))
+    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
 }
 
 // ---------------------------------------------------------------------------
@@ -242,14 +263,13 @@ pub async fn api_logs(
 ) -> Json<LogsResponse> {
     let limit = query.limit.unwrap_or(50);
     let offset = query.offset.unwrap_or(0);
+    let level = query.level.as_deref();
 
-    let mut entries = load_log_entries(&state.repo_path, limit, offset);
+    // Count total matching entries (no limit/offset applied).
+    let total = load_log_entries_filtered(&state.repo_path, usize::MAX, 0, level).len();
+    // Fetch the requested page.
+    let entries = load_log_entries_filtered(&state.repo_path, limit, offset, level);
 
-    if let Some(ref level) = query.level {
-        entries.retain(|e| e.level == *level);
-    }
-
-    let total = entries.len();
     Json(LogsResponse {
         entries,
         total,
@@ -284,21 +304,25 @@ pub async fn api_config(
         Ok(()) => Html(
             r#"<div class="flash flash-success">Configuration saved.</div>"#.to_string(),
         ),
-        Err(e) => Html(format!(
-            r#"<div class="flash flash-error">Error: {}</div>"#,
-            e
-        )),
+        Err(e) => {
+            let msg = escape_html(&e.to_string());
+            Html(format!(
+                r#"<div class="flash flash-error">Error: {}</div>"#,
+                msg
+            ))
+        }
     }
 }
 
 pub async fn api_start(State(state): State<Arc<AppState>>) -> Json<ActionResponse> {
     let result = (|| -> anyhow::Result<String> {
         let config = LocalConfig::load(&state.repo_path)?;
-        let bin = std::env::current_exe()?;
-        let commitbook_bin = bin
-            .parent()
-            .map(|p| p.join("commitbook"))
-            .unwrap_or(bin);
+        let commitbook_bin = which::which("commitbook").unwrap_or_else(|_| {
+            let bin = std::env::current_exe().expect("cannot determine current exe");
+            bin.parent()
+                .map(|p| p.join("commitbook"))
+                .unwrap_or(bin)
+        });
         cron::install(&state.repo_path, &config.schedule, &commitbook_bin)
     })();
 
@@ -330,3 +354,7 @@ pub async fn api_stop(State(state): State<Arc<AppState>>) -> Json<ActionResponse
 pub async fn api_providers() -> Json<Vec<ProviderInfo>> {
     Json(load_providers())
 }
+
+#[cfg(test)]
+#[path = "routes_tests.rs"]
+mod tests;

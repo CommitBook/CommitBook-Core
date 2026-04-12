@@ -1,231 +1,149 @@
 use anyhow::Result;
-use colored::*;
+use colored::Colorize;
 use std::path::Path;
 use std::process::Command;
 
-use commitbook_core::ai::ProviderChain;
-use commitbook_core::config::{GlobalConfig, LocalConfig};
+use commitbook_core::config::LocalConfig;
 use commitbook_core::cron;
 use commitbook_core::git::GitRepo;
+use commitbook_core::state::auth::AuthConfig;
 
-struct Check {
-    name: String,
-    passed: bool,
-    detail: String,
-    required: bool,
-}
-
-impl Check {
-    fn pass(name: &str, detail: &str) -> Self {
-        Self { name: name.to_string(), passed: true, detail: detail.to_string(), required: true }
-    }
-    fn fail(name: &str, detail: &str) -> Self {
-        Self { name: name.to_string(), passed: false, detail: detail.to_string(), required: true }
-    }
-    fn optional_pass(name: &str, detail: &str) -> Self {
-        Self { name: name.to_string(), passed: true, detail: detail.to_string(), required: false }
-    }
-    fn optional_fail(name: &str, detail: &str) -> Self {
-        Self { name: name.to_string(), passed: false, detail: detail.to_string(), required: false }
-    }
-
-    fn display(&self) {
-        let icon = if self.passed {
-            "OK".green().bold()
-        } else if self.required {
-            "FAIL".red().bold()
-        } else {
-            "SKIP".yellow().bold()
-        };
-        let detail = if self.passed {
-            self.detail.green().to_string()
-        } else if self.required {
-            self.detail.red().to_string()
-        } else {
-            self.detail.yellow().to_string()
-        };
-        println!("  [{}] {}: {}", icon, self.name, detail);
-    }
-}
-
-pub fn run(repo_path: &Path, json: bool) -> Result<()> {
-    // Core checks
-    let core_checks = vec![
-        check_git(),
-        check_git_repo(repo_path),
-        check_git_remote(repo_path),
-        check_scheduler(),
-    ];
-
-    // AI provider checks
-    let global = GlobalConfig::load().unwrap_or_default();
-    let chain = ProviderChain::new();
-    let ai_checks: Vec<Check> = chain
-        .check_availability(&global.ai.providers)
-        .into_iter()
-        .map(|(key, name, available)| {
-            if available {
-                Check::optional_pass(&name, "Available")
-            } else {
-                Check::optional_fail(&name, &format!("Not found ({})", key))
-            }
-        })
-        .collect();
-
-    // CommitBook checks
-    let cb_checks = vec![
-        check_commitbook_config(repo_path),
-        check_logs_writable(repo_path),
-        check_binary_path(repo_path),
-    ];
-
-    let all_checks: Vec<&Check> = core_checks.iter()
-        .chain(ai_checks.iter())
-        .chain(cb_checks.iter())
-        .collect();
-
-    if json {
-        let checks_json: Vec<serde_json::Value> = all_checks
-            .iter()
-            .map(|c| serde_json::json!({
-                "name": c.name,
-                "passed": c.passed,
-                "detail": c.detail,
-                "required": c.required,
-            }))
-            .collect();
-        let passed = all_checks.iter().filter(|c| c.passed).count();
-        let failed = all_checks.iter().filter(|c| !c.passed && c.required).count();
-        let output = serde_json::json!({
-            "checks": checks_json,
-            "passed": passed,
-            "total": all_checks.len(),
-            "required_failed": failed,
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-        return Ok(());
-    }
-
+pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
     println!("{}", "CommitBook Doctor".bold().cyan());
-
     println!();
-    println!("  {}", "Core".bold());
-    for c in &core_checks { c.display(); }
 
-    println!();
-    println!("  {}", "AI Providers".bold());
-    for c in &ai_checks { c.display(); }
+    let mut all_ok = true;
 
-    println!();
-    println!("  {}", "CommitBook".bold());
-    for c in &cb_checks { c.display(); }
+    // 1. Git.
+    print!("  Git installed... ");
+    match Command::new("git").arg("--version").output() {
+        Ok(output) if output.status.success() => {
+            println!("{}", "OK".green().bold());
+        }
+        _ => {
+            println!("{}", "FAILED".red().bold());
+            all_ok = false;
+        }
+    }
 
-    let passed = all_checks.iter().filter(|c| c.passed).count();
-    let required_failed = all_checks.iter().filter(|c| !c.passed && c.required).count();
-
-    println!();
-    if required_failed == 0 {
-        println!("  {} All core checks passed! ({}/{} total)", "OK".green().bold(), passed, all_checks.len());
+    // 2. Git repo.
+    print!("  Git repository... ");
+    if GitRepo::is_repo(repo_root) {
+        println!("{}", "OK".green().bold());
     } else {
-        println!("  {} {} required check(s) failed.", "!!".red().bold(), required_failed);
+        println!("{}", "FAILED".red().bold());
+        println!("    {}", "Not a git repository.".dimmed());
+        all_ok = false;
+    }
+
+    // 3. Remote.
+    print!("  Git remote... ");
+    if let Ok(repo) = GitRepo::open(repo_root) {
+        if repo.has_remote() {
+            println!("{}", "OK".green().bold());
+        } else {
+            println!("{}", "WARN".yellow().bold());
+            println!(
+                "    {}",
+                "No remote configured. Sync will be local only.".dimmed()
+            );
+        }
+    } else {
+        println!("{}", "SKIP".dimmed());
+    }
+
+    // 4. .CommitBook/ structure.
+    print!("  .CommitBook/ directory... ");
+    if cb_dir.is_dir() {
+        println!("{}", "OK".green().bold());
+    } else {
+        println!("{}", "FAILED".red().bold());
+        all_ok = false;
+    }
+
+    // 5. config.toml.
+    print!("  config.toml... ");
+    if LocalConfig::exists(repo_root) {
+        println!("{}", "OK".green().bold());
+    } else {
+        println!("{}", "MISSING".yellow().bold());
+    }
+
+    // 6. Auth.
+    print!("  auth.toml... ");
+    match AuthConfig::load(cb_dir) {
+        Ok(auth) if auth.has_token() => {
+            println!("{}", "OK".green().bold());
+        }
+        Ok(_) => {
+            println!("{}", "not configured".dimmed());
+        }
+        Err(_) => {
+            println!("{}", "error reading".red());
+            all_ok = false;
+        }
+    }
+
+    // 7. Scheduler.
+    print!("  Scheduler... ");
+    if cron::is_loaded(repo_root) {
+        println!("{}", "running".green().bold());
+    } else {
+        println!("{}", "stopped".dimmed());
+    }
+
+    // 8. AI providers.
+    print!("  AI providers... ");
+    let chain = commitbook_core::ai::ProviderChain::new();
+    let keys = vec![
+        "gh-copilot".to_string(),
+        "claude-cli".to_string(),
+        "codex-cli".to_string(),
+    ];
+    let availability = chain.check_availability(&keys);
+    let available: Vec<_> = availability
+        .iter()
+        .filter(|(_, _, avail)| *avail)
+        .map(|(_, name, _)| name.as_str())
+        .collect();
+    if available.is_empty() {
+        println!("{}", "none found".yellow());
+        println!(
+            "    {}",
+            "Commit messages will use fallback text.".dimmed()
+        );
+    } else {
+        println!(
+            "{}",
+            available.join(", ").green()
+        );
+    }
+
+    // 9. Base directory.
+    print!("  base/ directory... ");
+    let base_dir = cb_dir.join("base");
+    if base_dir.is_dir() {
+        println!("{}", "OK".green().bold());
+    } else {
+        println!("{}", "MISSING".yellow().bold());
+        println!(
+            "    {}",
+            "Will be created on first sync.".dimmed()
+        );
+    }
+
+    println!();
+    if all_ok {
+        println!(
+            "  {}",
+            "All checks passed.".green().bold()
+        );
+    } else {
+        println!(
+            "  {}",
+            "Some checks failed. See above.".red().bold()
+        );
     }
 
     Ok(())
-}
-
-fn check_git() -> Check {
-    match Command::new("git").args(["--version"]).output() {
-        Ok(output) if output.status.success() => {
-            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            Check::pass("Git", &version)
-        }
-        _ => Check::fail("Git", "git is not installed"),
-    }
-}
-
-fn check_git_repo(repo_path: &Path) -> Check {
-    if GitRepo::is_repo(repo_path) {
-        Check::pass("Git repository", &format!("{}", repo_path.display()))
-    } else {
-        Check::fail("Git repository", &format!("Not a git repo: {}", repo_path.display()))
-    }
-}
-
-fn check_git_remote(repo_path: &Path) -> Check {
-    if !GitRepo::is_repo(repo_path) {
-        return Check::fail("Git remote", "Not a git repository");
-    }
-    match commitbook_core::git::remote::check_remote_connectivity(repo_path) {
-        Ok(true) => {
-            let url = commitbook_core::git::remote::get_remote_url(repo_path, "origin")
-                .unwrap_or_else(|_| "unknown".to_string());
-            Check::pass("Git remote", &url)
-        }
-        Ok(false) => Check::optional_fail("Git remote", "Remote is not reachable"),
-        Err(e) => Check::optional_fail("Git remote", &format!("Error: {}", e)),
-    }
-}
-
-fn check_scheduler() -> Check {
-    if cron::is_accessible() {
-        let name = if cfg!(target_os = "macos") { "launchd" } else { "crontab" };
-        Check::pass("Scheduler", &format!("{} is accessible", name))
-    } else {
-        Check::fail("Scheduler", "Scheduler is not accessible")
-    }
-}
-
-fn check_commitbook_config(repo_path: &Path) -> Check {
-    if !LocalConfig::exists(repo_path) {
-        return Check::fail("CommitBook config", "Not set up (run: commitbook setup)");
-    }
-    match LocalConfig::load(repo_path) {
-        Ok(config) => {
-            let status = if config.enabled { "enabled" } else { "disabled" };
-            let schedule = cron::describe_schedule(&config.schedule);
-            Check::pass("CommitBook config", &format!("{}, schedule: {}", status, schedule))
-        }
-        Err(e) => Check::fail("CommitBook config", &format!("Corrupt: {}", e)),
-    }
-}
-
-fn check_logs_writable(repo_path: &Path) -> Check {
-    let logs_dir = LocalConfig::logs_dir(repo_path);
-    if !logs_dir.exists() {
-        if !LocalConfig::exists(repo_path) {
-            return Check::optional_fail("Logs directory", "Not set up");
-        }
-        if std::fs::create_dir_all(&logs_dir).is_err() {
-            return Check::fail("Logs directory", &format!("Cannot create: {}", logs_dir.display()));
-        }
-    }
-    let test_file = logs_dir.join(".commitbook_test");
-    match std::fs::write(&test_file, "test") {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&test_file);
-            Check::pass("Logs directory", "Writable")
-        }
-        Err(_) => Check::fail("Logs directory", &format!("Not writable: {}", logs_dir.display())),
-    }
-}
-
-fn check_binary_path(repo_path: &Path) -> Check {
-    #[cfg(target_os = "macos")]
-    {
-        match commitbook_core::cron::macos::validate_binary_path(repo_path) {
-            Ok(true) => Check::pass("Binary path", "Plist binary exists"),
-            Ok(false) => {
-                if !LocalConfig::exists(repo_path) || !cron::is_loaded(repo_path) {
-                    return Check::optional_fail("Binary path", "No active plist");
-                }
-                Check::fail("Binary path", "Binary in plist no longer exists — reinstall with `commitbook start`")
-            }
-            Err(_) => Check::optional_fail("Binary path", "Could not check"),
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = repo_path;
-        Check::optional_pass("Binary path", "N/A (non-macOS)")
-    }
 }

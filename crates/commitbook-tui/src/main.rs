@@ -16,18 +16,36 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let repo_path = commitbook_core::config::resolve_repo_path(cli.repo.as_deref())?;
+    let repo_path = match cli.repo {
+        Some(p) => std::fs::canonicalize(&p).unwrap_or(p),
+        None => std::env::current_dir().context("Cannot determine current directory")?,
+    };
 
     // Verify the repo has CommitBook initialized
     if !commitbook_core::config::local::LocalConfig::exists(&repo_path) {
         bail!(
-            "CommitBook not initialized in {}. Run `commitbook init` first.",
+            "CommitBook not initialized in {}. Run `commitbook sync` first.",
             repo_path.display()
         );
     }
 
+    // RAII guard ensures terminal is restored even on panic or early return
+    struct TerminalGuard;
+    impl Drop for TerminalGuard {
+        fn drop(&mut self) {
+            let _ = crossterm::terminal::disable_raw_mode();
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                crossterm::terminal::LeaveAlternateScreen,
+                crossterm::event::DisableMouseCapture
+            );
+        }
+    }
+
     // Set up terminal
     crossterm::terminal::enable_raw_mode().context("Failed to enable raw mode")?;
+    let _guard = TerminalGuard;
+
     let mut stdout = std::io::stdout();
     crossterm::execute!(
         stdout,
@@ -41,7 +59,7 @@ fn main() -> Result<()> {
 
     let result = app::run(&mut terminal, &repo_path);
 
-    // Restore terminal
+    // Restore terminal (happy path — guard handles failure/panic paths)
     crossterm::terminal::disable_raw_mode().ok();
     crossterm::execute!(
         terminal.backend_mut(),

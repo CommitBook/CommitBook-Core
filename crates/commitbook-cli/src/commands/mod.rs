@@ -1,10 +1,9 @@
-pub mod auto_commit;
-pub mod commit;
+pub mod conflicts;
 pub mod doctor;
 pub mod log;
+pub mod login;
 pub mod schedule;
-pub mod setup;
 pub mod start;
 pub mod status;
 pub mod stop;
-pub mod uninstall;
+pub mod sync_cmd;

@@ -5,7 +5,6 @@ use ratatui::Terminal;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use commitbook_core::config::global::GlobalConfig;
 use commitbook_core::config::local::LocalConfig;
 use commitbook_core::cron;
 use commitbook_core::git::{ChangesSummary, GitRepo};
@@ -110,7 +109,7 @@ impl App {
             self.schedule_desc = cron::describe_schedule(&config.schedule);
             self.auto_push = config.git.auto_push;
             self.branch = config.git.branch.clone();
-            self.last_commit = config.last_commit.clone();
+            self.last_commit = None; // moved to state.toml
             self.enabled = config.enabled;
             self.log_level = config.logging.level.clone();
         }
@@ -132,10 +131,13 @@ impl App {
         }
 
         // Check provider availability
-        if let Ok(global) = GlobalConfig::load() {
-            let chain = commitbook_core::ai::ProviderChain::new();
-            self.providers = chain.check_availability(&global.ai.providers);
-        }
+        let chain = commitbook_core::ai::ProviderChain::new();
+        let default_keys = vec![
+            "gh-copilot".to_string(),
+            "claude-cli".to_string(),
+            "codex-cli".to_string(),
+        ];
+        self.providers = chain.check_availability(&default_keys);
     }
 
     pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
@@ -163,13 +165,14 @@ impl App {
     fn toggle_scheduler(&mut self) {
         if self.running {
             let _ = cron::uninstall(&self.repo_path, None);
-        } else if let Ok(bin) = std::env::current_exe() {
-            // Use commitbook binary, not commitbook-tui
-            let commitbook_bin = bin
-                .parent()
-                .map(|p| p.join("commitbook"))
-                .unwrap_or(bin);
-            let _ = cron::install(&self.repo_path, &self.schedule, &commitbook_bin);
+        } else {
+            let commitbook_bin = which::which("commitbook")
+                .or_else(|_| std::env::current_exe().map(|bin|
+                    bin.parent().map(|p| p.join("commitbook")).unwrap_or(bin)
+                ));
+            if let Ok(bin) = commitbook_bin {
+                let _ = cron::install(&self.repo_path, &self.schedule, &bin);
+            }
         }
         self.refresh();
     }

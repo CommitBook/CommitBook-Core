@@ -26,12 +26,15 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let repo_path = commitbook_core::config::resolve_repo_path(cli.repo.as_deref())?;
+    let repo_path = match cli.repo {
+        Some(p) => std::fs::canonicalize(&p).unwrap_or(p),
+        None => std::env::current_dir().context("Cannot determine current directory")?,
+    };
     let port = cli.port;
 
     if !commitbook_core::config::local::LocalConfig::exists(&repo_path) {
         bail!(
-            "CommitBook not initialized in {}. Run `commitbook init` first.",
+            "CommitBook not initialized in {}. Run `commitbook sync` first.",
             repo_path.display()
         );
     }

@@ -42,6 +42,25 @@ fn test_truncate_long_appends_ellipsis() {
     assert_eq!(truncate("hello world", 5), "hello...");
 }
 
+#[test]
+fn test_truncate_multibyte_does_not_panic() {
+    // "🎉" is 4 bytes; truncating at byte 2 would panic without char-boundary check
+    let s = "🎉🎉🎉";
+    let result = truncate(s, 5);
+    assert!(result.ends_with("..."));
+    assert!(!result.contains('\u{FFFD}')); // no replacement chars
+}
+
+#[test]
+fn test_clean_message_multibyte_truncate() {
+    // 72 chars of emoji (each emoji = 4 bytes = 288 bytes total)
+    let long_emoji = "😀".repeat(80);
+    let result = clean_message(&long_emoji);
+    // Should not panic, and result should be valid UTF-8
+    assert!(result.len() <= 288); // 72 * 4 bytes max
+    assert!(result.is_char_boundary(result.len()));
+}
+
 // --- MockProvider + ProviderChain async tests ---
 
 struct MockProvider {

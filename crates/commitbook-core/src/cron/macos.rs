@@ -26,6 +26,15 @@ pub fn plist_path(repo_path: &Path) -> PathBuf {
         .join(format!("{}.plist", label))
 }
 
+/// Escape special XML characters in a string value.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+     .replace('<', "&lt;")
+     .replace('>', "&gt;")
+     .replace('"', "&quot;")
+     .replace('\'', "&apos;")
+}
+
 /// Generate the plist XML content with PATH environment variable baked in.
 fn generate_plist(
     repo_path: &Path,
@@ -54,10 +63,10 @@ fn generate_plist(
     <key>ProgramArguments</key>
     <array>
         <string>{bin}</string>
-        <string>auto-commit</string>
-        <string>--repo</string>
-        <string>{repo}</string>
+        <string>run</string>
     </array>
+    <key>WorkingDirectory</key>
+    <string>{repo}</string>
     <key>StartInterval</key>
     <integer>{interval}</integer>
     <key>StandardOutPath</key>
@@ -74,12 +83,12 @@ fn generate_plist(
 </dict>
 </plist>"#,
         label = label,
-        bin = bin_str,
-        repo = repo_str,
+        bin = xml_escape(&bin_str),
+        repo = xml_escape(&repo_str),
         interval = interval,
-        stdout = stdout_log.to_string_lossy(),
-        stderr = stderr_log.to_string_lossy(),
-        path = path_env,
+        stdout = xml_escape(&stdout_log.to_string_lossy()),
+        stderr = xml_escape(&stderr_log.to_string_lossy()),
+        path = xml_escape(&path_env),
     )
 }
 
