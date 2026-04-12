@@ -101,6 +101,75 @@ created_at = "2026-04-07T00:00:00Z"
 
     let loaded = LocalConfig::load(repo).unwrap();
     assert_eq!(loaded.config_version, "1");
+
+    let saved = fs::read_to_string(dir.join("config.toml")).unwrap();
+    assert!(saved.contains("config_version = \"1\""));
+}
+
+#[test]
+fn test_load_legacy_version_defaults_enabled_and_rewrites() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let dir = repo.join(".CommitBook");
+    fs::create_dir_all(&dir).unwrap();
+
+    let toml_content = r#"
+version = "1.0.0"
+schedule = "0 * * * *"
+created_at = "2026-04-07T00:00:00Z"
+"#;
+    fs::write(dir.join("config.toml"), toml_content).unwrap();
+
+    let loaded = LocalConfig::load(repo).unwrap();
+    assert_eq!(loaded.config_version, "1");
+    assert!(loaded.enabled);
+
+    let saved = fs::read_to_string(dir.join("config.toml")).unwrap();
+    assert!(saved.contains("config_version = \"1\""));
+    assert!(saved.contains("enabled = true"));
+    assert!(!saved.contains("version = \"1.0.0\""));
+}
+
+#[test]
+fn test_load_with_config_version_defaults_enabled_and_rewrites() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let dir = repo.join(".CommitBook");
+    fs::create_dir_all(&dir).unwrap();
+
+    let toml_content = r#"
+config_version = "1"
+schedule = "0 * * * *"
+created_at = "2026-04-07T00:00:00Z"
+"#;
+    fs::write(dir.join("config.toml"), toml_content).unwrap();
+
+    let loaded = LocalConfig::load(repo).unwrap();
+    assert_eq!(loaded.config_version, "1");
+    assert!(loaded.enabled);
+
+    let saved = fs::read_to_string(dir.join("config.toml")).unwrap();
+    assert!(saved.contains("config_version = \"1\""));
+    assert!(saved.contains("enabled = true"));
+}
+
+#[test]
+fn test_load_preserves_explicit_enabled_false() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let dir = repo.join(".CommitBook");
+    fs::create_dir_all(&dir).unwrap();
+
+    let toml_content = r#"
+config_version = "1"
+enabled = false
+schedule = "0 * * * *"
+created_at = "2026-04-07T00:00:00Z"
+"#;
+    fs::write(dir.join("config.toml"), toml_content).unwrap();
+
+    let loaded = LocalConfig::load(repo).unwrap();
+    assert!(!loaded.enabled);
 }
 
 #[test]
@@ -131,4 +200,41 @@ max_log_files = 14
 
     let loaded = LocalConfig::load(repo).unwrap();
     assert_eq!(loaded.logging.max_log_days, 14);
+}
+
+#[test]
+fn test_load_missing_schedule_still_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let dir = repo.join(".CommitBook");
+    fs::create_dir_all(&dir).unwrap();
+
+    let toml_content = r#"
+version = "1.0.0"
+created_at = "2026-04-07T00:00:00Z"
+"#;
+    fs::write(dir.join("config.toml"), toml_content).unwrap();
+
+    let err = format!("{:#}", LocalConfig::load(repo).unwrap_err());
+    assert!(err.contains("Failed to parse local config"));
+    assert!(err.contains("missing field `schedule`"));
+}
+
+#[test]
+fn test_load_rejects_unknown_config_version() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let dir = repo.join(".CommitBook");
+    fs::create_dir_all(&dir).unwrap();
+
+    let toml_content = r#"
+config_version = "2.0.0"
+enabled = true
+schedule = "0 * * * *"
+created_at = "2026-04-07T00:00:00Z"
+"#;
+    fs::write(dir.join("config.toml"), toml_content).unwrap();
+
+    let err = LocalConfig::load(repo).unwrap_err().to_string();
+    assert!(err.contains("Unsupported local config version `2.0.0`"));
 }

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,6 +47,41 @@ impl Default for LoggingSettings {
 
 fn default_config_version() -> String {
     "1".to_string()
+}
+
+fn canonicalize_v1_config_version(config_version: &str) -> Option<String> {
+    if config_version == "1" || config_version.starts_with("1.") {
+        Some("1".to_string())
+    } else {
+        None
+    }
+}
+
+fn normalize_legacy_config_table(table: &mut toml::map::Map<String, toml::Value>) -> bool {
+    let mut changed = false;
+
+    if !table.contains_key("config_version") {
+        if let Some(version) = table.get("version").cloned() {
+            table.insert("config_version".to_string(), version);
+        } else {
+            table.insert(
+                "config_version".to_string(),
+                toml::Value::String(default_config_version()),
+            );
+        }
+        changed = true;
+    }
+
+    if table.remove("version").is_some() {
+        changed = true;
+    }
+
+    if !table.contains_key("enabled") {
+        table.insert("enabled".to_string(), toml::Value::Boolean(true));
+        changed = true;
+    }
+
+    changed
 }
 
 /// Local configuration stored at <repo>/.CommitBook/config.toml
@@ -108,9 +143,26 @@ impl LocalConfig {
 
     /// Migrate config to the latest version. Returns true if migration occurred.
     pub fn migrate(&mut self) -> bool {
-        // Currently at version "1" — no migrations needed yet.
-        // Future versions will match on self.config_version and apply upgrades.
+        if let Some(canonical) = canonicalize_v1_config_version(&self.config_version) {
+            if self.config_version != canonical {
+                self.config_version = canonical;
+                return true;
+            }
+        }
+
         false
+    }
+
+    fn validate_config_version(&self, path: &Path) -> Result<()> {
+        if self.config_version == "1" {
+            return Ok(());
+        }
+
+        bail!(
+            "Unsupported local config version `{}` in {}",
+            self.config_version,
+            path.display()
+        );
     }
 
     /// Load local config from a repo.
@@ -119,10 +171,24 @@ impl LocalConfig {
         let content = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read local config: {}", path.display()))?;
 
-        let mut config: Self = toml::from_str(&content)
-            .with_context(|| "Failed to parse local config")?;
+        let mut value: toml::Value = toml::from_str(&content)
+            .with_context(|| format!("Failed to parse local config: {}", path.display()))?;
+        let table = value.as_table_mut().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Failed to parse local config: {}: top-level TOML value must be a table",
+                path.display()
+            )
+        })?;
+        let repaired = normalize_legacy_config_table(table);
+        let normalized = toml::to_string(&value)
+            .with_context(|| format!("Failed to normalize local config: {}", path.display()))?;
 
-        if config.migrate() {
+        let mut config: Self = toml::from_str(&normalized)
+            .with_context(|| format!("Failed to parse local config: {}", path.display()))?;
+        let migrated = config.migrate();
+        config.validate_config_version(&path)?;
+
+        if repaired || migrated {
             config.save(repo_path)?;
         }
 
@@ -132,12 +198,13 @@ impl LocalConfig {
     /// Save local config to the repo.
     pub fn save(&self, repo_path: &Path) -> Result<()> {
         let dir = Self::commitbook_dir(repo_path);
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("Failed to create .CommitBook directory: {}", dir.display()))?;
+        fs::create_dir_all(&dir).with_context(|| {
+            format!("Failed to create .CommitBook directory: {}", dir.display())
+        })?;
 
         let path = Self::config_path(repo_path);
-        let content = toml::to_string_pretty(self)
-            .with_context(|| "Failed to serialize local config")?;
+        let content =
+            toml::to_string_pretty(self).with_context(|| "Failed to serialize local config")?;
 
         fs::write(&path, content)
             .with_context(|| format!("Failed to write local config: {}", path.display()))?;
@@ -183,8 +250,7 @@ impl LocalConfig {
         ];
 
         let content = if gitignore_path.exists() {
-            fs::read_to_string(&gitignore_path)
-                .with_context(|| "Failed to read .gitignore")?
+            fs::read_to_string(&gitignore_path).with_context(|| "Failed to read .gitignore")?
         } else {
             String::new()
         };
