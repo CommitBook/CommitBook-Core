@@ -10,13 +10,14 @@ cd "$PROJECT_DIR"
 
 BINARY="$PROJECT_DIR/target/debug/commitbook"
 
-# Build if binary is missing
-if [ ! -x "$BINARY" ]; then
-    echo "Binary not found. Building..."
-    echo ""
-    cargo build -p commitbook-cli
-    echo ""
-fi
+# Pull latest code and rebuild
+echo "Pulling latest changes..."
+git pull
+echo ""
+
+echo "Building..."
+cargo build -p commitbook-cli
+echo ""
 
 echo "========================================"
 echo "  CommitBook CLI"
