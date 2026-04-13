@@ -29,6 +29,12 @@ commitbook start
 
 That's it. CommitBook auto-initializes on first use — no setup command needed.
 
+## Use Cases
+
+| Guide | Description |
+|---|---|
+| [AI Agent Dotfiles](use-cases/ai-agent-dotfiles.md) | Auto-sync config for Claude, Cursor, Codex, Copilot and other AI agents |
+
 ## Commands
 
 | Command | Description |
