@@ -3,7 +3,7 @@ use std::path::Path;
 
 /// Read the base version of a file (last successfully synced version).
 pub fn read(commitbook_dir: &Path, file_path: &str) -> Result<Option<String>> {
-    let path = commitbook_dir.join("base").join(file_path);
+    let path = commitbook_dir.join("local").join("base").join(file_path);
     if !path.exists() {
         return Ok(None);
     }
@@ -14,7 +14,7 @@ pub fn read(commitbook_dir: &Path, file_path: &str) -> Result<Option<String>> {
 
 /// Write the base version of a file.
 pub fn write(commitbook_dir: &Path, file_path: &str, content: &str) -> Result<()> {
-    let path = commitbook_dir.join("base").join(file_path);
+    let path = commitbook_dir.join("local").join("base").join(file_path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -25,7 +25,7 @@ pub fn write(commitbook_dir: &Path, file_path: &str, content: &str) -> Result<()
 
 /// Delete the base version of a file.
 pub fn delete(commitbook_dir: &Path, file_path: &str) -> Result<()> {
-    let path = commitbook_dir.join("base").join(file_path);
+    let path = commitbook_dir.join("local").join("base").join(file_path);
     if path.exists() {
         std::fs::remove_file(&path)?;
     }
@@ -34,7 +34,7 @@ pub fn delete(commitbook_dir: &Path, file_path: &str) -> Result<()> {
 
 /// List all files in the base directory (relative paths).
 pub fn list(commitbook_dir: &Path) -> Result<Vec<String>> {
-    let base_dir = commitbook_dir.join("base");
+    let base_dir = commitbook_dir.join("local").join("base");
     if !base_dir.exists() {
         return Ok(Vec::new());
     }

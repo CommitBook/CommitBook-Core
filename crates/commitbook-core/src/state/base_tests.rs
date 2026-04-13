@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn test_read_missing_returns_none() {
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(tmp.path().join("base")).unwrap();
+    std::fs::create_dir_all(tmp.path().join("local").join("base")).unwrap();
     let result = read(tmp.path(), "nonexistent.md").unwrap();
     assert!(result.is_none());
 }
@@ -40,7 +40,7 @@ fn test_delete_removes_file() {
 #[test]
 fn test_delete_nonexistent_is_ok() {
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(tmp.path().join("base")).unwrap();
+    std::fs::create_dir_all(tmp.path().join("local").join("base")).unwrap();
     // Should not error.
     delete(tmp.path(), "nonexistent.md").unwrap();
 }

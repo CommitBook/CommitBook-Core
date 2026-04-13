@@ -6,7 +6,7 @@ fn setup_repo() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let repo_root = tmp.path().to_path_buf();
     let cb_dir = repo_root.join(".CommitBook");
-    std::fs::create_dir_all(cb_dir.join("base")).unwrap();
+    std::fs::create_dir_all(cb_dir.join("local").join("base")).unwrap();
     (tmp, repo_root, cb_dir)
 }
 

@@ -109,7 +109,7 @@ async fn test_api_logs_respects_limit() {
     let (tmp, app) = setup_test_app();
 
     // Write log entries
-    let logs_dir = tmp.path().join(".CommitBook").join("logs");
+    let logs_dir = tmp.path().join(".CommitBook").join("local").join("logs");
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let log_file = logs_dir.join(format!("{}.log", today));
     let mut entries = String::new();
@@ -131,7 +131,7 @@ async fn test_api_logs_respects_limit() {
 async fn test_api_logs_filters_by_level() {
     let (tmp, app) = setup_test_app();
 
-    let logs_dir = tmp.path().join(".CommitBook").join("logs");
+    let logs_dir = tmp.path().join(".CommitBook").join("local").join("logs");
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let log_file = logs_dir.join(format!("{}.log", today));
     let entries = concat!(
@@ -241,7 +241,7 @@ async fn test_api_config_error_is_escaped() {
 async fn test_api_logs_filter_then_paginate() {
     let (tmp, app) = setup_test_app();
 
-    let logs_dir = tmp.path().join(".CommitBook").join("logs");
+    let logs_dir = tmp.path().join(".CommitBook").join("local").join("logs");
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let log_file = logs_dir.join(format!("{}.log", today));
     let mut entries = String::new();

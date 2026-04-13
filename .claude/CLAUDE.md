@@ -27,7 +27,7 @@ All UI crates depend on `commitbook-core`. No database — all state is file-bas
 
 ## Architecture
 
-- **No database.** State lives in `.CommitBook/` (config.toml, state.toml, auth.toml, base/ versions).
+- **No database.** State lives in `.CommitBook/` (config.toml committed; local/ gitignored with state.toml, auth.toml, base/ versions).
 - **No global config.** Each repo is self-contained. No `~/.commitbook/`.
 - **Auto-init.** CLI auto-creates `.CommitBook/` on first use. No `init` command.
 - **Sync = commit + try-push.** Every sync commits locally (works offline), then pulls/merges/pushes if remote is reachable.
@@ -71,12 +71,25 @@ commitbook login       # Store auth token
 
 ## .CommitBook/ Directory
 
+`config.toml` is the only committed file. Everything else lives under `local/`, which is gitignored as a single entry (`.CommitBook/local/`). Initialization auto-adds this entry to `.gitignore`.
+
 ```
 .CommitBook/
-  config.toml    # Human-editable settings (COMMITTED to git)
-  auth.toml      # Credentials (GITIGNORED)
-  state.toml     # Sync checkpoint (GITIGNORED)
-  base/          # Base versions for 3-way merge (GITIGNORED)
-  logs/          # Activity logs (GITIGNORED)
-  .lock          # Prevents concurrent runs (GITIGNORED)
+  config.toml        # Human-editable settings (COMMITTED to git)
+  local/             # All local state (GITIGNORED via single entry)
+    auth.toml        # Credentials (0o600 permissions)
+    state.toml       # Sync checkpoint (remote_head, last_sync_at)
+    base/            # Base versions of tracked files for 3-way merge
+    logs/            # Activity logs
+      YYYY-MM-DD.log       # Daily JSON-lines log files
+      launchd-stdout.log   # macOS scheduler stdout (when scheduled)
+      launchd-stderr.log   # macOS scheduler stderr (when scheduled)
+    .lock            # Prevents concurrent sync runs
 ```
+
+Path helpers in code:
+- `state::local_dir(cb_dir)` — returns `.CommitBook/local/`
+- `LocalConfig::local_dir(repo_path)` — returns `.CommitBook/local/`
+- `LocalConfig::logs_dir(repo_path)` — returns `.CommitBook/local/logs/`
+- `LocalConfig::lock_path(repo_path)` — returns `.CommitBook/local/.lock`
+- `AuthConfig`, `SyncState`, `base::*` all take `commitbook_dir` (`.CommitBook/`) and internally join `local/` before their filename

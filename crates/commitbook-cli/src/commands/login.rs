@@ -49,7 +49,7 @@ pub async fn run(
     );
     println!(
         "  {}",
-        "Token stored in .CommitBook/auth.toml (gitignored).".dimmed()
+        "Token stored in .CommitBook/local/auth.toml (gitignored).".dimmed()
     );
 
     Ok(())

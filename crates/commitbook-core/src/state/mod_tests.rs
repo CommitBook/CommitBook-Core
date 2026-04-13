@@ -61,8 +61,8 @@ fn test_initialize_creates_structure() {
     initialize(repo).unwrap();
 
     assert!(repo.join(".CommitBook").is_dir());
-    assert!(repo.join(".CommitBook/base").is_dir());
-    assert!(repo.join(".CommitBook/logs").is_dir());
+    assert!(repo.join(".CommitBook/local/base").is_dir());
+    assert!(repo.join(".CommitBook/local/logs").is_dir());
     assert!(repo.join(".CommitBook/config.toml").exists());
 }
 
@@ -75,11 +75,7 @@ fn test_initialize_updates_gitignore() {
     initialize(repo).unwrap();
 
     let gitignore = std::fs::read_to_string(repo.join(".gitignore")).unwrap();
-    assert!(gitignore.contains(".CommitBook/auth.toml"));
-    assert!(gitignore.contains(".CommitBook/state.toml"));
-    assert!(gitignore.contains(".CommitBook/base/"));
-    assert!(gitignore.contains(".CommitBook/logs/"));
-    assert!(gitignore.contains(".CommitBook/.lock"));
+    assert!(gitignore.contains(".CommitBook/local/"));
 }
 
 #[test]
@@ -126,6 +122,6 @@ fn test_gitignore_does_not_duplicate_entries() {
     update_gitignore(repo).unwrap();
 
     let content = std::fs::read_to_string(repo.join(".gitignore")).unwrap();
-    let count = content.matches(".CommitBook/auth.toml").count();
+    let count = content.matches(".CommitBook/local/").count();
     assert_eq!(count, 1);
 }

@@ -17,7 +17,7 @@ pub struct AuthEntry {
 
 impl AuthConfig {
     pub fn load(commitbook_dir: &Path) -> Result<Self> {
-        let path = commitbook_dir.join("auth.toml");
+        let path = commitbook_dir.join("local").join("auth.toml");
         if !path.exists() {
             return Ok(Self::default());
         }
@@ -27,7 +27,9 @@ impl AuthConfig {
     }
 
     pub fn save(&self, commitbook_dir: &Path) -> Result<()> {
-        let path = commitbook_dir.join("auth.toml");
+        let local = commitbook_dir.join("local");
+        std::fs::create_dir_all(&local)?;
+        let path = local.join("auth.toml");
         let content = toml::to_string_pretty(self)
             .with_context(|| "Failed to serialize auth.toml")?;
         std::fs::write(&path, &content)

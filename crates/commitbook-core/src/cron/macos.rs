@@ -46,7 +46,7 @@ fn generate_plist(
     let bin_str = commitbook_bin.to_string_lossy();
     let interval = cron_to_interval_seconds(schedule);
 
-    let logs_dir = repo_path.join(".CommitBook").join("logs");
+    let logs_dir = repo_path.join(".CommitBook").join("local").join("logs");
     let stdout_log = logs_dir.join("launchd-stdout.log");
     let stderr_log = logs_dir.join("launchd-stderr.log");
 

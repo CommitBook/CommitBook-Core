@@ -58,8 +58,9 @@ pub fn ensure_initialized() -> Result<PathBuf> {
 /// Initialize `.CommitBook/` in a repo directory.
 pub fn initialize(repo_root: &Path) -> Result<()> {
     let cb_dir = repo_root.join(".CommitBook");
-    std::fs::create_dir_all(cb_dir.join("base"))?;
-    std::fs::create_dir_all(cb_dir.join("logs"))?;
+    let local = cb_dir.join("local");
+    std::fs::create_dir_all(local.join("base"))?;
+    std::fs::create_dir_all(local.join("logs"))?;
 
     // Set directory permissions to 700 (owner only)
     #[cfg(unix)]
@@ -67,6 +68,10 @@ pub fn initialize(repo_root: &Path) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(
             &cb_dir,
+            std::fs::Permissions::from_mode(0o700),
+        );
+        let _ = std::fs::set_permissions(
+            &local,
             std::fs::Permissions::from_mode(0o700),
         );
     }
@@ -88,11 +93,7 @@ pub fn initialize(repo_root: &Path) -> Result<()> {
 fn update_gitignore(repo_root: &Path) -> Result<()> {
     let gitignore_path = repo_root.join(".gitignore");
     let entries = [
-        ".CommitBook/auth.toml",
-        ".CommitBook/state.toml",
-        ".CommitBook/base/",
-        ".CommitBook/logs/",
-        ".CommitBook/.lock",
+        ".CommitBook/local/",
     ];
 
     let content = if gitignore_path.exists() {
@@ -124,6 +125,11 @@ fn update_gitignore(repo_root: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Get the local state directory (`.CommitBook/local/`) from a `.CommitBook/` dir path.
+pub fn local_dir(commitbook_dir: &Path) -> PathBuf {
+    commitbook_dir.join("local")
 }
 
 /// Get the repo root from a `.CommitBook/` dir path.

@@ -150,14 +150,19 @@ impl LocalConfig {
         Self::commitbook_dir(repo_path).join("config.toml")
     }
 
+    /// Returns the local state directory path for a repo.
+    pub fn local_dir(repo_path: &Path) -> PathBuf {
+        Self::commitbook_dir(repo_path).join("local")
+    }
+
     /// Returns the logs directory path for a repo.
     pub fn logs_dir(repo_path: &Path) -> PathBuf {
-        Self::commitbook_dir(repo_path).join("logs")
+        Self::local_dir(repo_path).join("logs")
     }
 
     /// Returns the lock file path for a repo.
     pub fn lock_path(repo_path: &Path) -> PathBuf {
-        Self::commitbook_dir(repo_path).join(".lock")
+        Self::local_dir(repo_path).join(".lock")
     }
 
     /// Check if a repo has been set up with CommitBook.
@@ -239,10 +244,13 @@ impl LocalConfig {
     /// Initialize the .CommitBook directory structure.
     pub fn init(repo_path: &Path, schedule: &str) -> Result<Self> {
         let cb_dir = Self::commitbook_dir(repo_path);
+        let local_dir = Self::local_dir(repo_path);
         let logs_dir = Self::logs_dir(repo_path);
 
         fs::create_dir_all(&cb_dir)
             .with_context(|| format!("Failed to create .CommitBook: {}", cb_dir.display()))?;
+        fs::create_dir_all(&local_dir)
+            .with_context(|| format!("Failed to create local dir: {}", local_dir.display()))?;
         fs::create_dir_all(&logs_dir)
             .with_context(|| format!("Failed to create logs dir: {}", logs_dir.display()))?;
 
@@ -251,6 +259,7 @@ impl LocalConfig {
         {
             use std::os::unix::fs::PermissionsExt;
             let _ = fs::set_permissions(&cb_dir, fs::Permissions::from_mode(0o700));
+            let _ = fs::set_permissions(&local_dir, fs::Permissions::from_mode(0o700));
         }
 
         let config = Self::new(schedule);
@@ -266,11 +275,7 @@ impl LocalConfig {
     fn update_gitignore(repo_path: &Path) -> Result<()> {
         let gitignore_path = repo_path.join(".gitignore");
         let entries = [
-            ".CommitBook/auth.toml",
-            ".CommitBook/state.toml",
-            ".CommitBook/base/",
-            ".CommitBook/logs/",
-            ".CommitBook/.lock",
+            ".CommitBook/local/",
         ];
 
         let content = if gitignore_path.exists() {

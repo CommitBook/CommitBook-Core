@@ -19,7 +19,7 @@ pub struct FileLogger {
 
 impl FileLogger {
     pub fn new(repo_path: &Path, max_log_days: u32) -> Result<Self> {
-        let logs_dir = repo_path.join(".CommitBook").join("logs");
+        let logs_dir = repo_path.join(".CommitBook").join("local").join("logs");
         fs::create_dir_all(&logs_dir)
             .with_context(|| format!("Failed to create logs directory: {}", logs_dir.display()))?;
         Ok(Self {

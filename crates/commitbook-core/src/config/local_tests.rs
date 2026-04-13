@@ -27,13 +27,13 @@ fn test_config_path() {
 #[test]
 fn test_logs_dir_path() {
     let p = LocalConfig::logs_dir(Path::new("/tmp/repo"));
-    assert_eq!(p, PathBuf::from("/tmp/repo/.CommitBook/logs"));
+    assert_eq!(p, PathBuf::from("/tmp/repo/.CommitBook/local/logs"));
 }
 
 #[test]
 fn test_lock_path() {
     let p = LocalConfig::lock_path(Path::new("/tmp/repo"));
-    assert_eq!(p, PathBuf::from("/tmp/repo/.CommitBook/.lock"));
+    assert_eq!(p, PathBuf::from("/tmp/repo/.CommitBook/local/.lock"));
 }
 
 #[test]
@@ -74,8 +74,7 @@ fn test_init_creates_structure() {
 
     // .gitignore updated
     let gitignore = fs::read_to_string(repo.join(".gitignore")).unwrap();
-    assert!(gitignore.contains(".CommitBook/logs/"));
-    assert!(gitignore.contains(".CommitBook/.lock"));
+    assert!(gitignore.contains(".CommitBook/local/"));
 }
 
 #[test]

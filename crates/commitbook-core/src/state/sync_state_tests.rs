@@ -35,7 +35,7 @@ fn test_save_and_load_roundtrip() {
 #[test]
 fn test_save_creates_file() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("state.toml");
+    let path = tmp.path().join("local").join("state.toml");
     assert!(!path.exists());
 
     SyncState::default().save(tmp.path()).unwrap();

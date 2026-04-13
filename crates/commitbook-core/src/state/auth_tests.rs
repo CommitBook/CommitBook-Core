@@ -35,7 +35,7 @@ fn test_save_and_load_roundtrip() {
 #[test]
 fn test_save_creates_file() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("auth.toml");
+    let path = tmp.path().join("local").join("auth.toml");
     assert!(!path.exists());
 
     AuthConfig::default().save(tmp.path()).unwrap();
@@ -79,7 +79,7 @@ fn test_save_sets_restrictive_permissions() {
     };
     auth.save(tmp.path()).unwrap();
 
-    let path = tmp.path().join("auth.toml");
+    let path = tmp.path().join("local").join("auth.toml");
     let perms = std::fs::metadata(&path).unwrap().permissions();
     assert_eq!(perms.mode() & 0o777, 0o600);
 }

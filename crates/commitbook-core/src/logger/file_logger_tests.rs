@@ -10,7 +10,7 @@ fn make_logger() -> (tempfile::TempDir, FileLogger) {
 fn test_creates_logs_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let _logger = FileLogger::new(tmp.path(), 10).unwrap();
-    assert!(tmp.path().join(".CommitBook").join("logs").exists());
+    assert!(tmp.path().join(".CommitBook").join("local").join("logs").exists());
 }
 
 #[test]

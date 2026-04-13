@@ -121,7 +121,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
 
     // 9. Base directory.
     print!("  base/ directory... ");
-    let base_dir = cb_dir.join("base");
+    let base_dir = cb_dir.join("local").join("base");
     if base_dir.is_dir() {
         println!("{}", "OK".green().bold());
     } else {
