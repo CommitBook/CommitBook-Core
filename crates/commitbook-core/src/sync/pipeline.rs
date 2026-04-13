@@ -8,6 +8,12 @@ use crate::markdown::reassemble::reassemble;
 use crate::merge::engine::merge_document;
 use crate::state::{base, sync_state::SyncState};
 
+/// A base write deferred until push succeeds.
+struct DeferredBaseWrite {
+    path: String,
+    content: String,
+}
+
 /// Result of executing a sync plan.
 #[derive(Debug)]
 pub struct SyncResult {
@@ -35,26 +41,42 @@ pub async fn execute_sync(
     match plan.mode {
         SyncMode::Noop => return Ok(result),
         SyncMode::PullOnly => {
-            pull_documents(plan, commitbook_dir, repo_root, branch, transport, &mut result)
-                .await?;
+            let deferred = pull_documents(
+                plan, commitbook_dir, repo_root, branch, transport, &mut result,
+            )
+            .await?;
+            // No push phase — flush all deferred bases immediately.
+            for d in &deferred {
+                base::write(commitbook_dir, &d.path, &d.content)?;
+            }
         }
         SyncMode::PushOnly => {
             push_documents(plan, repo_root, branch, transport, &mut result).await?;
         }
         SyncMode::PullThenPush => {
-            pull_documents(plan, commitbook_dir, repo_root, branch, transport, &mut result)
-                .await?;
-            push_documents(plan, repo_root, branch, transport, &mut result).await?;
+            let deferred = pull_documents(
+                plan, commitbook_dir, repo_root, branch, transport, &mut result,
+            )
+            .await?;
+            let push_ok =
+                push_documents(plan, repo_root, branch, transport, &mut result).await?;
+            if push_ok {
+                for d in &deferred {
+                    base::write(commitbook_dir, &d.path, &d.content)?;
+                }
+            }
         }
     }
 
-    // Update checkpoint after successful sync.
-    if let Ok(head) = transport.get_head(branch).await {
-        let state = SyncState {
-            remote_head: Some(head),
-            last_sync_at: Some(chrono::Utc::now().to_rfc3339()),
-        };
-        state.save(commitbook_dir)?;
+    // Update checkpoint only if no errors occurred.
+    if result.errors.is_empty() {
+        if let Ok(head) = transport.get_head(branch).await {
+            let state = SyncState {
+                remote_head: Some(head),
+                last_sync_at: Some(chrono::Utc::now().to_rfc3339()),
+            };
+            state.save(commitbook_dir)?;
+        }
     }
 
     Ok(result)
@@ -67,7 +89,9 @@ async fn pull_documents(
     branch: &str,
     transport: &dyn RemoteTransport,
     result: &mut SyncResult,
-) -> Result<()> {
+) -> Result<Vec<DeferredBaseWrite>> {
+    let mut deferred_bases: Vec<DeferredBaseWrite> = Vec::new();
+
     for doc_plan in &plan.documents {
         if !doc_plan.requires_download {
             continue;
@@ -98,9 +122,13 @@ async fn pull_documents(
             };
 
             // Fast-path: skip parse→merge→reassemble when content hasn't diverged.
+            // Merge-path files always have requires_upload=true, so defer base writes.
             if local_content == remote_doc.content {
                 // Local and remote are identical — just update base, no file write needed.
-                base::write(commitbook_dir, &doc_plan.path, &local_content)?;
+                deferred_bases.push(DeferredBaseWrite {
+                    path: doc_plan.path.clone(),
+                    content: local_content,
+                });
             } else if local_content == base_content {
                 // Only remote changed — take remote content verbatim (no reassemble).
                 let file_path = repo_root.join(&doc_plan.path);
@@ -108,11 +136,17 @@ async fn pull_documents(
                     std::fs::create_dir_all(parent)?;
                 }
                 std::fs::write(&file_path, &remote_doc.content)?;
-                base::write(commitbook_dir, &doc_plan.path, &remote_doc.content)?;
+                deferred_bases.push(DeferredBaseWrite {
+                    path: doc_plan.path.clone(),
+                    content: remote_doc.content.clone(),
+                });
                 result.pulled += 1;
             } else if remote_doc.content == base_content {
                 // Only local changed — keep local as-is, just update base.
-                base::write(commitbook_dir, &doc_plan.path, &local_content)?;
+                deferred_bases.push(DeferredBaseWrite {
+                    path: doc_plan.path.clone(),
+                    content: local_content,
+                });
             } else {
                 // Both sides changed — full three-way merge required.
                 let base_tree = parse_document(&base_content);
@@ -127,7 +161,10 @@ async fn pull_documents(
                     std::fs::create_dir_all(parent)?;
                 }
                 std::fs::write(&file_path, &merged_content)?;
-                base::write(commitbook_dir, &doc_plan.path, &merged_content)?;
+                deferred_bases.push(DeferredBaseWrite {
+                    path: doc_plan.path.clone(),
+                    content: merged_content,
+                });
                 result.pulled += 1;
 
                 if !merge_result.conflicts.is_empty() {
@@ -157,7 +194,14 @@ async fn pull_documents(
             }
 
             // Save as base version for future merges.
-            base::write(commitbook_dir, &doc_plan.path, &remote_doc.content)?;
+            if doc_plan.requires_upload {
+                deferred_bases.push(DeferredBaseWrite {
+                    path: doc_plan.path.clone(),
+                    content: remote_doc.content.clone(),
+                });
+            } else {
+                base::write(commitbook_dir, &doc_plan.path, &remote_doc.content)?;
+            }
         }
     }
 
@@ -174,7 +218,7 @@ async fn pull_documents(
         }
     }
 
-    Ok(())
+    Ok(deferred_bases)
 }
 
 async fn push_documents(
@@ -183,7 +227,7 @@ async fn push_documents(
     branch: &str,
     transport: &dyn RemoteTransport,
     result: &mut SyncResult,
-) -> Result<()> {
+) -> Result<bool> {
     // Collect files to push.
     let mut to_push: Vec<WriteFileInput> = Vec::new();
 
@@ -209,20 +253,20 @@ async fn push_documents(
     }
 
     if to_push.is_empty() {
-        return Ok(());
+        return Ok(true);
     }
 
     // Push all files atomically.
     match transport.write_files(branch, to_push).await {
         Ok(write_results) => {
             result.pushed += write_results.len() as u32;
+            Ok(true)
         }
         Err(e) => {
             result.errors.push(format!("Push failed: {e}"));
+            Ok(false)
         }
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

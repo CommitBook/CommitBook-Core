@@ -12,6 +12,7 @@ pub struct MockTransport {
     files: HashMap<String, String>,
     head: String,
     written: Mutex<Vec<WriteFileInput>>,
+    fail_writes: bool,
 }
 
 impl MockTransport {
@@ -20,6 +21,7 @@ impl MockTransport {
             files: HashMap::new(),
             head: "mock_head_sha_000".to_string(),
             written: Mutex::new(Vec::new()),
+            fail_writes: false,
         }
     }
 
@@ -30,6 +32,11 @@ impl MockTransport {
 
     pub fn with_head(mut self, head: &str) -> Self {
         self.head = head.to_string();
+        self
+    }
+
+    pub fn with_fail_writes(mut self) -> Self {
+        self.fail_writes = true;
         self
     }
 
@@ -69,6 +76,9 @@ impl RemoteTransport for MockTransport {
         _branch: &str,
         inputs: Vec<WriteFileInput>,
     ) -> Result<Vec<WriteFileResult>> {
+        if self.fail_writes {
+            bail!("Simulated push failure");
+        }
         let mut written = self.written.lock().unwrap();
         let results = inputs
             .iter()
