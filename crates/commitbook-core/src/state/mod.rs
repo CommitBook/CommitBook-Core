@@ -8,9 +8,12 @@ use std::path::{Path, PathBuf};
 
 /// Walk up directories to find `.CommitBook/` folder.
 pub fn find_commitbook_dir() -> Result<PathBuf> {
-    let mut dir =
-        std::env::current_dir().context("Cannot determine current directory")?;
+    let start = std::env::current_dir().context("Cannot determine current directory")?;
+    find_commitbook_dir_from(&start)
+}
 
+fn find_commitbook_dir_from(start: &Path) -> Result<PathBuf> {
+    let mut dir = start.to_path_buf();
     loop {
         let cb_dir = dir.join(".CommitBook");
         if cb_dir.is_dir() && dir.join(".git").exists() {

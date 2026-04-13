@@ -58,7 +58,7 @@ pub fn parse_document(content: &str) -> SectionTree {
     // Extract preamble: content before the first heading.
     let first_heading_source_start =
         find_heading_start(body, 0, &headings_info[0].1, headings_info[0].0);
-    let preamble = body[..first_heading_source_start].trim_end().to_string();
+    let preamble = body[..first_heading_source_start].trim().to_string();
 
     // Extract section content: text between consecutive headings.
     let mut raw_sections: Vec<(u8, String, String)> = Vec::new();

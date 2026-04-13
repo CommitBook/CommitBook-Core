@@ -1,5 +1,6 @@
 use super::*;
 use crate::domain::section::{Frontmatter, FrontmatterFormat, Section, SectionTree};
+use crate::markdown::parser::parse_document;
 use std::collections::BTreeMap;
 
 #[test]
@@ -137,4 +138,52 @@ fn test_reassemble_toml_frontmatter() {
     assert!(output.starts_with("+++\n"));
     assert!(output.contains("title = \"TOML Doc\""));
     assert!(output.contains("+++"));
+}
+
+#[test]
+fn test_roundtrip_simple() {
+    let input = "# Hello\n\nWorld.\n\n## Sub\n\nSub content.\n";
+    let tree = parse_document(input);
+    let output = reassemble(&tree);
+    assert_eq!(output, input);
+}
+
+#[test]
+fn test_roundtrip_with_preamble() {
+    let input = "Some preamble text.\n\n# Heading\n\nBody.\n";
+    let tree = parse_document(input);
+    let output = reassemble(&tree);
+    assert_eq!(output, input);
+}
+
+#[test]
+fn test_roundtrip_with_frontmatter() {
+    let input = "---\ntitle: My Notes\n---\n\n# Notes\n\nSome notes.\n";
+    let tree = parse_document(input);
+    let output = reassemble(&tree);
+    assert_eq!(output, input);
+}
+
+#[test]
+fn test_roundtrip_multiple_h1s() {
+    let input = "# Product\n\nProduct notes.\n\n# Journal\n\nJournal entry.\n";
+    let tree = parse_document(input);
+    let output = reassemble(&tree);
+    assert_eq!(output, input);
+}
+
+#[test]
+fn test_roundtrip_empty_section() {
+    let input = "# Product\n\n## Notes\n\nMy notes.\n";
+    let tree = parse_document(input);
+    let output = reassemble(&tree);
+    assert_eq!(output, input);
+}
+
+#[test]
+fn test_roundtrip_frontmatter_preamble_and_sections() {
+    let input = "---\ntitle: Full\n---\n\nPreamble text.\n\n# Heading\n\nContent.\n";
+    let tree = parse_document(input);
+    let output = reassemble(&tree);
+    assert_eq!(output, input);
 }

@@ -32,10 +32,12 @@ pub fn reassemble(tree: &SectionTree) -> String {
 
     // Sections
     for section in &tree.sections {
-        if !output.is_empty() && !output.ends_with('\n') {
+        if !output.is_empty() {
+            if !output.ends_with('\n') {
+                output.push('\n');
+            }
             output.push('\n');
         }
-        output.push('\n');
 
         if let Some(raw) = &section.raw_source {
             output.push_str(raw);

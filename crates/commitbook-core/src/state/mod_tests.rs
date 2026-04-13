@@ -1,5 +1,48 @@
 use super::*;
 use std::path::PathBuf;
+use tempfile::tempdir;
+
+#[test]
+fn test_find_commitbook_dir_finds_in_git_repo() {
+    let tmp = tempdir().unwrap();
+    let repo = tmp.path();
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    std::fs::create_dir_all(repo.join(".CommitBook")).unwrap();
+
+    let found = find_commitbook_dir_from(repo).unwrap();
+    assert_eq!(found, repo.join(".CommitBook"));
+}
+
+#[test]
+fn test_find_commitbook_dir_finds_from_subdir() {
+    let tmp = tempdir().unwrap();
+    let repo = tmp.path();
+    let subdir = repo.join("notes").join("sub");
+    std::fs::create_dir_all(&subdir).unwrap();
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    std::fs::create_dir_all(repo.join(".CommitBook")).unwrap();
+
+    let found = find_commitbook_dir_from(&subdir).unwrap();
+    assert_eq!(found, repo.join(".CommitBook"));
+}
+
+#[test]
+fn test_find_commitbook_dir_skips_commitbook_without_git() {
+    let tmp = tempdir().unwrap();
+    let repo = tmp.path();
+    std::fs::create_dir_all(repo.join(".CommitBook")).unwrap();
+    // No .git — must not return this directory
+
+    let err = find_commitbook_dir_from(repo).unwrap_err().to_string();
+    assert!(err.contains("Not a CommitBook repository"));
+}
+
+#[test]
+fn test_find_commitbook_dir_errors_when_not_found() {
+    let tmp = tempdir().unwrap();
+    let err = find_commitbook_dir_from(tmp.path()).unwrap_err().to_string();
+    assert!(err.contains("Not a CommitBook repository"));
+}
 
 #[test]
 fn test_repo_root_from_commitbook_dir() {
