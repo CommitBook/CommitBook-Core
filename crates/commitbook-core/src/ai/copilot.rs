@@ -26,7 +26,7 @@ impl CommitMessageProvider for CopilotProvider {
             return false;
         }
         Command::new("gh")
-            .args(["copilot", "--version"])
+            .args(["copilot", "-v"])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -41,7 +41,7 @@ impl CommitMessageProvider for CopilotProvider {
         );
 
         let child = Command::new("gh")
-            .args(["copilot", "suggest", "-t", "git:commit", &prompt])
+            .args(["copilot", "-p", &prompt, "--no-color"])
             .current_dir(repo_path)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -76,8 +76,19 @@ pub fn is_authenticated() -> bool {
         .unwrap_or(false)
 }
 
-/// Parse the output from gh copilot suggest to extract the commit message.
+/// Parse the output from gh copilot to extract the commit message.
+///
+/// The new `gh copilot -p` output may contain:
+/// - Tool invocation lines (✓, $, ↪)
+/// - Usage statistics (Total usage est:, Total duration:, Usage by model:)
+/// - The commit message as plain text or inside a fenced code block
 fn extract_message(output: &str) -> String {
+    // First, try to extract from a fenced code block (```...```)
+    if let Some(msg) = extract_from_code_block(output) {
+        return clean_message(&msg);
+    }
+
+    // Otherwise, filter out noise and find the commit message
     let lines: Vec<&str> = output
         .lines()
         .map(|l| l.trim())
@@ -87,6 +98,10 @@ fn extract_message(output: &str) -> String {
     for line in lines.iter().rev() {
         let cleaned = line.trim_start_matches(['>', '#', '-', '*', ' ']);
         if cleaned.is_empty() {
+            continue;
+        }
+        // Skip usage statistics from new copilot CLI
+        if is_copilot_noise(cleaned) {
             continue;
         }
         // Skip meta-lines from copilot output
@@ -107,10 +122,66 @@ fn extract_message(output: &str) -> String {
     }
 
     if let Some(last) = lines.last() {
-        return clean_message(last);
+        if !is_copilot_noise(last) {
+            return clean_message(last);
+        }
     }
 
     String::new()
+}
+
+/// Extract commit message from a fenced code block in the output.
+fn extract_from_code_block(output: &str) -> Option<String> {
+    let mut in_block = false;
+    let mut content = Vec::new();
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            if in_block {
+                // End of block — return what we collected
+                let msg = content.join("\n").trim().to_string();
+                if !msg.is_empty() {
+                    return Some(msg);
+                }
+                return None;
+            }
+            in_block = true;
+            continue;
+        }
+        if in_block {
+            content.push(trimmed);
+        }
+    }
+    None
+}
+
+/// Returns true if the line is copilot CLI noise (tool output, stats, etc.)
+fn is_copilot_noise(line: &str) -> bool {
+    // Tool invocation lines
+    if line.starts_with("✓") || line.starts_with("✗") {
+        return true;
+    }
+    if line.starts_with("$ ") || line.starts_with("↪") {
+        return true;
+    }
+    // Usage statistics
+    if line.starts_with("Total usage")
+        || line.starts_with("Total duration")
+        || line.starts_with("Total code changes")
+        || line.starts_with("Usage by model")
+    {
+        return true;
+    }
+    // Model usage lines (e.g. "    claude-sonnet-4.5    26.3k input, ...")
+    if line.contains("input,") && line.contains("output,") && line.contains("cache") {
+        return true;
+    }
+    // Label lines like "**Commit message:**"
+    if line.contains("Commit message") && line.contains("**") {
+        return true;
+    }
+    false
 }
 
 /// Get the staged or working-directory diff summary for prompt context.

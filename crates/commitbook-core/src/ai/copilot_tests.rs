@@ -46,3 +46,34 @@ fn test_extract_message_long_truncated() {
     let result = extract_message(&long_line);
     assert!(result.len() <= 72);
 }
+
+#[test]
+fn test_extract_message_new_cli_plain() {
+    let output = "Add pagination to user list endpoint\n\n\nTotal usage est:       1 Premium request\nTotal duration (API):  2.9s\nTotal duration (wall): 6.3s\nTotal code changes:    0 lines added, 0 lines removed\nUsage by model:\n    claude-sonnet-4.5    11.4k input, 8 output, 0 cache read, 0 cache write (Est. 1 Premium request)";
+    assert_eq!(extract_message(output), "Add pagination to user list endpoint");
+}
+
+#[test]
+fn test_extract_message_new_cli_code_block() {
+    let output = "Based on the diff, this change defers base file writes.\n\n**Commit message:**\n\n```\nDefer base writes until push succeeds to prevent stale state\n```\n\n\nTotal usage est:       1 Premium request";
+    assert_eq!(
+        extract_message(output),
+        "Defer base writes until push succeeds to prevent stale state"
+    );
+}
+
+#[test]
+fn test_extract_message_new_cli_with_tool_output() {
+    let output = "I need to see the actual changes.\n\n✓ Check git status and diff\n   $ git --no-pager status\n   ↪ 5 lines...\n\nFix race condition in sync pipeline\n\n\nTotal usage est:       1 Premium request";
+    assert_eq!(
+        extract_message(output),
+        "Fix race condition in sync pipeline"
+    );
+}
+
+#[test]
+fn test_extract_message_new_cli_only_stats() {
+    // Edge case: copilot returns only stats with no message
+    let output = "Total usage est:       1 Premium request\nTotal duration (API):  1.0s";
+    assert_eq!(extract_message(output), "");
+}
