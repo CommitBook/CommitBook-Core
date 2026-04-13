@@ -1,5 +1,6 @@
 use super::*;
 use crate::domain::sync_plan::{DocumentState, PlannedDocumentSync, SyncMode, SyncPlan};
+use crate::logger::FileLogger;
 use crate::transport::mock::MockTransport;
 
 fn setup_repo() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
@@ -8,6 +9,10 @@ fn setup_repo() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let cb_dir = repo_root.join(".CommitBook");
     std::fs::create_dir_all(cb_dir.join("local").join("base")).unwrap();
     (tmp, repo_root, cb_dir)
+}
+
+fn test_logger(repo_root: &std::path::Path) -> FileLogger {
+    FileLogger::new(repo_root, 30).unwrap()
 }
 
 #[tokio::test]
@@ -19,8 +24,9 @@ async fn test_execute_noop_returns_zeros() {
     };
     let transport = MockTransport::new();
 
+    let logger = test_logger(&repo_root);
     let result =
-        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport)
+        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
             .await
             .unwrap();
 
@@ -51,8 +57,9 @@ async fn test_execute_pull_writes_files() {
     let transport = MockTransport::new()
         .with_file("notes.md", "# Hello from remote");
 
+    let logger = test_logger(&repo_root);
     let result =
-        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport)
+        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
             .await
             .unwrap();
 
@@ -90,8 +97,9 @@ async fn test_execute_push_reads_working_tree() {
 
     let transport = MockTransport::new();
 
+    let logger = test_logger(&repo_root);
     let result =
-        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport)
+        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
             .await
             .unwrap();
 
@@ -136,8 +144,9 @@ async fn test_execute_pull_merge_detects_conflict() {
     let transport = MockTransport::new()
         .with_file("shared.md", "# Title\n\n## Section\n\nRemote edit\n");
 
+    let logger = test_logger(&repo_root);
     let result =
-        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport)
+        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
             .await
             .unwrap();
 
@@ -174,7 +183,8 @@ async fn test_pull_then_push_failure_preserves_base() {
         .with_file("shared.md", "# Remote edit\n")
         .with_fail_writes();
 
-    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport)
+    let logger = test_logger(&repo_root);
+    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
         .await
         .unwrap();
 
@@ -218,7 +228,8 @@ async fn test_pull_then_push_failure_does_not_update_checkpoint() {
         .with_head("new_sha")
         .with_fail_writes();
 
-    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport)
+    let logger = test_logger(&repo_root);
+    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
         .await
         .unwrap();
 
@@ -253,7 +264,8 @@ async fn test_pull_then_push_success_updates_base() {
     let transport = MockTransport::new()
         .with_file("doc.md", "# Remote\n");
 
-    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport)
+    let logger = test_logger(&repo_root);
+    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
         .await
         .unwrap();
 
@@ -288,7 +300,8 @@ async fn test_pull_only_updates_base_immediately() {
     let transport = MockTransport::new()
         .with_file("remote.md", "# From remote\n");
 
-    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport)
+    let logger = test_logger(&repo_root);
+    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
         .await
         .unwrap();
 

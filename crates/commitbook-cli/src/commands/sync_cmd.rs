@@ -4,6 +4,7 @@ use std::path::Path;
 
 use commitbook_core::config::LocalConfig;
 use commitbook_core::git::GitRepo;
+use commitbook_core::logger::FileLogger;
 use commitbook_core::sync::scheduler::sync_repository;
 use commitbook_core::transport::local_repo::LocalRepoTransport;
 use commitbook_core::transport::ssh_git::SshGitTransport;
@@ -11,20 +12,25 @@ use commitbook_core::transport::ssh_git::SshGitTransport;
 /// Run a manual sync: commit locally + pull -> merge -> push.
 pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     let config = LocalConfig::load(repo_root)?;
+    let logger = FileLogger::new(repo_root, config.logging.max_log_days)?;
     let repo = GitRepo::open(repo_root)?;
 
+    let _ = logger.info("Sync started");
+
     // Step 1: Commit locally (always, even offline).
-    let committed = commit_local(repo_root, &repo, &config).await?;
+    let committed = commit_local(repo_root, &repo, &config, &logger).await?;
     if committed {
         println!("  {} Local changes committed.", "OK".green().bold());
     }
 
     // Step 2: Sync with remote (only if remote reachable).
     if !repo.has_remote() {
+        let _ = logger.info("No remote configured, local commit only");
         println!(
             "{}",
             "  No remote configured. Commits are local only.".yellow()
         );
+        let _ = logger.cleanup_old_logs();
         return Ok(());
     }
 
@@ -37,6 +43,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
         &config.git.branch,
         transport.as_ref(),
         &tracked_patterns,
+        &logger,
     )
     .await
     {
@@ -56,6 +63,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
                 );
             }
             if result.conflicts > 0 {
+                let _ = logger.warn(&format!("{} conflict(s) detected", result.conflicts));
                 println!(
                     "  {} {} conflict(s). Run `commitbook conflicts` to view.",
                     "WARN".yellow().bold(),
@@ -63,6 +71,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
                 );
             }
             for err in &result.errors {
+                let _ = logger.error(err);
                 println!("  {} {}", "ERROR".red().bold(), err);
             }
             if result.pulled == 0
@@ -70,10 +79,12 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
                 && result.conflicts == 0
                 && !committed
             {
+                let _ = logger.info("Already up to date");
                 println!("{}", "Already up to date.".dimmed());
             }
         }
         Err(e) => {
+            let _ = logger.error(&format!("Sync failed: {e}"));
             println!(
                 "  {} Sync failed: {}",
                 "ERROR".red().bold(),
@@ -86,6 +97,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
         }
     }
 
+    let _ = logger.cleanup_old_logs();
     Ok(())
 }
 
@@ -110,13 +122,17 @@ pub async fn run_scheduled(cb_dir: &Path, repo_root: &Path) -> Result<()> {
         return Ok(());
     }
 
+    let logger = FileLogger::new(repo_root, config.logging.max_log_days)?;
+    let _ = logger.info("Scheduled sync cycle started");
     log::info!("Starting scheduled sync cycle");
 
     // Commit + sync (same as manual, but with logging).
     if let Err(e) = run_sync(cb_dir, repo_root).await {
+        let _ = logger.error(&format!("Scheduled sync failed: {e}"));
         log::error!("Scheduled sync failed: {e}");
     }
 
+    let _ = logger.info("Scheduled sync cycle complete");
     log::info!("Scheduled sync cycle complete");
 
     // Cleanup lock.
@@ -131,6 +147,7 @@ async fn commit_local(
     repo_root: &Path,
     repo: &GitRepo,
     config: &LocalConfig,
+    logger: &FileLogger,
 ) -> Result<bool> {
     let summary = repo.changes_summary()?;
     if summary.is_empty() {
@@ -150,11 +167,13 @@ async fn commit_local(
 
     // Create commit.
     repo.commit(&message)?;
+    let _ = logger.info(&format!("Committed: {}", message.lines().next().unwrap_or(&message)));
 
     // Auto-push if configured and remote exists.
     if config.git.auto_push && repo.has_remote() {
         let remote = repo.default_remote_name().unwrap_or_else(|_| "origin".to_string());
         if let Err(e) = repo.push(&remote, &config.git.branch) {
+            let _ = logger.warn(&format!("Auto-push failed: {e}"));
             log::warn!("Auto-push failed: {e}");
         }
     }

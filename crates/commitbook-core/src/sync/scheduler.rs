@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::domain::transport::RemoteTransport;
+use crate::logger::FileLogger;
 
 use super::pipeline;
 use super::planner;
@@ -13,6 +14,7 @@ pub async fn sync_repository(
     branch: &str,
     transport: &dyn RemoteTransport,
     tracked_patterns: &[String],
+    logger: &FileLogger,
 ) -> Result<pipeline::SyncResult> {
     let plan = planner::create_sync_plan(
         commitbook_dir,
@@ -24,7 +26,7 @@ pub async fn sync_repository(
     .await?;
 
     let result =
-        pipeline::execute_sync(&plan, commitbook_dir, repo_root, branch, transport)
+        pipeline::execute_sync(&plan, commitbook_dir, repo_root, branch, transport, logger)
             .await?;
 
     Ok(result)

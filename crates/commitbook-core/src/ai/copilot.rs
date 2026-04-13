@@ -7,7 +7,7 @@ use std::time::Duration;
 use super::{clean_message, truncate, CommitMessageProvider};
 use crate::git::ChangesSummary;
 
-const COPILOT_TIMEOUT: Duration = Duration::from_secs(15);
+const COPILOT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct CopilotProvider;
 

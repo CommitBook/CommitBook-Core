@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::domain::sync_plan::{SyncMode, SyncPlan};
 use crate::domain::transport::{RemoteTransport, WriteFileInput};
+use crate::logger::FileLogger;
 use crate::markdown::parser::parse_document;
 use crate::markdown::reassemble::reassemble;
 use crate::merge::engine::merge_document;
@@ -30,6 +31,7 @@ pub async fn execute_sync(
     repo_root: &Path,
     branch: &str,
     transport: &dyn RemoteTransport,
+    logger: &FileLogger,
 ) -> Result<SyncResult> {
     let mut result = SyncResult {
         pulled: 0,
@@ -42,7 +44,7 @@ pub async fn execute_sync(
         SyncMode::Noop => return Ok(result),
         SyncMode::PullOnly => {
             let deferred = pull_documents(
-                plan, commitbook_dir, repo_root, branch, transport, &mut result,
+                plan, commitbook_dir, repo_root, branch, transport, &mut result, logger,
             )
             .await?;
             // No push phase — flush all deferred bases immediately.
@@ -51,15 +53,15 @@ pub async fn execute_sync(
             }
         }
         SyncMode::PushOnly => {
-            push_documents(plan, repo_root, branch, transport, &mut result).await?;
+            push_documents(plan, repo_root, branch, transport, &mut result, logger).await?;
         }
         SyncMode::PullThenPush => {
             let deferred = pull_documents(
-                plan, commitbook_dir, repo_root, branch, transport, &mut result,
+                plan, commitbook_dir, repo_root, branch, transport, &mut result, logger,
             )
             .await?;
             let push_ok =
-                push_documents(plan, repo_root, branch, transport, &mut result).await?;
+                push_documents(plan, repo_root, branch, transport, &mut result, logger).await?;
             if push_ok {
                 for d in &deferred {
                     base::write(commitbook_dir, &d.path, &d.content)?;
@@ -89,6 +91,7 @@ async fn pull_documents(
     branch: &str,
     transport: &dyn RemoteTransport,
     result: &mut SyncResult,
+    logger: &FileLogger,
 ) -> Result<Vec<DeferredBaseWrite>> {
     let mut deferred_bases: Vec<DeferredBaseWrite> = Vec::new();
 
@@ -101,9 +104,9 @@ async fn pull_documents(
         let remote_doc = match transport.read_file(branch, &doc_plan.path).await {
             Ok(doc) => doc,
             Err(e) => {
-                result
-                    .errors
-                    .push(format!("Failed to download {}: {e}", doc_plan.path));
+                let msg = format!("Failed to download {}: {e}", doc_plan.path);
+                let _ = logger.error(&msg);
+                result.errors.push(msg);
                 continue;
             }
         };
@@ -140,6 +143,7 @@ async fn pull_documents(
                     path: doc_plan.path.clone(),
                     content: remote_doc.content.clone(),
                 });
+                let _ = logger.info(&format!("Pulled {}", doc_plan.path));
                 result.pulled += 1;
             } else if remote_doc.content == base_content {
                 // Only local changed — keep local as-is, just update base.
@@ -169,11 +173,18 @@ async fn pull_documents(
 
                 if !merge_result.conflicts.is_empty() {
                     result.conflicts += merge_result.conflicts.len() as u32;
+                    let _ = logger.warn(&format!(
+                        "{} conflict(s) in {}",
+                        merge_result.conflicts.len(),
+                        doc_plan.path
+                    ));
                     log::warn!(
                         "{} conflict(s) in {}",
                         merge_result.conflicts.len(),
                         doc_plan.path
                     );
+                } else {
+                    let _ = logger.info(&format!("Merged {}", doc_plan.path));
                 }
             }
         } else {
@@ -190,6 +201,7 @@ async fn pull_documents(
                     std::fs::create_dir_all(parent)?;
                 }
                 std::fs::write(&file_path, &remote_doc.content)?;
+                let _ = logger.info(&format!("Pulled {}", doc_plan.path));
                 result.pulled += 1;
             }
 
@@ -227,6 +239,7 @@ async fn push_documents(
     branch: &str,
     transport: &dyn RemoteTransport,
     result: &mut SyncResult,
+    logger: &FileLogger,
 ) -> Result<bool> {
     // Collect files to push.
     let mut to_push: Vec<WriteFileInput> = Vec::new();
@@ -260,10 +273,13 @@ async fn push_documents(
     match transport.write_files(branch, to_push).await {
         Ok(write_results) => {
             result.pushed += write_results.len() as u32;
+            let _ = logger.info(&format!("Pushed {} file(s)", write_results.len()));
             Ok(true)
         }
         Err(e) => {
-            result.errors.push(format!("Push failed: {e}"));
+            let msg = format!("Push failed: {e}");
+            let _ = logger.error(&msg);
+            result.errors.push(msg);
             Ok(false)
         }
     }
