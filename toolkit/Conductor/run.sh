@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CommitBook - Conductor Run Script
-# Builds the CLI if needed and demonstrates available commands.
+# Builds the CLI and demonstrates available commands.
 
 set -euo pipefail
 
@@ -8,16 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_DIR"
 
-BINARY="$PROJECT_DIR/target/debug/commitbook"
-
-# Pull latest code and rebuild
-echo "Pulling latest changes..."
-git pull
-echo ""
-
+# Always rebuild to pick up local changes
 echo "Building..."
 cargo build -p commitbook-cli
 echo ""
+
+BINARY="$PROJECT_DIR/target/debug/commitbook"
 
 echo "========================================"
 echo "  CommitBook CLI"

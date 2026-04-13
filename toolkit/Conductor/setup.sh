@@ -52,12 +52,16 @@ echo ""
 
 # --- Build the CLI ---
 echo "--- Building CommitBook CLI ---"
+BINARY="$PROJECT_DIR/target/debug/commitbook"
+if [ -f "$BINARY" ]; then
+    echo "Removing old binary..."
+    rm "$BINARY"
+fi
 echo "Running: cargo build -p commitbook-cli"
 echo ""
 cargo build -p commitbook-cli
 echo ""
 
-BINARY="$PROJECT_DIR/target/debug/commitbook"
 if [ ! -x "$BINARY" ]; then
     echo -e "${RED}[ERROR]${NC} Build succeeded but binary not found at: $BINARY"
     exit 1
