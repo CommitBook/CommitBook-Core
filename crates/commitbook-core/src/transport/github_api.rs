@@ -359,7 +359,7 @@ pub async fn create_tree_and_commit(
             "{GITHUB_API_BASE}/repos/{owner}/{repo}/git/trees"
         ))
         .json(&CreateTreeRequest {
-            base_tree: base_tree_sha,
+            base_tree: base_tree_sha.clone(),
             tree: tree_entries,
         })
         .send()
@@ -367,6 +367,12 @@ pub async fn create_tree_and_commit(
         .error_for_status()?
         .json()
         .await?;
+
+    // 4b. Skip commit if tree is unchanged.
+    if new_tree.sha == base_tree_sha {
+        log::info!("Tree unchanged; skipping empty commit");
+        return Ok(vec![]);
+    }
 
     // 5. Create commit.
     let message = if inputs.len() == 1 {

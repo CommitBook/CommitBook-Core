@@ -112,11 +112,18 @@ impl RemoteTransport for LocalRepoTransport {
         };
 
         let tree_oid = index.write_tree()?;
+        let parent = repo.head()?.peel_to_commit()?;
+
+        // Skip commit if tree is unchanged from parent.
+        if tree_oid == parent.tree_id() {
+            log::info!("Tree unchanged; skipping empty commit");
+            return Ok(vec![]);
+        }
+
         let tree = repo.find_tree(tree_oid)?;
         let sig = repo
             .signature()
             .unwrap_or_else(|_| Signature::now("CommitBook", "commitbook@local").unwrap());
-        let parent = repo.head()?.peel_to_commit()?;
 
         let commit_oid = repo.commit(
             Some("HEAD"),

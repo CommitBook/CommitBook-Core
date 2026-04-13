@@ -241,3 +241,28 @@ async fn test_head_changes_after_write() {
     let head_after = transport.get_head("main").await.unwrap();
     assert_ne!(head_before, head_after);
 }
+
+#[tokio::test]
+async fn test_write_files_unchanged_skips_commit() {
+    let (_tmp, transport) = setup_test_repo();
+    let head_before = transport.get_head("main").await.unwrap();
+
+    // Write the exact same content that already exists.
+    let results = transport
+        .write_files(
+            "main",
+            vec![WriteFileInput {
+                path: "notes.md".to_string(),
+                content: "# Notes\n\nHello world.\n".to_string(),
+                message: "No-op update".to_string(),
+                base_revision: None,
+            }],
+        )
+        .await
+        .unwrap();
+
+    assert!(results.is_empty(), "Expected empty results for unchanged tree");
+
+    let head_after = transport.get_head("main").await.unwrap();
+    assert_eq!(head_before, head_after, "HEAD should not change for no-op write");
+}

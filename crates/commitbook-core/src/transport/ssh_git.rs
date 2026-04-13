@@ -164,8 +164,10 @@ impl RemoteTransport for SshGitTransport {
         );
         let results = local.write_files(_branch, inputs).await?;
 
-        // Push to remote via system git (SSH agent).
-        self.push()?;
+        // Only push if a commit was actually created.
+        if !results.is_empty() {
+            self.push()?;
+        }
 
         Ok(results)
     }

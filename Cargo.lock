@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "commitbook-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "commitbook-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -461,7 +461,7 @@ dependencies = [
 
 [[package]]
 name = "commitbook-tui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "commitbook-web"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "askama",
