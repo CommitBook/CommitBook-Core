@@ -13,7 +13,7 @@ pub fn find_commitbook_dir() -> Result<PathBuf> {
 
     loop {
         let cb_dir = dir.join(".CommitBook");
-        if cb_dir.is_dir() {
+        if cb_dir.is_dir() && dir.join(".git").exists() {
             return Ok(cb_dir);
         }
         if !dir.pop() {

@@ -57,6 +57,14 @@ fn canonicalize_v1_config_version(config_version: &str) -> Option<String> {
     }
 }
 
+fn default_schedule() -> String {
+    "0 * * * *".to_string()
+}
+
+fn default_created_at() -> String {
+    "unknown".to_string()
+}
+
 fn normalize_legacy_config_table(table: &mut toml::map::Map<String, toml::Value>) -> bool {
     let mut changed = false;
 
@@ -78,6 +86,22 @@ fn normalize_legacy_config_table(table: &mut toml::map::Map<String, toml::Value>
 
     if !table.contains_key("enabled") {
         table.insert("enabled".to_string(), toml::Value::Boolean(true));
+        changed = true;
+    }
+
+    if !table.contains_key("schedule") {
+        table.insert(
+            "schedule".to_string(),
+            toml::Value::String(default_schedule()),
+        );
+        changed = true;
+    }
+
+    if !table.contains_key("created_at") {
+        table.insert(
+            "created_at".to_string(),
+            toml::Value::String(default_created_at()),
+        );
         changed = true;
     }
 

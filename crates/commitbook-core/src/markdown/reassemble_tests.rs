@@ -14,6 +14,7 @@ fn test_reassemble_simple() {
             content: "World.".to_string(),
             content_hash: Section::compute_hash("World."),
             ordinal: None,
+            raw_source: None,
         }],
     };
 
@@ -41,6 +42,7 @@ fn test_reassemble_with_frontmatter() {
             content: "Content here.".to_string(),
             content_hash: Section::compute_hash("Content here."),
             ordinal: None,
+            raw_source: None,
         }],
     };
 
@@ -62,6 +64,7 @@ fn test_reassemble_with_preamble() {
             content: "Body.".to_string(),
             content_hash: Section::compute_hash("Body."),
             ordinal: None,
+            raw_source: None,
         }],
     };
 
@@ -83,6 +86,7 @@ fn test_reassemble_multiple_levels() {
                 content: "".to_string(),
                 content_hash: Section::compute_hash(""),
                 ordinal: None,
+                raw_source: None,
             },
             Section {
                 path: "/Product/Notes".to_string(),
@@ -91,6 +95,7 @@ fn test_reassemble_multiple_levels() {
                 content: "My notes.".to_string(),
                 content_hash: Section::compute_hash("My notes."),
                 ordinal: None,
+                raw_source: None,
             },
         ],
     };

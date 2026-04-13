@@ -37,18 +37,23 @@ pub fn reassemble(tree: &SectionTree) -> String {
         }
         output.push('\n');
 
-        // Emit heading
-        let hashes = "#".repeat(section.level as usize);
-        output.push_str(&hashes);
-        output.push(' ');
-        output.push_str(&section.heading_text);
-        output.push('\n');
+        if let Some(raw) = &section.raw_source {
+            output.push_str(raw);
+            output.push('\n');
+        } else {
+            // Normalized rendering for sections without raw source
+            // (e.g. conflict-merged sections or programmatically created ones).
+            let hashes = "#".repeat(section.level as usize);
+            output.push_str(&hashes);
+            output.push(' ');
+            output.push_str(&section.heading_text);
+            output.push('\n');
 
-        // Emit content
-        if !section.content.is_empty() {
-            output.push('\n');
-            output.push_str(&section.content);
-            output.push('\n');
+            if !section.content.is_empty() {
+                output.push('\n');
+                output.push_str(&section.content);
+                output.push('\n');
+            }
         }
     }
 

@@ -56,6 +56,7 @@ pub fn build_sections(raw_sections: Vec<(u8, String, String)>) -> Vec<Section> {
             content,
             content_hash,
             ordinal,
+            raw_source: None,
         });
 
         stack.push((level, heading_text));

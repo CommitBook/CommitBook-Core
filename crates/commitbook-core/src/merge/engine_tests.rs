@@ -10,6 +10,7 @@ fn make_section(path: &str, level: u8, heading: &str, content: &str) -> Section 
         content: content.to_string(),
         content_hash: Section::compute_hash(content),
         ordinal: None,
+        raw_source: None,
     }
 }
 

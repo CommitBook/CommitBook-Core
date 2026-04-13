@@ -62,7 +62,10 @@ pub fn parse_document(content: &str) -> SectionTree {
 
     // Extract section content: text between consecutive headings.
     let mut raw_sections: Vec<(u8, String, String)> = Vec::new();
+    let mut raw_sources: Vec<String> = Vec::new();
+    let mut heading_source_start = first_heading_source_start;
     for (i, (level, heading_text, heading_end_offset)) in headings_info.iter().enumerate() {
+        let current_start = heading_source_start;
         let content_start = *heading_end_offset;
         let content_end = if i + 1 < headings_info.len() {
             find_heading_start(
@@ -77,9 +80,14 @@ pub fn parse_document(content: &str) -> SectionTree {
 
         let section_content = body[content_start..content_end].trim().to_string();
         raw_sections.push((*level, heading_text.clone(), section_content));
+        raw_sources.push(body[current_start..content_end].trim_end().to_string());
+        heading_source_start = content_end;
     }
 
-    let sections = build_sections(raw_sections);
+    let mut sections = build_sections(raw_sections);
+    for (section, raw_source) in sections.iter_mut().zip(raw_sources.into_iter()) {
+        section.raw_source = Some(raw_source);
+    }
 
     SectionTree {
         frontmatter,

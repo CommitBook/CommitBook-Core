@@ -203,7 +203,7 @@ max_log_files = 14
 }
 
 #[test]
-fn test_load_missing_schedule_still_errors() {
+fn test_load_missing_schedule_uses_default() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path();
     let dir = repo.join(".CommitBook");
@@ -215,9 +215,9 @@ created_at = "2026-04-07T00:00:00Z"
 "#;
     fs::write(dir.join("config.toml"), toml_content).unwrap();
 
-    let err = format!("{:#}", LocalConfig::load(repo).unwrap_err());
-    assert!(err.contains("Failed to parse local config"));
-    assert!(err.contains("missing field `schedule`"));
+    let config = LocalConfig::load(repo).unwrap();
+    assert_eq!(config.schedule, "0 * * * *");
+    assert!(config.enabled);
 }
 
 #[test]

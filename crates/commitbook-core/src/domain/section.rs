@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// A single section in a parsed markdown document.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
     /// Hierarchical path, e.g. "/Product/Notes" or "/Notes[2]" for duplicates.
     pub path: String,
@@ -16,7 +16,24 @@ pub struct Section {
     pub content_hash: String,
     /// Disambiguation ordinal for duplicate sibling headings (None if unique).
     pub ordinal: Option<u32>,
+    /// Original verbatim source text (heading line + content block).
+    /// Set by the parser; None for programmatically-created sections.
+    #[serde(skip)]
+    pub raw_source: Option<String>,
 }
+
+impl PartialEq for Section {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+            && self.heading_text == other.heading_text
+            && self.level == other.level
+            && self.content == other.content
+            && self.content_hash == other.content_hash
+            && self.ordinal == other.ordinal
+    }
+}
+
+impl Eq for Section {}
 
 impl Section {
     pub fn compute_hash(content: &str) -> String {

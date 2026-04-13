@@ -93,7 +93,7 @@ impl GitRepo {
 
     /// Check if a directory is a git repository.
     pub fn is_repo(path: &Path) -> bool {
-        Repository::open(path).is_ok()
+        Repository::discover(path).is_ok()
     }
 
     /// Get a summary of all uncommitted changes.

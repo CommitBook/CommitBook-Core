@@ -110,6 +110,7 @@ pub fn merge_document(
                         let mut conflicted = make_merged_section(local_s, path);
                         conflicted.content = appended.clone();
                         conflicted.content_hash = Section::compute_hash(&appended);
+                        conflicted.raw_source = None;
                         merged_sections.push(conflicted);
 
                         conflicts.push(SectionConflict {
@@ -155,6 +156,7 @@ pub fn merge_document(
                     let mut conflicted = make_merged_section(local_s, path);
                     conflicted.content = appended.clone();
                     conflicted.content_hash = Section::compute_hash(&appended);
+                    conflicted.raw_source = None;
                     merged_sections.push(conflicted);
 
                     conflicts.push(SectionConflict {
@@ -318,6 +320,7 @@ fn make_merged_section(source: &Section, path: &str) -> Section {
         content: source.content.clone(),
         content_hash: source.content_hash.clone(),
         ordinal: source.ordinal,
+        raw_source: source.raw_source.clone(),
     }
 }
 
