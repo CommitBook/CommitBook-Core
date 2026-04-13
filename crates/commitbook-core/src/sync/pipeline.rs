@@ -97,44 +97,68 @@ async fn pull_documents(
                 }
             };
 
-            let base_tree = parse_document(&base_content);
-            let local_tree = parse_document(&local_content);
-            let remote_tree = parse_document(&remote_doc.content);
+            // Fast-path: skip parse→merge→reassemble when content hasn't diverged.
+            if local_content == remote_doc.content {
+                // Local and remote are identical — just update base, no file write needed.
+                base::write(commitbook_dir, &doc_plan.path, &local_content)?;
+            } else if local_content == base_content {
+                // Only remote changed — take remote content verbatim (no reassemble).
+                let file_path = repo_root.join(&doc_plan.path);
+                if let Some(parent) = file_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&file_path, &remote_doc.content)?;
+                base::write(commitbook_dir, &doc_plan.path, &remote_doc.content)?;
+                result.pulled += 1;
+            } else if remote_doc.content == base_content {
+                // Only local changed — keep local as-is, just update base.
+                base::write(commitbook_dir, &doc_plan.path, &local_content)?;
+            } else {
+                // Both sides changed — full three-way merge required.
+                let base_tree = parse_document(&base_content);
+                let local_tree = parse_document(&local_content);
+                let remote_tree = parse_document(&remote_doc.content);
 
-            let merge_result = merge_document(&base_tree, &local_tree, &remote_tree);
-            let merged_content = reassemble(&merge_result.merged_tree);
+                let merge_result = merge_document(&base_tree, &local_tree, &remote_tree);
+                let merged_content = reassemble(&merge_result.merged_tree);
 
-            // Write merged content to working tree.
-            let file_path = repo_root.join(&doc_plan.path);
-            if let Some(parent) = file_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&file_path, &merged_content)?;
+                let file_path = repo_root.join(&doc_plan.path);
+                if let Some(parent) = file_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&file_path, &merged_content)?;
+                base::write(commitbook_dir, &doc_plan.path, &merged_content)?;
+                result.pulled += 1;
 
-            // Update base version.
-            base::write(commitbook_dir, &doc_plan.path, &merged_content)?;
-
-            if !merge_result.conflicts.is_empty() {
-                result.conflicts += merge_result.conflicts.len() as u32;
-                log::warn!(
-                    "{} conflict(s) in {}",
-                    merge_result.conflicts.len(),
-                    doc_plan.path
-                );
+                if !merge_result.conflicts.is_empty() {
+                    result.conflicts += merge_result.conflicts.len() as u32;
+                    log::warn!(
+                        "{} conflict(s) in {}",
+                        merge_result.conflicts.len(),
+                        doc_plan.path
+                    );
+                }
             }
         } else {
-            // No merge needed — write remote content directly.
+            // No merge needed — write remote content directly (only if different).
             let file_path = repo_root.join(&doc_plan.path);
-            if let Some(parent) = file_path.parent() {
-                std::fs::create_dir_all(parent)?;
+            let local_content = if file_path.exists() {
+                std::fs::read_to_string(&file_path).ok()
+            } else {
+                None
+            };
+
+            if local_content.as_deref() != Some(&remote_doc.content) {
+                if let Some(parent) = file_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&file_path, &remote_doc.content)?;
+                result.pulled += 1;
             }
-            std::fs::write(&file_path, &remote_doc.content)?;
 
             // Save as base version for future merges.
             base::write(commitbook_dir, &doc_plan.path, &remote_doc.content)?;
         }
-
-        result.pulled += 1;
     }
 
     // Handle remote deletions.

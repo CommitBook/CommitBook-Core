@@ -4,9 +4,9 @@ use std::path::Path;
 
 use commitbook_core::config::LocalConfig;
 use commitbook_core::git::GitRepo;
-use commitbook_core::state::auth::AuthConfig;
 use commitbook_core::sync::scheduler::sync_repository;
 use commitbook_core::transport::local_repo::LocalRepoTransport;
+use commitbook_core::transport::ssh_git::SshGitTransport;
 
 /// Run a manual sync: commit locally + pull -> merge -> push.
 pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
@@ -185,17 +185,24 @@ fn create_transport(
     repo_root: &Path,
     config: &LocalConfig,
 ) -> Result<Box<dyn commitbook_core::domain::transport::RemoteTransport>> {
-    let auth = AuthConfig::load(cb_dir)?;
-
-    if auth.has_token() {
-        log::warn!("PAT token found in auth.toml; PAT transport not yet wired — using local git transport.");
+    // Use SSH git transport when the repo has a remote (reads from actual remote, pushes via SSH).
+    match commitbook_core::git::remote::get_remote_url(repo_root, "origin") {
+        Ok(remote_url) => {
+            let clone_dir = cb_dir.join("local").join("remote");
+            Ok(Box::new(SshGitTransport::new(
+                clone_dir,
+                remote_url,
+                config.git.branch.clone(),
+            )))
+        }
+        Err(_) => {
+            // No remote configured — local-only transport.
+            Ok(Box::new(LocalRepoTransport::new(
+                repo_root.to_path_buf(),
+                config.git.branch.clone(),
+            )))
+        }
     }
-
-    // Default: local repo transport (direct git operations).
-    Ok(Box::new(LocalRepoTransport::new(
-        repo_root.to_path_buf(),
-        config.git.branch.clone(),
-    )))
 }
 
 #[cfg(test)]

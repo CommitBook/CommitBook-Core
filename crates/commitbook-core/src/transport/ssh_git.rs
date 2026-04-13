@@ -52,7 +52,7 @@ impl SshGitTransport {
         Ok(())
     }
 
-    /// Fetch latest from remote using system git (for SSH agent support).
+    /// Fetch latest from remote and update the working tree.
     fn fetch(&self) -> Result<()> {
         let output = Command::new("git")
             .current_dir(&self.local_clone_path)
@@ -63,6 +63,20 @@ impl SshGitTransport {
         if !output.status.success() {
             bail!(
                 "git fetch failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        // Update working tree to match fetched remote branch.
+        let output = Command::new("git")
+            .current_dir(&self.local_clone_path)
+            .args(["reset", "--hard", &format!("origin/{}", self.branch)])
+            .output()
+            .context("Failed to update working tree")?;
+
+        if !output.status.success() {
+            bail!(
+                "git reset failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
