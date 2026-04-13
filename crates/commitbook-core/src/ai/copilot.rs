@@ -7,7 +7,7 @@ use std::time::Duration;
 use super::{clean_message, truncate, CommitMessageProvider};
 use crate::git::ChangesSummary;
 
-const COPILOT_TIMEOUT: Duration = Duration::from_secs(30);
+const COPILOT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct CopilotProvider;
 
@@ -46,14 +46,14 @@ impl CommitMessageProvider for CopilotProvider {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .context("Failed to run gh copilot suggest")?;
+            .context("Failed to run gh copilot")?;
 
         let output = wait_with_timeout(child, COPILOT_TIMEOUT)
-            .context("gh copilot suggest timed out")?;
+            .context("gh copilot timed out")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("gh copilot suggest failed: {}", stderr.trim());
+            bail!("gh copilot failed: {}", stderr.trim());
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
