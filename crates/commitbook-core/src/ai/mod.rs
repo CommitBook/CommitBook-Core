@@ -108,6 +108,23 @@ pub(crate) fn truncate(s: &str, max_len: usize) -> String {
     }
 }
 
+/// Returns true if the message reads like the AI is describing the diff
+/// itself rather than the change. Triggers a fall-through to the next provider.
+pub(crate) fn looks_like_diff_narration(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    if lower.contains("staged") && lower.contains("unstaged") {
+        return true;
+    }
+    const PREFIXES: &[&str] = &[
+        "the diff ",
+        "the staged ",
+        "the unstaged ",
+        "the changes show ",
+        "this diff ",
+    ];
+    PREFIXES.iter().any(|p| lower.starts_with(p))
+}
+
 /// Clean up AI-generated commit message text.
 pub(crate) fn clean_message(raw: &str) -> String {
     let mut msg = raw.trim().to_string();

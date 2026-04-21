@@ -234,29 +234,31 @@ impl GitRepo {
     }
 
     /// Get the diff summary (stat) for AI prompt context, truncated.
+    ///
+    /// Uses `git diff --stat HEAD` so each changed file appears exactly once
+    /// with its total delta vs HEAD — regardless of staging state. This avoids
+    /// the AI seeing the same file twice (once staged, once unstaged) when the
+    /// working tree changes between `stage_all()` and this call.
     pub fn diff_summary(&self) -> Result<String> {
         let output = Command::new("git")
-            .args(["diff", "--stat", "--no-color"])
+            .args(["diff", "--stat", "HEAD", "--no-color"])
             .current_dir(&self.path)
             .output()
             .context("Failed to get diff summary")?;
 
-        let mut result = String::from_utf8_lossy(&output.stdout).to_string();
+        let result = if output.status.success() {
+            String::from_utf8_lossy(&output.stdout).to_string()
+        } else {
+            // No HEAD yet (initial commit) — fall back to staged diff.
+            let staged = Command::new("git")
+                .args(["diff", "--staged", "--stat", "--no-color"])
+                .current_dir(&self.path)
+                .output()
+                .context("Failed to get staged diff summary")?;
+            String::from_utf8_lossy(&staged.stdout).to_string()
+        };
 
-        // Also get staged diff
-        let staged = Command::new("git")
-            .args(["diff", "--staged", "--stat", "--no-color"])
-            .current_dir(&self.path)
-            .output();
-
-        if let Ok(staged) = staged {
-            let staged_text = String::from_utf8_lossy(&staged.stdout);
-            if !staged_text.is_empty() {
-                result = format!("{}{}", staged_text, result);
-            }
-        }
-
-        // Truncate to avoid overwhelming AI prompts
+        // Truncate to avoid overwhelming AI prompts.
         let lines: Vec<&str> = result.lines().collect();
         if lines.len() > 20 {
             let truncated: Vec<&str> = lines[..20].to_vec();

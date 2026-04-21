@@ -155,6 +155,52 @@ fn test_changes_summary_modified() {
 }
 
 #[test]
+fn test_diff_summary_lists_each_file_once_after_concurrent_edit() {
+    // Simulates the race condition that produced commit messages like
+    // "The staged change adds an entry; the unstaged ...":
+    // user edits a file between stage_all() and the diff_summary() shell-out.
+    let (tmp, _repo) = create_temp_repo();
+    let git_repo = GitRepo::open(tmp.path()).unwrap();
+
+    // Initial commit so HEAD exists.
+    let file_path = tmp.path().join("notes.md");
+    fs::write(&file_path, "v1\n").unwrap();
+    git_repo.stage_all().unwrap();
+    git_repo.commit("init").unwrap();
+
+    // First edit -> stage it.
+    fs::write(&file_path, "v1\nfirst edit\n").unwrap();
+    git_repo.stage_all().unwrap();
+
+    // Concurrent edit lands AFTER staging but BEFORE diff_summary().
+    fs::write(&file_path, "v1\nfirst edit\nconcurrent edit\n").unwrap();
+
+    let summary = git_repo.diff_summary().unwrap();
+    let occurrences = summary.matches("notes.md").count();
+    assert_eq!(
+        occurrences, 1,
+        "expected notes.md to appear exactly once, got summary:\n{}",
+        summary
+    );
+}
+
+#[test]
+fn test_diff_summary_works_before_first_commit() {
+    // Pre-HEAD: `git diff HEAD` errors, but we should still get the staged diff.
+    let (tmp, _repo) = create_temp_repo();
+    let git_repo = GitRepo::open(tmp.path()).unwrap();
+    fs::write(tmp.path().join("brand_new.md"), "hello\n").unwrap();
+    git_repo.stage_all().unwrap();
+
+    let summary = git_repo.diff_summary().unwrap();
+    assert!(
+        summary.contains("brand_new.md"),
+        "expected brand_new.md in summary, got:\n{}",
+        summary
+    );
+}
+
+#[test]
 fn test_changes_summary_deleted() {
     let (tmp, _repo) = create_temp_repo();
     let git_repo = GitRepo::open(tmp.path()).unwrap();

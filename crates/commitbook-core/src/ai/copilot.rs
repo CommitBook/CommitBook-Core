@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use super::{clean_message, truncate, CommitMessageProvider};
+use super::{clean_message, looks_like_diff_narration, truncate, CommitMessageProvider};
 use crate::git::ChangesSummary;
 
 const COPILOT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -33,9 +33,11 @@ impl CommitMessageProvider for CopilotProvider {
     }
 
     async fn generate(&self, summary: &ChangesSummary, repo_path: &Path) -> Result<String> {
-        let diff_text = get_diff_summary(repo_path)?;
+        let diff_text = crate::git::GitRepo::open(repo_path)
+            .and_then(|r| r.diff_summary())
+            .unwrap_or_default();
         let prompt = format!(
-            "Write a concise one-line git commit message (max 72 chars) for these changes: {}. Diff:\n{}",
+            "Write a single-line git commit message in imperative mood (max 72 chars, no quotes, no markdown, no prefix) describing what changed. Do not describe the diff itself or mention 'staged'/'unstaged'. Files: {}. Changes:\n{}",
             summary.to_summary_text(),
             truncate(&diff_text, 500)
         );
@@ -61,6 +63,9 @@ impl CommitMessageProvider for CopilotProvider {
 
         if message.is_empty() {
             bail!("GitHub Copilot returned empty response");
+        }
+        if looks_like_diff_narration(&message) {
+            bail!("GitHub Copilot returned diff narration, not a commit message");
         }
 
         Ok(message)
@@ -182,27 +187,6 @@ fn is_copilot_noise(line: &str) -> bool {
         return true;
     }
     false
-}
-
-/// Get the staged or working-directory diff summary for prompt context.
-fn get_diff_summary(repo_path: &Path) -> Result<String> {
-    let output = Command::new("git")
-        .args(["diff", "--staged", "--stat"])
-        .current_dir(repo_path)
-        .output()
-        .context("Failed to get staged diff summary")?;
-
-    if output.status.success() && !output.stdout.is_empty() {
-        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
-    }
-
-    let output = Command::new("git")
-        .args(["diff", "--stat"])
-        .current_dir(repo_path)
-        .output()
-        .context("Failed to get diff summary")?;
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Wait for a child process with a timeout.

@@ -61,6 +61,49 @@ fn test_clean_message_multibyte_truncate() {
     assert!(result.is_char_boundary(result.len()));
 }
 
+// --- looks_like_diff_narration tests ---
+
+#[test]
+fn test_diff_narration_detects_staged_unstaged_pair() {
+    assert!(looks_like_diff_narration(
+        "The staged change adds an entry; the unstaged adjusts a line"
+    ));
+}
+
+#[test]
+fn test_diff_narration_detects_prefix_the_diff() {
+    assert!(looks_like_diff_narration("The diff shows a few formatting tweaks"));
+}
+
+#[test]
+fn test_diff_narration_detects_prefix_this_diff() {
+    assert!(looks_like_diff_narration("This diff modifies multiple files"));
+}
+
+#[test]
+fn test_diff_narration_detects_prefix_the_changes_show() {
+    assert!(looks_like_diff_narration("The changes show new content added"));
+}
+
+#[test]
+fn test_diff_narration_case_insensitive() {
+    assert!(looks_like_diff_narration("THE STAGED CHANGES ADD X; THE UNSTAGED Y"));
+}
+
+#[test]
+fn test_diff_narration_passes_normal_messages() {
+    assert!(!looks_like_diff_narration("Add pagination to user list endpoint"));
+    assert!(!looks_like_diff_narration("Fix race condition in sync pipeline"));
+    assert!(!looks_like_diff_narration("Update README with install steps"));
+}
+
+#[test]
+fn test_diff_narration_lone_word_staged_is_ok() {
+    // A legitimate message about staging behavior should not be rejected
+    // unless BOTH "staged" and "unstaged" appear together.
+    assert!(!looks_like_diff_narration("Stage all changes before commit"));
+}
+
 // --- MockProvider + ProviderChain async tests ---
 
 struct MockProvider {

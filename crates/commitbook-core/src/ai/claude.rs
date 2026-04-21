@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use super::{clean_message, truncate, CommitMessageProvider};
+use super::{clean_message, looks_like_diff_narration, truncate, CommitMessageProvider};
 use crate::git::ChangesSummary;
 
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -31,7 +31,7 @@ impl CommitMessageProvider for ClaudeProvider {
             .unwrap_or_default();
 
         let prompt = format!(
-            "Write a concise one-line git commit message (max 72 chars, no quotes) for these changes: {}. Diff stats:\n{}",
+            "Write a single-line git commit message in imperative mood (max 72 chars, no quotes, no markdown, no prefix) describing what changed. Do not describe the diff itself or mention 'staged'/'unstaged'. Files: {}. Changes:\n{}",
             summary.to_summary_text(),
             truncate(&diff_summary, 500)
         );
@@ -62,6 +62,9 @@ impl CommitMessageProvider for ClaudeProvider {
 
         if msg.is_empty() {
             bail!("Empty response from claude CLI");
+        }
+        if looks_like_diff_narration(&msg) {
+            bail!("claude CLI returned diff narration, not a commit message");
         }
 
         Ok(msg)
