@@ -40,7 +40,7 @@ All UI crates depend on `commitbook-core`. No database — all state is file-bas
 | `state/` | File-based state: SyncState, AuthConfig, base version management |
 | `sync/` | Planner (creates sync plan), pipeline (executes pull/merge/push), scheduler |
 | `merge/` | Section-aware three-way merge engine for markdown |
-| `transport/` | RemoteTransport trait: local_repo, ssh_git, github_pat, github_app |
+| `transport/` | RemoteTransport trait: local_repo, git_remote, github_pat, github_app |
 | `config/` | LocalConfig reads/writes `.CommitBook/config.toml` |
 | `ai/` | Commit message generation: Copilot, Claude, Codex, fallback |
 | `git/` | Git operations via git2 + CLI |

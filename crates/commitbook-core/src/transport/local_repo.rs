@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::domain::transport::{
     RemoteDocument, RemoteTransport, RepoDescriptor, WriteFileInput, WriteFileResult,
 };
+use crate::git::commit::commit_files;
 
 /// Transport for existing local git repositories on disk.
 ///
@@ -85,65 +86,7 @@ impl RemoteTransport for LocalRepoTransport {
         _branch: &str,
         inputs: Vec<WriteFileInput>,
     ) -> Result<Vec<WriteFileResult>> {
-        let repo = self.open_repo()?;
-
-        // Write files to disk.
-        for input in &inputs {
-            let full_path = self.repo_path.join(&input.path);
-            if let Some(parent) = full_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&full_path, &input.content)
-                .with_context(|| format!("Failed to write {}", full_path.display()))?;
-        }
-
-        // Stage all written files.
-        let mut index = repo.index()?;
-        for input in &inputs {
-            index.add_path(Path::new(&input.path))?;
-        }
-        index.write()?;
-
-        // Create commit.
-        let message = if inputs.len() == 1 {
-            inputs[0].message.clone()
-        } else {
-            format!("Update {} files", inputs.len())
-        };
-
-        let tree_oid = index.write_tree()?;
-        let parent = repo.head()?.peel_to_commit()?;
-
-        // Skip commit if tree is unchanged from parent.
-        if tree_oid == parent.tree_id() {
-            log::info!("Tree unchanged; skipping empty commit");
-            return Ok(vec![]);
-        }
-
-        let tree = repo.find_tree(tree_oid)?;
-        let sig = repo
-            .signature()
-            .unwrap_or_else(|_| Signature::now("CommitBook", "commitbook@local").unwrap());
-
-        let commit_oid = repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            &message,
-            &tree,
-            &[&parent],
-        )?;
-
-        let new_revision = commit_oid.to_string();
-        let results = inputs
-            .iter()
-            .map(|input| WriteFileResult {
-                path: input.path.clone(),
-                new_revision: new_revision.clone(),
-            })
-            .collect();
-
-        Ok(results)
+        commit_files(&self.repo_path, inputs)
     }
 
     async fn delete_file(&self, _branch: &str, path: &str, message: &str) -> Result<()> {

@@ -26,7 +26,7 @@ async fn test_execute_noop_returns_zeros() {
 
     let logger = test_logger(&repo_root);
     let result =
-        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
+        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger, None)
             .await
             .unwrap();
 
@@ -59,7 +59,7 @@ async fn test_execute_pull_writes_files() {
 
     let logger = test_logger(&repo_root);
     let result =
-        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
+        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger, None)
             .await
             .unwrap();
 
@@ -99,7 +99,7 @@ async fn test_execute_push_reads_working_tree() {
 
     let logger = test_logger(&repo_root);
     let result =
-        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
+        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger, None)
             .await
             .unwrap();
 
@@ -146,7 +146,7 @@ async fn test_execute_pull_merge_detects_conflict() {
 
     let logger = test_logger(&repo_root);
     let result =
-        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
+        execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger, None)
             .await
             .unwrap();
 
@@ -184,7 +184,7 @@ async fn test_pull_then_push_failure_preserves_base() {
         .with_fail_writes();
 
     let logger = test_logger(&repo_root);
-    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
+    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger, None)
         .await
         .unwrap();
 
@@ -229,7 +229,7 @@ async fn test_pull_then_push_failure_does_not_update_checkpoint() {
         .with_fail_writes();
 
     let logger = test_logger(&repo_root);
-    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
+    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger, None)
         .await
         .unwrap();
 
@@ -265,7 +265,7 @@ async fn test_pull_then_push_success_updates_base() {
         .with_file("doc.md", "# Remote\n");
 
     let logger = test_logger(&repo_root);
-    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
+    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger, None)
         .await
         .unwrap();
 
@@ -301,7 +301,7 @@ async fn test_pull_only_updates_base_immediately() {
         .with_file("remote.md", "# From remote\n");
 
     let logger = test_logger(&repo_root);
-    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger)
+    let result = execute_sync(&plan, &cb_dir, &repo_root, "main", &transport, &logger, None)
         .await
         .unwrap();
 

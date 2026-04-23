@@ -5,6 +5,7 @@ use std::process::Command;
 use std::time::Duration;
 
 const PUSH_TIMEOUT: Duration = Duration::from_secs(30);
+const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Wrapper around git2 for repository operations.
 pub struct GitRepo {
@@ -300,6 +301,163 @@ impl GitRepo {
             .unwrap_or(0);
 
         Ok(count > 0)
+    }
+
+    /// Fetch a specific branch from the remote.
+    pub fn fetch(&self, remote: &str, branch: &str) -> Result<()> {
+        let child = Command::new("git")
+            .args(["fetch", remote, branch])
+            .current_dir(&self.path)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("Failed to start git fetch")?;
+
+        let output = wait_with_timeout(child, FETCH_TIMEOUT)
+            .context("git fetch timed out")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("git fetch failed: {}", stderr.trim());
+        }
+
+        Ok(())
+    }
+
+    /// Attempt a fast-forward-only merge of the given ref into HEAD.
+    ///
+    /// Returns `Ok(true)` if HEAD was advanced (or already at the target),
+    /// `Ok(false)` if the merge would not be fast-forward. Other failures
+    /// bubble up as errors.
+    pub fn merge_ff_only(&self, refname: &str) -> Result<bool> {
+        let ancestor = Command::new("git")
+            .args(["merge-base", "--is-ancestor", "HEAD", refname])
+            .current_dir(&self.path)
+            .output()
+            .context("Failed to run git merge-base")?;
+
+        // Exit 0 = HEAD is an ancestor of refname (including equal).
+        // Exit 1 = not an ancestor. Other codes are real errors.
+        match ancestor.status.code() {
+            Some(0) => {}
+            Some(1) => return Ok(false),
+            _ => {
+                let stderr = String::from_utf8_lossy(&ancestor.stderr);
+                bail!("git merge-base failed: {}", stderr.trim());
+            }
+        }
+
+        let output = Command::new("git")
+            .args(["merge", "--ff-only", refname])
+            .current_dir(&self.path)
+            .output()
+            .context("Failed to run git merge --ff-only")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("git merge --ff-only failed: {}", stderr.trim());
+        }
+
+        Ok(true)
+    }
+
+    /// Count commits ahead and behind between two refs.
+    ///
+    /// Returns `(ahead, behind)`: how many commits `local` has that `remote` doesn't
+    /// (ahead) and vice versa (behind).
+    pub fn ahead_behind(&self, local: &str, remote: &str) -> Result<(u32, u32)> {
+        let output = Command::new("git")
+            .args([
+                "rev-list",
+                "--left-right",
+                "--count",
+                &format!("{local}...{remote}"),
+            ])
+            .current_dir(&self.path)
+            .output()
+            .context("Failed to run git rev-list")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("git rev-list failed: {}", stderr.trim());
+        }
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut parts = text.split_whitespace();
+        let ahead: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
+        let behind: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
+        Ok((ahead, behind))
+    }
+
+    /// Read a file's content at a specific ref (commit/branch/tag).
+    pub fn show_file_at_ref(&self, refname: &str, path: &str) -> Result<String> {
+        let output = Command::new("git")
+            .args(["show", &format!("{refname}:{path}")])
+            .current_dir(&self.path)
+            .output()
+            .context("Failed to run git show")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("git show {}:{} failed: {}", refname, path, stderr.trim());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// List all file paths reachable from a ref.
+    pub fn ls_tree_files(&self, refname: &str) -> Result<Vec<String>> {
+        let output = Command::new("git")
+            .args(["ls-tree", "-r", "--name-only", refname])
+            .current_dir(&self.path)
+            .output()
+            .context("Failed to run git ls-tree")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("git ls-tree failed: {}", stderr.trim());
+        }
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        Ok(text.lines().map(|s| s.to_string()).collect())
+    }
+
+    /// Resolve a ref to its full SHA.
+    pub fn rev_parse(&self, refname: &str) -> Result<String> {
+        let output = Command::new("git")
+            .args(["rev-parse", refname])
+            .current_dir(&self.path)
+            .output()
+            .context("Failed to run git rev-parse")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("git rev-parse {} failed: {}", refname, stderr.trim());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Rebase the current branch onto the given ref.
+    ///
+    /// On conflict, aborts the rebase and returns an error.
+    pub fn rebase_onto(&self, refname: &str) -> Result<()> {
+        let output = Command::new("git")
+            .args(["rebase", refname])
+            .current_dir(&self.path)
+            .output()
+            .context("Failed to run git rebase")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let _ = Command::new("git")
+                .args(["rebase", "--abort"])
+                .current_dir(&self.path)
+                .output();
+            bail!("git rebase {} failed (aborted): {}", refname, stderr.trim());
+        }
+
+        Ok(())
     }
 
     /// Attempt to pull with rebase to sync with remote.

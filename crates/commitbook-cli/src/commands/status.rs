@@ -69,5 +69,25 @@ pub fn run(cb_dir: &Path, repo_root: &Path, json: bool) -> Result<()> {
         );
     }
 
+    // Local vs origin divergence check — only meaningful when a remote is configured.
+    if repo.has_remote() {
+        let remote_ref = format!("origin/{}", config.git.branch);
+        if let Ok((ahead, behind)) = repo.ahead_behind("HEAD", &remote_ref) {
+            if ahead > 0 || behind > 0 {
+                println!(
+                    "  Local vs {}: {} ahead, {} behind",
+                    remote_ref, ahead, behind
+                );
+                if ahead > 0 && behind > 0 {
+                    println!(
+                        "  {} Local has diverged from {}. Run `commitbook doctor` for recovery.",
+                        "WARN".yellow().bold(),
+                        remote_ref
+                    );
+                }
+            }
+        }
+    }
+
     Ok(())
 }

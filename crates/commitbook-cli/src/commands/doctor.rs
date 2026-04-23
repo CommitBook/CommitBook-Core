@@ -132,6 +132,77 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
         );
     }
 
+    // 10. Local vs origin divergence.
+    if let Ok(repo) = GitRepo::open(repo_root) {
+        if repo.has_remote() {
+            let config = LocalConfig::load(repo_root).ok();
+            let branch = config
+                .as_ref()
+                .map(|c| c.git.branch.clone())
+                .unwrap_or_else(|| "main".to_string());
+            let remote_ref = format!("origin/{branch}");
+
+            print!("  Local vs {}... ", remote_ref);
+            match repo.ahead_behind("HEAD", &remote_ref) {
+                Ok((0, 0)) => println!("{}", "in sync".green().bold()),
+                Ok((ahead, 0)) => {
+                    println!(
+                        "{}",
+                        format!("{} commit(s) ahead", ahead).yellow().bold()
+                    );
+                    println!(
+                        "    {}",
+                        "Next sync will try to push.".dimmed()
+                    );
+                }
+                Ok((0, behind)) => {
+                    println!(
+                        "{}",
+                        format!("{} commit(s) behind", behind).yellow().bold()
+                    );
+                    println!(
+                        "    Run: {}",
+                        format!("git pull --ff-only").dimmed()
+                    );
+                }
+                Ok((ahead, behind)) => {
+                    println!("{}", "DIVERGED".red().bold());
+                    println!(
+                        "    {} ahead, {} behind — local and origin have different histories.",
+                        ahead, behind
+                    );
+                    println!(
+                        "    If CommitBook has been pushing your content, local-only commits are redundant. Recovery:"
+                    );
+                    println!(
+                        "    {}",
+                        "git fetch origin".dimmed()
+                    );
+                    println!(
+                        "    {}",
+                        format!("git diff {} -- '*.md' '*.markdown'", remote_ref).dimmed()
+                    );
+                    println!(
+                        "    If the diff is empty/expected:  {}",
+                        format!("git reset --hard {}", remote_ref).dimmed()
+                    );
+                    println!(
+                        "    Otherwise, merge by hand:       {}",
+                        format!("git merge {}", remote_ref).dimmed()
+                    );
+                    all_ok = false;
+                }
+                Err(_) => {
+                    println!("{}", "SKIP".dimmed());
+                    println!(
+                        "    {}",
+                        "Could not determine divergence (fetch may have failed).".dimmed()
+                    );
+                }
+            }
+        }
+    }
+
     println!();
     if all_ok {
         println!(

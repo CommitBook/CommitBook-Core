@@ -6,10 +6,10 @@ use commitbook_core::config::LocalConfig;
 use commitbook_core::git::GitRepo;
 use commitbook_core::logger::FileLogger;
 use commitbook_core::sync::scheduler::sync_repository;
+use commitbook_core::transport::git_remote::GitRemoteTransport;
 use commitbook_core::transport::local_repo::LocalRepoTransport;
-use commitbook_core::transport::ssh_git::SshGitTransport;
 
-/// Run a manual sync: commit locally + pull -> merge -> push.
+/// Run a manual sync: one commit covering dirty tracked files, then pull/merge/push.
 pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     let config = LocalConfig::load(repo_root)?;
     let logger = FileLogger::new(repo_root, config.logging.max_log_days)?;
@@ -17,22 +17,15 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
 
     let _ = logger.info("Sync started");
 
-    // Step 1: Commit locally (always, even offline).
-    let committed = commit_local(repo_root, &repo, &config, &logger).await?;
-    if committed {
-        println!("  {} Local changes committed.", "OK".green().bold());
-    }
-
-    // Step 2: Sync with remote (only if remote reachable).
-    if !repo.has_remote() {
-        let _ = logger.info("No remote configured, local commit only");
-        println!(
-            "{}",
-            "  No remote configured. Commits are local only.".yellow()
-        );
-        let _ = logger.cleanup_old_logs();
-        return Ok(());
-    }
+    // Generate the commit message upfront so the pipeline can use it for the
+    // single commit it creates per cycle. Falls back to a per-file default if
+    // there are no git-visible changes.
+    let commit_message = match repo.changes_summary() {
+        Ok(summary) if !summary.is_empty() => {
+            Some(generate_commit_message(repo_root, &summary).await)
+        }
+        _ => None,
+    };
 
     let transport = create_transport(cb_dir, repo_root, &config)?;
     let tracked_patterns: Vec<String> = config.files.include.clone();
@@ -44,6 +37,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
         transport.as_ref(),
         &tracked_patterns,
         &logger,
+        commit_message,
     )
     .await
     {
@@ -74,25 +68,17 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
                 let _ = logger.error(err);
                 println!("  {} {}", "ERROR".red().bold(), err);
             }
-            if result.pulled == 0
-                && result.pushed == 0
-                && result.conflicts == 0
-                && !committed
-            {
+            if result.pulled == 0 && result.pushed == 0 && result.conflicts == 0 {
                 let _ = logger.info("Already up to date");
                 println!("{}", "Already up to date.".dimmed());
             }
         }
         Err(e) => {
             let _ = logger.error(&format!("Sync failed: {e}"));
-            println!(
-                "  {} Sync failed: {}",
-                "ERROR".red().bold(),
-                e
-            );
+            println!("  {} Sync failed: {}", "ERROR".red().bold(), e);
             println!(
                 "{}",
-                "  Local commit preserved. Will retry on next sync.".dimmed()
+                "  Working tree preserved. Will retry on next sync.".dimmed()
             );
         }
     }
@@ -142,45 +128,6 @@ pub async fn run_scheduled(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Commit local changes (git add + AI message + git commit).
-async fn commit_local(
-    repo_root: &Path,
-    repo: &GitRepo,
-    config: &LocalConfig,
-    logger: &FileLogger,
-) -> Result<bool> {
-    let summary = repo.changes_summary()?;
-    if summary.is_empty() {
-        return Ok(false);
-    }
-
-    // Stage all changes.
-    repo.stage_all()?;
-
-    // Check for real diff.
-    if !repo.has_real_staged_changes()? {
-        return Ok(false);
-    }
-
-    // Generate commit message.
-    let message = generate_commit_message(repo_root, &summary).await;
-
-    // Create commit.
-    repo.commit(&message)?;
-    let _ = logger.info(&format!("Committed: {}", message.lines().next().unwrap_or(&message)));
-
-    // Auto-push if configured and remote exists.
-    if config.git.auto_push && repo.has_remote() {
-        let remote = repo.default_remote_name().unwrap_or_else(|_| "origin".to_string());
-        if let Err(e) = repo.push(&remote, &config.git.branch) {
-            let _ = logger.warn(&format!("Auto-push failed: {e}"));
-            log::warn!("Auto-push failed: {e}");
-        }
-    }
-
-    Ok(true)
-}
-
 /// Generate a commit message using AI or fallback.
 async fn generate_commit_message(
     repo_root: &Path,
@@ -200,27 +147,22 @@ async fn generate_commit_message(
 
 /// Create the appropriate transport based on config and auth.
 fn create_transport(
-    cb_dir: &Path,
+    _cb_dir: &Path,
     repo_root: &Path,
     config: &LocalConfig,
 ) -> Result<Box<dyn commitbook_core::domain::transport::RemoteTransport>> {
-    // Use SSH git transport when the repo has a remote (reads from actual remote, pushes via SSH).
+    // Remote-backed repos use GitRemoteTransport directly on the user's repo.
+    // No shadow clone — the user's repo is the single source of truth.
     match commitbook_core::git::remote::get_remote_url(repo_root, "origin") {
-        Ok(remote_url) => {
-            let clone_dir = cb_dir.join("local").join("remote");
-            Ok(Box::new(SshGitTransport::new(
-                clone_dir,
-                remote_url,
-                config.git.branch.clone(),
-            )))
-        }
-        Err(_) => {
-            // No remote configured — local-only transport.
-            Ok(Box::new(LocalRepoTransport::new(
-                repo_root.to_path_buf(),
-                config.git.branch.clone(),
-            )))
-        }
+        Ok(_) => Ok(Box::new(GitRemoteTransport::new(
+            repo_root.to_path_buf(),
+            "origin".to_string(),
+            config.git.branch.clone(),
+        ))),
+        Err(_) => Ok(Box::new(LocalRepoTransport::new(
+            repo_root.to_path_buf(),
+            config.git.branch.clone(),
+        ))),
     }
 }
 

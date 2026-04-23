@@ -1,4 +1,5 @@
 use super::*;
+use crate::git::test_support::{clone_second_workdir, commit_and_push_from, setup_repo_with_bare_remote};
 use std::fs;
 
 fn create_temp_repo() -> (tempfile::TempDir, Repository) {
@@ -198,6 +199,174 @@ fn test_diff_summary_works_before_first_commit() {
         "expected brand_new.md in summary, got:\n{}",
         summary
     );
+}
+
+// --- New helper tests: fetch / merge_ff_only / ahead_behind / show_file_at_ref / ls_tree_files / rev_parse ---
+
+#[test]
+fn test_rev_parse_resolves_head() {
+    let fx = setup_repo_with_bare_remote();
+    let sha = fx.repo.rev_parse("HEAD").unwrap();
+    assert_eq!(sha.len(), 40);
+}
+
+#[test]
+fn test_rev_parse_resolves_remote_ref() {
+    let fx = setup_repo_with_bare_remote();
+    let head_sha = fx.repo.rev_parse("HEAD").unwrap();
+    let remote_sha = fx
+        .repo
+        .rev_parse(&format!("origin/{}", fx.branch))
+        .unwrap();
+    assert_eq!(head_sha, remote_sha);
+}
+
+#[test]
+fn test_ls_tree_files_lists_initial_commit() {
+    let fx = setup_repo_with_bare_remote();
+    let files = fx.repo.ls_tree_files("HEAD").unwrap();
+    assert_eq!(files, vec!["init.md".to_string()]);
+}
+
+#[test]
+fn test_show_file_at_ref_reads_committed_content() {
+    let fx = setup_repo_with_bare_remote();
+    let content = fx.repo.show_file_at_ref("HEAD", "init.md").unwrap();
+    assert_eq!(content, "# init\n");
+}
+
+#[test]
+fn test_show_file_at_ref_ignores_uncommitted_edits() {
+    let fx = setup_repo_with_bare_remote();
+    // Dirty the working tree after the commit.
+    fs::write(fx.repo_dir.path().join("init.md"), "uncommitted\n").unwrap();
+
+    let content = fx.repo.show_file_at_ref("HEAD", "init.md").unwrap();
+    assert_eq!(content, "# init\n");
+}
+
+#[test]
+fn test_fetch_advances_remote_ref() {
+    let fx = setup_repo_with_bare_remote();
+
+    let before = fx
+        .repo
+        .rev_parse(&format!("origin/{}", fx.branch))
+        .unwrap();
+
+    // A second workdir pushes a new commit.
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "new.md", "# new\n");
+
+    // Fetch in the original repo picks up the new commit.
+    fx.repo.fetch("origin", &fx.branch).unwrap();
+
+    let after = fx
+        .repo
+        .rev_parse(&format!("origin/{}", fx.branch))
+        .unwrap();
+    assert_ne!(before, after);
+}
+
+#[test]
+fn test_ahead_behind_zero_when_in_sync() {
+    let fx = setup_repo_with_bare_remote();
+    let (ahead, behind) = fx
+        .repo
+        .ahead_behind("HEAD", &format!("origin/{}", fx.branch))
+        .unwrap();
+    assert_eq!((ahead, behind), (0, 0));
+}
+
+#[test]
+fn test_ahead_behind_reports_remote_only_commits() {
+    let fx = setup_repo_with_bare_remote();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "new.md", "# new\n");
+    fx.repo.fetch("origin", &fx.branch).unwrap();
+
+    let (ahead, behind) = fx
+        .repo
+        .ahead_behind("HEAD", &format!("origin/{}", fx.branch))
+        .unwrap();
+    assert_eq!(ahead, 0);
+    assert_eq!(behind, 1);
+}
+
+#[test]
+fn test_ahead_behind_reports_divergence() {
+    let fx = setup_repo_with_bare_remote();
+
+    // Local makes a commit that is not pushed.
+    fs::write(fx.repo_dir.path().join("local.md"), "local\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("local only").unwrap();
+
+    // Another workdir makes a different commit on remote.
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "new.md", "# new\n");
+    fx.repo.fetch("origin", &fx.branch).unwrap();
+
+    let (ahead, behind) = fx
+        .repo
+        .ahead_behind("HEAD", &format!("origin/{}", fx.branch))
+        .unwrap();
+    assert_eq!(ahead, 1);
+    assert_eq!(behind, 1);
+}
+
+#[test]
+fn test_merge_ff_only_noop_when_equal() {
+    let fx = setup_repo_with_bare_remote();
+    let before = fx.repo.rev_parse("HEAD").unwrap();
+    let advanced = fx
+        .repo
+        .merge_ff_only(&format!("origin/{}", fx.branch))
+        .unwrap();
+    assert!(advanced);
+    let after = fx.repo.rev_parse("HEAD").unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn test_merge_ff_only_fast_forwards_when_linear() {
+    let fx = setup_repo_with_bare_remote();
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "new.md", "# new\n");
+    fx.repo.fetch("origin", &fx.branch).unwrap();
+    let remote_sha = fx
+        .repo
+        .rev_parse(&format!("origin/{}", fx.branch))
+        .unwrap();
+
+    let advanced = fx
+        .repo
+        .merge_ff_only(&format!("origin/{}", fx.branch))
+        .unwrap();
+    assert!(advanced);
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), remote_sha);
+}
+
+#[test]
+fn test_merge_ff_only_rejects_divergent() {
+    let fx = setup_repo_with_bare_remote();
+
+    fs::write(fx.repo_dir.path().join("local.md"), "local\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("local only").unwrap();
+    let local_sha = fx.repo.rev_parse("HEAD").unwrap();
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "new.md", "# new\n");
+    fx.repo.fetch("origin", &fx.branch).unwrap();
+
+    let advanced = fx
+        .repo
+        .merge_ff_only(&format!("origin/{}", fx.branch))
+        .unwrap();
+    assert!(!advanced);
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), local_sha);
 }
 
 #[test]

@@ -32,6 +32,7 @@ pub async fn execute_sync(
     branch: &str,
     transport: &dyn RemoteTransport,
     logger: &FileLogger,
+    commit_message: Option<String>,
 ) -> Result<SyncResult> {
     let mut result = SyncResult {
         pulled: 0,
@@ -53,15 +54,32 @@ pub async fn execute_sync(
             }
         }
         SyncMode::PushOnly => {
-            push_documents(plan, repo_root, branch, transport, &mut result, logger).await?;
+            push_documents(
+                plan,
+                repo_root,
+                branch,
+                transport,
+                &commit_message,
+                &mut result,
+                logger,
+            )
+            .await?;
         }
         SyncMode::PullThenPush => {
             let deferred = pull_documents(
                 plan, commitbook_dir, repo_root, branch, transport, &mut result, logger,
             )
             .await?;
-            let push_ok =
-                push_documents(plan, repo_root, branch, transport, &mut result, logger).await?;
+            let push_ok = push_documents(
+                plan,
+                repo_root,
+                branch,
+                transport,
+                &commit_message,
+                &mut result,
+                logger,
+            )
+            .await?;
             if push_ok {
                 for d in &deferred {
                     base::write(commitbook_dir, &d.path, &d.content)?;
@@ -238,6 +256,7 @@ async fn push_documents(
     repo_root: &Path,
     branch: &str,
     transport: &dyn RemoteTransport,
+    commit_message: &Option<String>,
     result: &mut SyncResult,
     logger: &FileLogger,
 ) -> Result<bool> {
@@ -257,10 +276,14 @@ async fn push_documents(
             continue;
         };
 
+        let msg = commit_message
+            .clone()
+            .unwrap_or_else(|| format!("Update {} via CommitBook", doc_plan.path));
+
         to_push.push(WriteFileInput {
             path: doc_plan.path.clone(),
             content,
-            message: format!("Update {} via CommitBook", doc_plan.path),
+            message: msg,
             base_revision: None,
         });
     }
