@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn test_plist_label_prefix() {
     let label = plist_label(Path::new("/tmp/my-repo"));
-    assert!(label.starts_with("com.commitbook."));
+    assert!(label.starts_with("com.zaai.commitbook."));
 }
 
 #[test]

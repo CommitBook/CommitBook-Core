@@ -14,7 +14,7 @@ pub fn plist_label(repo_path: &Path) -> String {
     let mut hasher = Sha256::new();
     hasher.update(canonical.to_string_lossy().as_bytes());
     let hash = hex::encode(hasher.finalize());
-    format!("com.commitbook.{}", &hash[..12])
+    format!("com.zaai.commitbook.{}", &hash[..12])
 }
 
 /// Get the path where the plist file should be written.
