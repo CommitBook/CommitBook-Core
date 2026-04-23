@@ -26,6 +26,91 @@ pub fn plist_path(repo_path: &Path) -> PathBuf {
         .join(format!("{}.plist", label))
 }
 
+/// Binaries commitbook's scheduled runs invoke. Their parent directories
+/// are resolved at install time and written into the plist's PATH so the
+/// captured PATH is narrow instead of inheriting the full shell PATH
+/// (which can reach into TCC-protected roots like ~/Downloads and cause
+/// macOS to prompt for folder access on every scheduled run).
+const REQUIRED_TOOLS: &[&str] = &["git", "claude", "codex", "gh"];
+
+/// Baseline directories always included so scheduled runs keep working
+/// if a tool is installed into a standard location after the scheduler
+/// was registered. `launchctl` lives in `/bin`, already covered here.
+const BASELINE_PATHS: &[&str] = &[
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+];
+
+/// TCC-protected roots (relative to `$HOME`). Any PATH entry that sits
+/// under one of these triggers macOS's Files-and-Folders prompt when the
+/// scheduled process performs PATH lookups, so we strip them.
+const PROTECTED_SUBPATHS: &[&str] = &[
+    "Downloads",
+    "Desktop",
+    "Documents",
+    "Library/Mobile Documents",
+];
+
+/// Resolve a binary's parent directory via `which`.
+fn which_parent(tool: &str) -> Option<String> {
+    let output = Command::new("/usr/bin/which").arg(tool).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let first = stdout.lines().find(|l| !l.trim().is_empty())?.trim();
+    Path::new(first)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+}
+
+/// Remove PATH entries that live under a TCC-protected root.
+fn filter_protected(entries: Vec<String>, home: &Path) -> Vec<String> {
+    let protected: Vec<PathBuf> = PROTECTED_SUBPATHS
+        .iter()
+        .map(|sub| home.join(sub))
+        .collect();
+    entries
+        .into_iter()
+        .filter(|entry| {
+            let entry_path = Path::new(entry);
+            !protected.iter().any(|root| entry_path.starts_with(root))
+        })
+        .collect()
+}
+
+/// Build the minimal PATH string written into the generated plist.
+fn build_plist_path() -> String {
+    let mut entries: Vec<String> = Vec::new();
+
+    for tool in REQUIRED_TOOLS {
+        if let Some(dir) = which_parent(tool) {
+            entries.push(dir);
+        }
+    }
+
+    for base in BASELINE_PATHS {
+        entries.push((*base).to_string());
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        entries.push(home.join(".cargo").join("bin").to_string_lossy().to_string());
+    }
+
+    let home_for_filter = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let filtered = filter_protected(entries, &home_for_filter);
+
+    let mut seen = std::collections::HashSet::new();
+    let deduped: Vec<String> = filtered
+        .into_iter()
+        .filter(|e| seen.insert(e.clone()))
+        .collect();
+
+    deduped.join(":")
+}
+
 /// Escape special XML characters in a string value.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -50,8 +135,9 @@ fn generate_plist(
     let stdout_log = logs_dir.join("launchd-stdout.log");
     let stderr_log = logs_dir.join("launchd-stderr.log");
 
-    // Capture current PATH so AI CLIs (claude, codex, gh) are discoverable
-    let path_env = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
+    // Build a minimal PATH from resolved tool locations + baseline dirs.
+    // Avoids leaking TCC-protected roots (e.g. ~/Downloads) from the shell PATH.
+    let path_env = build_plist_path();
 
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
