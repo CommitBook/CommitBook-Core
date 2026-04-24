@@ -28,7 +28,11 @@ pub struct PlannedDocumentSync {
     pub requires_conflict: bool,
     pub requires_upload: bool,
     pub requires_download: bool,
+    /// Remove the file from the local working tree (remote deleted it).
     pub requires_delete: bool,
+    /// Push a deletion to the remote (local deleted it, remote still has it).
+    #[serde(default)]
+    pub requires_remote_delete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

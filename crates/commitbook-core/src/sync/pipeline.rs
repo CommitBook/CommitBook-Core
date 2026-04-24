@@ -215,6 +215,23 @@ async fn push_documents(
     result: &mut SyncResult,
     logger: &dyn Logger,
 ) -> Result<bool> {
+    let push_ok = push_uploads(
+        plan, repo_root, branch, transport, commit_message, result, logger,
+    )
+    .await?;
+    push_remote_deletes(plan, branch, transport, commit_message, result, logger).await?;
+    Ok(push_ok)
+}
+
+async fn push_uploads(
+    plan: &SyncPlan,
+    repo_root: &Path,
+    branch: &str,
+    transport: &dyn RemoteTransport,
+    commit_message: &Option<String>,
+    result: &mut SyncResult,
+    logger: &dyn Logger,
+) -> Result<bool> {
     // Collect files to push.
     let mut to_push: Vec<WriteFileInput> = Vec::new();
 
@@ -261,6 +278,45 @@ async fn push_documents(
             Ok(false)
         }
     }
+}
+
+async fn push_remote_deletes(
+    plan: &SyncPlan,
+    branch: &str,
+    transport: &dyn RemoteTransport,
+    commit_message: &Option<String>,
+    result: &mut SyncResult,
+    logger: &dyn Logger,
+) -> Result<()> {
+    let to_delete: Vec<&crate::domain::sync_plan::PlannedDocumentSync> = plan
+        .documents
+        .iter()
+        .filter(|d| d.requires_remote_delete)
+        .collect();
+
+    if to_delete.is_empty() {
+        return Ok(());
+    }
+
+    let msg = commit_message
+        .clone()
+        .unwrap_or_else(|| format!("Delete {} file(s) via CommitBook", to_delete.len()));
+
+    for doc in to_delete {
+        match transport.delete_file(branch, &doc.path, &msg).await {
+            Ok(()) => {
+                result.pushed += 1;
+                let _ = logger.info(&format!("Deleted {}", doc.path));
+            }
+            Err(e) => {
+                let emsg = format!("Failed to delete {}: {e}", doc.path);
+                let _ = logger.error(&emsg);
+                result.errors.push(emsg);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

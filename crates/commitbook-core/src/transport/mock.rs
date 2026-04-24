@@ -12,6 +12,7 @@ pub struct MockTransport {
     files: HashMap<String, String>,
     head: String,
     written: Mutex<Vec<WriteFileInput>>,
+    deleted: Mutex<Vec<(String, String)>>,
     fail_writes: bool,
 }
 
@@ -21,6 +22,7 @@ impl MockTransport {
             files: HashMap::new(),
             head: "mock_head_sha_000".to_string(),
             written: Mutex::new(Vec::new()),
+            deleted: Mutex::new(Vec::new()),
             fail_writes: false,
         }
     }
@@ -43,6 +45,11 @@ impl MockTransport {
     /// Returns files that were written via `write_files`.
     pub fn written_files(&self) -> Vec<WriteFileInput> {
         self.written.lock().unwrap().clone()
+    }
+
+    /// Returns (path, message) tuples recorded via `delete_file`.
+    pub fn deleted_files(&self) -> Vec<(String, String)> {
+        self.deleted.lock().unwrap().clone()
     }
 }
 
@@ -94,9 +101,16 @@ impl RemoteTransport for MockTransport {
     async fn delete_file(
         &self,
         _branch: &str,
-        _path: &str,
-        _message: &str,
+        path: &str,
+        message: &str,
     ) -> Result<()> {
+        if self.fail_writes {
+            bail!("Simulated delete failure");
+        }
+        self.deleted
+            .lock()
+            .unwrap()
+            .push((path.to_string(), message.to_string()));
         Ok(())
     }
 

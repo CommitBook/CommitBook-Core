@@ -1,20 +1,31 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::domain::sync_plan::{
     DocumentState, PlannedDocumentSync, SyncMode, SyncPlan,
 };
 use crate::domain::transport::RemoteTransport;
-use crate::git::{self, GitRepo};
+use crate::git::GitRepo;
 use crate::state::sync_state::SyncState;
 
 /// Create a sync plan by comparing local state against the remote.
+///
+/// Local dirty detection uses `git status` (via `GitRepo::status_markdown`)
+/// rather than walking the working tree — this catches modifications, untracked
+/// additions, and deletions in one call. The planner's job is just to reconcile
+/// those categories with the transport's view of the remote and emit
+/// `PlannedDocumentSync` entries for the pipeline.
+///
+/// `tracked_patterns` is retained for API stability but no longer referenced:
+/// status is git-driven, and `is_markdown_path` already filters inside
+/// `status_markdown`.
 pub async fn create_sync_plan(
     commitbook_dir: &Path,
     repo_root: &Path,
     branch: &str,
     transport: &dyn RemoteTransport,
-    tracked_patterns: &[String],
+    _tracked_patterns: &[String],
 ) -> Result<SyncPlan> {
     let state = SyncState::load(commitbook_dir)?;
     let remote_head = transport.get_head(branch).await?;
@@ -35,27 +46,21 @@ pub async fn create_sync_plan(
                 .and_then(|r| r.rev_parse(&format!("origin/{branch}")).ok())
         });
 
-    // Find dirty local files by comparing working tree vs base (from git).
-    let tracked_files = list_tracked_files(repo_root, tracked_patterns)?;
-    let base_files = match &repo {
-        Some(r) => git::base::list(r, &base_sha)?,
-        None => Vec::new(),
+    // Git status is the single source of truth for local changes.
+    let status = match repo.as_ref() {
+        Some(r) => r.status_markdown()?,
+        None => Default::default(),
     };
 
-    let mut dirty_files = Vec::new();
-    for path in &tracked_files {
-        let working_path = repo_root.join(path);
-        let working_content = std::fs::read_to_string(&working_path)?;
-        let base_content = repo
-            .as_ref()
-            .and_then(|r| git::base::read(r, &base_sha, path));
-        match base_content {
-            Some(content) if content == working_content => {} // unchanged
-            _ => dirty_files.push(path.clone()), // new or modified
-        }
-    }
+    let dirty_set: HashSet<String> = status
+        .modified
+        .iter()
+        .chain(status.added.iter())
+        .cloned()
+        .collect();
+    let deleted_set: HashSet<String> = status.deleted.iter().cloned().collect();
 
-    let has_dirty = !dirty_files.is_empty();
+    let has_dirty = !dirty_set.is_empty() || !deleted_set.is_empty();
 
     let mode = match (remote_changed, has_dirty) {
         (false, false) => SyncMode::Noop,
@@ -78,22 +83,31 @@ pub async fn create_sync_plan(
     } else {
         Vec::new()
     };
+    let remote_paths: HashSet<String> = remote_files.iter().cloned().collect();
+
+    // Markdown paths at the base commit — used to detect files that were removed
+    // on remote since we last synced (so we can pull the delete into the working
+    // tree).
+    let base_files: Vec<String> = match (repo.as_ref(), base_sha.as_ref()) {
+        (Some(r), Some(_)) => r
+            .ls_tree_files(base_sha.as_ref().unwrap())?
+            .into_iter()
+            .filter(|p| is_markdown_path(p))
+            .collect(),
+        _ => Vec::new(),
+    };
 
     let mut planned_docs = Vec::new();
 
-    let remote_paths: std::collections::HashSet<String> =
-        remote_files.iter().cloned().collect();
-    let dirty_set: std::collections::HashSet<&str> =
-        dirty_files.iter().map(|s| s.as_str()).collect();
-
-    // For each remote file, determine what action is needed.
+    // For each remote file, decide the action. `dirty_set` is the set of local
+    // paths with uncommitted content changes.
     for remote_path in &remote_files {
-        let is_dirty = dirty_set.contains(remote_path.as_str());
-        let exists_locally = tracked_files.contains(remote_path)
-            || base_files.contains(remote_path);
+        let is_dirty = dirty_set.contains(remote_path);
+        let exists_locally = !deleted_set.contains(remote_path)
+            && (repo_root.join(remote_path).exists() || base_files.contains(remote_path));
 
         if is_dirty {
-            // Both local dirty and remote exists -> needs merge.
+            // Both local dirty and remote exists → needs merge.
             planned_docs.push(PlannedDocumentSync {
                 path: remote_path.clone(),
                 local_state: DocumentState::Modified,
@@ -103,9 +117,10 @@ pub async fn create_sync_plan(
                 requires_upload: true,
                 requires_download: true,
                 requires_delete: false,
+                requires_remote_delete: false,
             });
         } else if exists_locally {
-            // Local exists but not dirty -> download if changed.
+            // Local exists but not dirty → download if changed.
             planned_docs.push(PlannedDocumentSync {
                 path: remote_path.clone(),
                 local_state: DocumentState::Unchanged,
@@ -115,6 +130,20 @@ pub async fn create_sync_plan(
                 requires_upload: false,
                 requires_download: true,
                 requires_delete: false,
+                requires_remote_delete: false,
+            });
+        } else if deleted_set.contains(remote_path) {
+            // Local deleted something that still exists on remote → push the delete.
+            planned_docs.push(PlannedDocumentSync {
+                path: remote_path.clone(),
+                local_state: DocumentState::Deleted,
+                remote_state: DocumentState::Modified,
+                requires_merge: false,
+                requires_conflict: false,
+                requires_upload: false,
+                requires_download: false,
+                requires_delete: false,
+                requires_remote_delete: true,
             });
         } else {
             // New file on remote.
@@ -127,12 +156,13 @@ pub async fn create_sync_plan(
                 requires_upload: false,
                 requires_download: true,
                 requires_delete: false,
+                requires_remote_delete: false,
             });
         }
     }
 
-    // For dirty local files not on remote.
-    for dirty_path in &dirty_files {
+    // Dirty local files not on remote → new file, push.
+    for dirty_path in &dirty_set {
         if !remote_paths.contains(dirty_path) {
             planned_docs.push(PlannedDocumentSync {
                 path: dirty_path.clone(),
@@ -143,15 +173,37 @@ pub async fn create_sync_plan(
                 requires_upload: true,
                 requires_download: false,
                 requires_delete: false,
+                requires_remote_delete: false,
             });
         }
     }
 
-    // For base files deleted on remote (only if we had a previous checkpoint).
+    // Local deletions without a fresh remote fetch: still push the delete
+    // optimistically (the transport may reject if remote moved; next cycle will
+    // re-plan with the new state).
+    if !remote_changed {
+        for deleted_path in &deleted_set {
+            planned_docs.push(PlannedDocumentSync {
+                path: deleted_path.clone(),
+                local_state: DocumentState::Deleted,
+                remote_state: DocumentState::Unknown,
+                requires_merge: false,
+                requires_conflict: false,
+                requires_upload: false,
+                requires_download: false,
+                requires_delete: false,
+                requires_remote_delete: true,
+            });
+        }
+    }
+
+    // Base files gone from remote → pull the deletion into the working tree
+    // (only when we had a previous checkpoint to trust).
     if state.remote_head.is_some() {
         for base_path in &base_files {
             if !remote_paths.contains(base_path)
-                && !dirty_set.contains(base_path.as_str())
+                && !dirty_set.contains(base_path)
+                && !deleted_set.contains(base_path)
             {
                 planned_docs.push(PlannedDocumentSync {
                     path: base_path.clone(),
@@ -162,6 +214,7 @@ pub async fn create_sync_plan(
                     requires_upload: false,
                     requires_download: false,
                     requires_delete: true,
+                    requires_remote_delete: false,
                 });
             }
         }
@@ -174,63 +227,12 @@ pub async fn create_sync_plan(
     })
 }
 
-/// List tracked files in the repo (markdown files matching patterns).
-pub(crate) fn list_tracked_files(
-    repo_root: &Path,
-    patterns: &[String],
-) -> Result<Vec<String>> {
-    let mut files = Vec::new();
-
-    if patterns.is_empty() {
-        // Default: all .md files
-        collect_markdown_files(repo_root, repo_root, &mut files)?;
-    } else {
-        // Use glob patterns from config
-        for pattern in patterns {
-            let full = repo_root.join(pattern).to_string_lossy().into_owned();
-            for path in glob::glob(&full)
-                .with_context(|| format!("Invalid glob pattern: {pattern}"))?
-                .flatten()
-            {
-                if path.is_file() {
-                    if let Ok(rel) = path.strip_prefix(repo_root) {
-                        files.push(rel.to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
+fn is_markdown_path(p: &str) -> bool {
+    if p.split('/').any(|seg| seg.starts_with('.')) {
+        return false;
     }
-
-    Ok(files)
-}
-
-pub(crate) fn collect_markdown_files(
-    root: &Path,
-    dir: &Path,
-    files: &mut Vec<String>,
-) -> Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        // Skip hidden directories and .CommitBook/
-        if name_str.starts_with('.') {
-            continue;
-        }
-
-        if path.is_dir() {
-            collect_markdown_files(root, &path, files)?;
-        } else if path
-            .extension()
-            .is_some_and(|ext| ext == "md" || ext == "markdown")
-        {
-            let rel = path.strip_prefix(root)?.to_string_lossy().to_string();
-            files.push(rel);
-        }
-    }
-    Ok(())
+    let lower = p.to_lowercase();
+    lower.ends_with(".md") || lower.ends_with(".markdown")
 }
 
 #[cfg(test)]

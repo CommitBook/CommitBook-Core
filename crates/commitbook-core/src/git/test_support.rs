@@ -26,6 +26,13 @@ pub struct BaseRepoFixture {
     pub branch: String,
 }
 
+impl BaseRepoFixture {
+    /// Open a fresh `GitRepo` handle on the fixture's working tree.
+    pub fn repo(&self) -> GitRepo {
+        GitRepo::open(&self.repo_root).expect("fixture repo should open")
+    }
+}
+
 /// Initialize a git repo at a temp dir, commit the provided files, and return
 /// the commit SHA. Use this for planner/pipeline tests that previously wrote
 /// `base/*` files directly.

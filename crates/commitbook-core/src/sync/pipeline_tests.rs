@@ -53,6 +53,7 @@ async fn test_execute_pull_writes_files() {
             requires_upload: false,
             requires_download: true,
             requires_delete: false,
+            requires_remote_delete: false,
         }],
         base_revision: None,
     };
@@ -101,6 +102,7 @@ async fn test_execute_push_reads_working_tree() {
             requires_upload: true,
             requires_download: false,
             requires_delete: false,
+            requires_remote_delete: false,
         }],
         base_revision: Some(fx.base_sha.clone()),
     };
@@ -153,6 +155,7 @@ async fn test_execute_pull_merge_detects_conflict() {
             requires_upload: true,
             requires_download: true,
             requires_delete: false,
+            requires_remote_delete: false,
         }],
         base_revision: Some(fx.base_sha.clone()),
     };
@@ -201,6 +204,7 @@ async fn test_pull_then_push_failure_does_not_advance_checkpoint() {
             requires_upload: true,
             requires_download: true,
             requires_delete: false,
+            requires_remote_delete: false,
         }],
         base_revision: Some(fx.base_sha.clone()),
     };
@@ -256,6 +260,7 @@ async fn test_push_only_failure_does_not_advance_checkpoint() {
             requires_upload: true,
             requires_download: false,
             requires_delete: false,
+            requires_remote_delete: false,
         }],
         base_revision: Some("old_sha".to_string()),
     };
@@ -300,6 +305,7 @@ async fn test_pull_then_push_success_advances_checkpoint() {
             requires_upload: true,
             requires_download: true,
             requires_delete: false,
+            requires_remote_delete: false,
         }],
         base_revision: Some(fx.base_sha.clone()),
     };
@@ -331,6 +337,50 @@ async fn test_pull_then_push_success_advances_checkpoint() {
 }
 
 #[tokio::test]
+async fn test_push_phase_deletes_on_remote() {
+    let fx = setup_repo_with_base(&[("stale.md", "# stale\n")]);
+
+    let plan = SyncPlan {
+        mode: SyncMode::PushOnly,
+        documents: vec![PlannedDocumentSync {
+            path: "stale.md".to_string(),
+            local_state: DocumentState::Deleted,
+            remote_state: DocumentState::Modified,
+            requires_merge: false,
+            requires_conflict: false,
+            requires_upload: false,
+            requires_download: false,
+            requires_delete: false,
+            requires_remote_delete: true,
+        }],
+        base_revision: Some(fx.base_sha.clone()),
+    };
+
+    let transport = MockTransport::new();
+
+    let logger = test_logger(&fx.repo_root);
+    let result = execute_sync(
+        &plan,
+        &fx.cb_dir,
+        &fx.repo_root,
+        "main",
+        &transport,
+        &logger,
+        Some("Delete stale notes".to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert!(result.errors.is_empty());
+    assert_eq!(result.pushed, 1);
+
+    let deletes = transport.deleted_files();
+    assert_eq!(deletes.len(), 1);
+    assert_eq!(deletes[0].0, "stale.md");
+    assert_eq!(deletes[0].1, "Delete stale notes");
+}
+
+#[tokio::test]
 async fn test_pull_only_advances_checkpoint() {
     let fx = setup_repo_with_base(&[]);
 
@@ -345,6 +395,7 @@ async fn test_pull_only_advances_checkpoint() {
             requires_upload: false,
             requires_download: true,
             requires_delete: false,
+            requires_remote_delete: false,
         }],
         base_revision: None,
     };

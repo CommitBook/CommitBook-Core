@@ -1,11 +1,10 @@
 use anyhow::{bail, Context, Result};
-use git2::{Repository, Signature, StatusOptions};
+use git2::{FetchOptions, PushOptions, RemoteCallbacks, Repository, Signature, StatusOptions};
 use std::path::{Path, PathBuf};
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use std::process::Command;
-use std::time::Duration;
 
-const PUSH_TIMEOUT: Duration = Duration::from_secs(30);
-const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::platform::{CredentialProvider, SystemCredentials};
 
 /// Wrapper around git2 for repository operations.
 pub struct GitRepo {
@@ -19,6 +18,24 @@ pub struct ChangesSummary {
     pub new_files: Vec<String>,
     pub modified_files: Vec<String>,
     pub deleted_files: Vec<String>,
+}
+
+/// Markdown-only status view used by the sync planner.
+///
+/// Same source of truth as `ChangesSummary` (git2 statuses) but filtered to
+/// `.md` / `.markdown`, with hidden directories (any path segment starting
+/// with `.`) skipped.
+#[derive(Debug, Default, Clone)]
+pub struct StatusSummary {
+    pub modified: Vec<String>,
+    pub added: Vec<String>,
+    pub deleted: Vec<String>,
+}
+
+impl StatusSummary {
+    pub fn is_empty(&self) -> bool {
+        self.modified.is_empty() && self.added.is_empty() && self.deleted.is_empty()
+    }
 }
 
 impl ChangesSummary {
@@ -126,6 +143,42 @@ impl GitRepo {
         Ok(summary)
     }
 
+    /// Report markdown-only changes in the working tree vs HEAD.
+    ///
+    /// Filters the git2 status output to `.md` / `.markdown` and skips any
+    /// path under a hidden directory. Planner uses this as the single source
+    /// of truth for local dirty detection (modifications, additions, and
+    /// deletions all come out of one call).
+    pub fn status_markdown(&self) -> Result<StatusSummary> {
+        let mut opts = StatusOptions::new();
+        opts.include_untracked(true).recurse_untracked_dirs(true);
+
+        let statuses = self
+            .repo
+            .statuses(Some(&mut opts))
+            .context("Failed to get repository status")?;
+
+        let mut out = StatusSummary::default();
+
+        for entry in statuses.iter() {
+            let Some(path) = entry.path() else { continue };
+            if !is_markdown_path(path) {
+                continue;
+            }
+            let s = entry.status();
+
+            if s.is_wt_deleted() || s.is_index_deleted() {
+                out.deleted.push(path.to_string());
+            } else if s.is_wt_new() || s.is_index_new() {
+                out.added.push(path.to_string());
+            } else if s.is_wt_modified() || s.is_index_modified() {
+                out.modified.push(path.to_string());
+            }
+        }
+
+        Ok(out)
+    }
+
     /// Stage all changes (equivalent to `git add -A`).
     pub fn stage_all(&self) -> Result<()> {
         let mut index = self.repo.index().context("Failed to get index")?;
@@ -141,14 +194,15 @@ impl GitRepo {
 
     /// Check if staged changes have actual content diffs (not just mtime changes).
     pub fn has_real_staged_changes(&self) -> Result<bool> {
-        let output = Command::new("git")
-            .args(["diff", "--cached", "--quiet"])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to check staged changes")?;
-
-        // exit code 1 = there are differences, 0 = no differences
-        Ok(!output.status.success())
+        let head_tree = match self.repo.head() {
+            Ok(head) => Some(head.peel_to_tree().context("Failed to peel HEAD to tree")?),
+            Err(_) => None, // No HEAD yet — any staged content counts as change.
+        };
+        let diff = self
+            .repo
+            .diff_tree_to_index(head_tree.as_ref(), None, None)
+            .context("Failed to diff HEAD to index")?;
+        Ok(diff.deltas().count() > 0)
     }
 
     /// Create a commit with the given message.
@@ -181,24 +235,52 @@ impl GitRepo {
         Ok(oid.to_string()[..7].to_string())
     }
 
-    /// Push to the remote using the git CLI with timeout.
+    /// Push the given branch to the remote using the system credential helper.
     pub fn push(&self, remote_name: &str, branch: &str) -> Result<()> {
-        let child = Command::new("git")
-            .args(["push", remote_name, branch])
-            .current_dir(&self.path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("Failed to start git push")?;
+        self.push_with(remote_name, branch, &SystemCredentials)
+    }
 
-        let output = wait_with_timeout(child, PUSH_TIMEOUT)
-            .context("git push timed out")?;
+    /// Push the given branch to the remote using the given credential provider.
+    pub fn push_with(
+        &self,
+        remote_name: &str,
+        branch: &str,
+        creds: &dyn CredentialProvider,
+    ) -> Result<()> {
+        let mut remote = self
+            .repo
+            .find_remote(remote_name)
+            .with_context(|| format!("Remote '{}' not found", remote_name))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("git push failed: {}", stderr.trim());
+        let mut callbacks = RemoteCallbacks::new();
+        callbacks.credentials(|url, username_from_url, allowed| {
+            creds
+                .provide(url, username_from_url, allowed)
+                .map_err(|e| git2::Error::from_str(&format!("credential provider failed: {e}")))
+        });
+        // Surface server-side rejections (branch protection, hook failures) as errors.
+        let push_error = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+        let push_error_cb = push_error.clone();
+        callbacks.push_update_reference(move |refname, status| {
+            if let Some(msg) = status {
+                *push_error_cb.borrow_mut() = Some(format!("{}: {}", refname, msg));
+            }
+            Ok(())
+        });
+
+        let mut opts = PushOptions::new();
+        opts.remote_callbacks(callbacks);
+
+        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+        remote
+            .push(&[refspec.as_str()], Some(&mut opts))
+            .with_context(|| format!("Failed to push {}/{}", remote_name, branch))?;
+
+        // Drop opts (and thus the callback clone) before taking the value.
+        drop(opts);
+        if let Some(err) = push_error.borrow_mut().take() {
+            bail!("Push rejected by remote: {}", err);
         }
-
         Ok(())
     }
 
@@ -236,28 +318,25 @@ impl GitRepo {
 
     /// Get the diff summary (stat) for AI prompt context, truncated.
     ///
-    /// Uses `git diff --stat HEAD` so each changed file appears exactly once
-    /// with its total delta vs HEAD — regardless of staging state. This avoids
-    /// the AI seeing the same file twice (once staged, once unstaged) when the
-    /// working tree changes between `stage_all()` and this call.
+    /// Produces a `git diff --stat HEAD` style summary vs HEAD (or vs an empty
+    /// tree for the initial commit). Each changed file appears exactly once
+    /// with its total delta — regardless of staging state. Covers working-tree
+    /// and index in a single diff so the AI never sees a file twice.
     pub fn diff_summary(&self) -> Result<String> {
-        let output = Command::new("git")
-            .args(["diff", "--stat", "HEAD", "--no-color"])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to get diff summary")?;
-
-        let result = if output.status.success() {
-            String::from_utf8_lossy(&output.stdout).to_string()
-        } else {
-            // No HEAD yet (initial commit) — fall back to staged diff.
-            let staged = Command::new("git")
-                .args(["diff", "--staged", "--stat", "--no-color"])
-                .current_dir(&self.path)
-                .output()
-                .context("Failed to get staged diff summary")?;
-            String::from_utf8_lossy(&staged.stdout).to_string()
-        };
+        let head_tree = self
+            .repo
+            .head()
+            .ok()
+            .and_then(|h| h.peel_to_tree().ok());
+        let diff = self
+            .repo
+            .diff_tree_to_workdir_with_index(head_tree.as_ref(), None)
+            .context("Failed to compute diff")?;
+        let stats = diff.stats().context("Failed to get diff stats")?;
+        let buf = stats
+            .to_buf(git2::DiffStatsFormat::FULL, 80)
+            .context("Failed to format diff stats")?;
+        let result = String::from_utf8_lossy(&buf).to_string();
 
         // Truncate to avoid overwhelming AI prompts.
         let lines: Vec<&str> = result.lines().collect();
@@ -273,55 +352,36 @@ impl GitRepo {
         Ok(result.trim().to_string())
     }
 
-    /// Check if remote has diverged (has commits we don't have).
-    pub fn remote_has_diverged(&self, remote: &str, branch: &str) -> Result<bool> {
-        // Fetch latest refs
-        let _ = Command::new("git")
-            .args(["fetch", remote, "--quiet"])
-            .current_dir(&self.path)
-            .output();
-
-        let output = Command::new("git")
-            .args([
-                "rev-list",
-                "--count",
-                &format!("HEAD..{}/{}", remote, branch),
-            ])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to check for diverged remote")?;
-
-        if !output.status.success() {
-            return Ok(false); // Can't determine, assume not diverged
-        }
-
-        let count: usize = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse()
-            .unwrap_or(0);
-
-        Ok(count > 0)
+    /// Fetch a specific branch from the remote using the system credential helper.
+    pub fn fetch(&self, remote: &str, branch: &str) -> Result<()> {
+        self.fetch_with(remote, branch, &SystemCredentials)
     }
 
-    /// Fetch a specific branch from the remote.
-    pub fn fetch(&self, remote: &str, branch: &str) -> Result<()> {
-        let child = Command::new("git")
-            .args(["fetch", remote, branch])
-            .current_dir(&self.path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("Failed to start git fetch")?;
+    /// Fetch a specific branch from the remote using the given credential provider.
+    pub fn fetch_with(
+        &self,
+        remote: &str,
+        branch: &str,
+        creds: &dyn CredentialProvider,
+    ) -> Result<()> {
+        let mut remote_obj = self
+            .repo
+            .find_remote(remote)
+            .with_context(|| format!("Remote '{}' not found", remote))?;
 
-        let output = wait_with_timeout(child, FETCH_TIMEOUT)
-            .context("git fetch timed out")?;
+        let mut callbacks = RemoteCallbacks::new();
+        callbacks.credentials(|url, username_from_url, allowed| {
+            creds
+                .provide(url, username_from_url, allowed)
+                .map_err(|e| git2::Error::from_str(&format!("credential provider failed: {e}")))
+        });
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("git fetch failed: {}", stderr.trim());
-        }
+        let mut opts = FetchOptions::new();
+        opts.remote_callbacks(callbacks);
 
-        Ok(())
+        remote_obj
+            .fetch(&[branch], Some(&mut opts), None)
+            .with_context(|| format!("Failed to fetch {}/{}", remote, branch))
     }
 
     /// Attempt a fast-forward-only merge of the given ref into HEAD.
@@ -330,33 +390,38 @@ impl GitRepo {
     /// `Ok(false)` if the merge would not be fast-forward. Other failures
     /// bubble up as errors.
     pub fn merge_ff_only(&self, refname: &str) -> Result<bool> {
-        let ancestor = Command::new("git")
-            .args(["merge-base", "--is-ancestor", "HEAD", refname])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to run git merge-base")?;
+        let target_oid = self
+            .repo
+            .revparse_single(refname)
+            .with_context(|| format!("Failed to resolve ref '{}'", refname))?
+            .id();
 
-        // Exit 0 = HEAD is an ancestor of refname (including equal).
-        // Exit 1 = not an ancestor. Other codes are real errors.
-        match ancestor.status.code() {
-            Some(0) => {}
-            Some(1) => return Ok(false),
-            _ => {
-                let stderr = String::from_utf8_lossy(&ancestor.stderr);
-                bail!("git merge-base failed: {}", stderr.trim());
-            }
+        let head_ref = self.repo.head().context("Failed to get HEAD")?;
+        let head_oid = head_ref.target().context("HEAD has no target")?;
+
+        if head_oid == target_oid {
+            return Ok(true); // Already at target.
         }
 
-        let output = Command::new("git")
-            .args(["merge", "--ff-only", refname])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to run git merge --ff-only")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("git merge --ff-only failed: {}", stderr.trim());
+        // HEAD must be an ancestor of target for a fast-forward to be possible.
+        if !self
+            .repo
+            .graph_descendant_of(target_oid, head_oid)
+            .context("Failed to compute ancestry")?
+        {
+            return Ok(false);
         }
+
+        let head_name = head_ref.name().context("HEAD is detached")?.to_string();
+        drop(head_ref);
+
+        self.repo
+            .reference(&head_name, target_oid, true, "commitbook: fast-forward")
+            .with_context(|| format!("Failed to update {}", head_name))?;
+        self.repo.set_head(&head_name)?;
+        self.repo
+            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .context("Failed to check out fast-forwarded HEAD")?;
 
         Ok(true)
     }
@@ -366,143 +431,121 @@ impl GitRepo {
     /// Returns `(ahead, behind)`: how many commits `local` has that `remote` doesn't
     /// (ahead) and vice versa (behind).
     pub fn ahead_behind(&self, local: &str, remote: &str) -> Result<(u32, u32)> {
-        let output = Command::new("git")
-            .args([
-                "rev-list",
-                "--left-right",
-                "--count",
-                &format!("{local}...{remote}"),
-            ])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to run git rev-list")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("git rev-list failed: {}", stderr.trim());
-        }
-
-        let text = String::from_utf8_lossy(&output.stdout);
-        let mut parts = text.split_whitespace();
-        let ahead: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
-        let behind: u32 = parts.next().unwrap_or("0").parse().unwrap_or(0);
-        Ok((ahead, behind))
+        let local_oid = self
+            .repo
+            .revparse_single(local)
+            .with_context(|| format!("Failed to resolve ref '{}'", local))?
+            .id();
+        let remote_oid = self
+            .repo
+            .revparse_single(remote)
+            .with_context(|| format!("Failed to resolve ref '{}'", remote))?
+            .id();
+        let (ahead, behind) = self
+            .repo
+            .graph_ahead_behind(local_oid, remote_oid)
+            .context("Failed to compute ahead/behind counts")?;
+        Ok((ahead as u32, behind as u32))
     }
 
     /// Read a file's content at a specific ref (commit/branch/tag).
     pub fn show_file_at_ref(&self, refname: &str, path: &str) -> Result<String> {
-        let output = Command::new("git")
-            .args(["show", &format!("{refname}:{path}")])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to run git show")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("git show {}:{} failed: {}", refname, path, stderr.trim());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        let obj = self
+            .repo
+            .revparse_single(refname)
+            .with_context(|| format!("Failed to resolve ref '{}'", refname))?;
+        let tree = obj
+            .peel_to_tree()
+            .with_context(|| format!("Ref '{}' does not point to a tree", refname))?;
+        let entry = tree
+            .get_path(Path::new(path))
+            .with_context(|| format!("Path '{}' not found at ref '{}'", path, refname))?;
+        let object = entry
+            .to_object(&self.repo)
+            .with_context(|| format!("Failed to resolve object at {}:{}", refname, path))?;
+        let blob = object
+            .peel_to_blob()
+            .with_context(|| format!("{}:{} is not a blob", refname, path))?;
+        Ok(String::from_utf8_lossy(blob.content()).to_string())
     }
 
     /// List all file paths reachable from a ref.
     pub fn ls_tree_files(&self, refname: &str) -> Result<Vec<String>> {
-        let output = Command::new("git")
-            .args(["ls-tree", "-r", "--name-only", refname])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to run git ls-tree")?;
+        let obj = self
+            .repo
+            .revparse_single(refname)
+            .with_context(|| format!("Failed to resolve ref '{}'", refname))?;
+        let tree = obj
+            .peel_to_tree()
+            .with_context(|| format!("Ref '{}' does not point to a tree", refname))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("git ls-tree failed: {}", stderr.trim());
-        }
+        let mut files = Vec::new();
+        tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
+            if entry.kind() == Some(git2::ObjectType::Blob) {
+                if let Some(name) = entry.name() {
+                    let path = if dir.is_empty() {
+                        name.to_string()
+                    } else {
+                        format!("{}{}", dir, name)
+                    };
+                    files.push(path);
+                }
+            }
+            git2::TreeWalkResult::Ok
+        })
+        .context("Failed to walk tree")?;
 
-        let text = String::from_utf8_lossy(&output.stdout);
-        Ok(text.lines().map(|s| s.to_string()).collect())
+        Ok(files)
     }
 
     /// Resolve a ref to its full SHA.
     pub fn rev_parse(&self, refname: &str) -> Result<String> {
-        let output = Command::new("git")
-            .args(["rev-parse", refname])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to run git rev-parse")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("git rev-parse {} failed: {}", refname, stderr.trim());
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        let obj = self
+            .repo
+            .revparse_single(refname)
+            .with_context(|| format!("Failed to resolve ref '{}'", refname))?;
+        Ok(obj.id().to_string())
     }
 
     /// Rebase the current branch onto the given ref.
     ///
     /// On conflict, aborts the rebase and returns an error.
+    /// Desktop-only: shells out to system `git`. On mobile, returns an error.
     pub fn rebase_onto(&self, refname: &str) -> Result<()> {
-        let output = Command::new("git")
-            .args(["rebase", refname])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to run git rebase")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let _ = Command::new("git")
-                .args(["rebase", "--abort"])
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            let output = Command::new("git")
+                .args(["rebase", refname])
                 .current_dir(&self.path)
-                .output();
-            bail!("git rebase {} failed (aborted): {}", refname, stderr.trim());
+                .output()
+                .context("Failed to run git rebase")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let _ = Command::new("git")
+                    .args(["rebase", "--abort"])
+                    .current_dir(&self.path)
+                    .output();
+                bail!("git rebase {} failed (aborted): {}", refname, stderr.trim());
+            }
+
+            Ok(())
         }
 
-        Ok(())
-    }
-
-    /// Attempt to pull with rebase to sync with remote.
-    pub fn pull_rebase(&self, remote: &str, branch: &str) -> Result<()> {
-        let output = Command::new("git")
-            .args(["pull", "--rebase", remote, branch])
-            .current_dir(&self.path)
-            .output()
-            .context("Failed to pull --rebase")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // Abort the rebase if it failed
-            let _ = Command::new("git")
-                .args(["rebase", "--abort"])
-                .current_dir(&self.path)
-                .output();
-            bail!("pull --rebase failed (aborted): {}", stderr.trim());
+        #[cfg(any(target_os = "ios", target_os = "android"))]
+        {
+            let _ = refname;
+            bail!("rebase_onto is not supported on this platform");
         }
-
-        Ok(())
     }
 }
 
-/// Wait for a child process with a timeout.
-fn wait_with_timeout(
-    child: std::process::Child,
-    timeout: Duration,
-) -> Result<std::process::Output> {
-    let mut child = child;
-    let start = std::time::Instant::now();
-
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return child.wait_with_output().context("Failed to get output"),
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    bail!("Process timed out after {:?}", timeout);
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => bail!("Error waiting for process: {}", e),
-        }
+fn is_markdown_path(p: &str) -> bool {
+    if p.split('/').any(|seg| seg.starts_with('.')) {
+        return false;
     }
+    let lower = p.to_lowercase();
+    lower.ends_with(".md") || lower.ends_with(".markdown")
 }
 
 #[cfg(test)]

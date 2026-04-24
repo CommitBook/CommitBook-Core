@@ -1,5 +1,7 @@
 use super::*;
-use crate::git::test_support::{clone_second_workdir, commit_and_push_from, setup_repo_with_bare_remote};
+use crate::git::test_support::{
+    clone_second_workdir, commit_and_push_from, setup_repo_with_base, setup_repo_with_bare_remote,
+};
 use std::fs;
 
 fn create_temp_repo() -> (tempfile::TempDir, Repository) {
@@ -367,6 +369,73 @@ fn test_merge_ff_only_rejects_divergent() {
         .unwrap();
     assert!(!advanced);
     assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), local_sha);
+}
+
+// --- status_markdown tests ---
+
+#[test]
+fn test_status_markdown_clean_working_tree() {
+    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
+    let status = fx.repo().status_markdown().unwrap();
+    assert!(status.is_empty());
+}
+
+#[test]
+fn test_status_markdown_modified() {
+    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
+    fs::write(fx.repo_root.join("notes.md"), "# modified\n").unwrap();
+
+    let status = fx.repo().status_markdown().unwrap();
+    assert_eq!(status.modified, vec!["notes.md".to_string()]);
+    assert!(status.added.is_empty());
+    assert!(status.deleted.is_empty());
+}
+
+#[test]
+fn test_status_markdown_added_untracked() {
+    let fx = setup_repo_with_base(&[]);
+    fs::write(fx.repo_root.join("new.md"), "# new\n").unwrap();
+
+    let status = fx.repo().status_markdown().unwrap();
+    assert_eq!(status.added, vec!["new.md".to_string()]);
+    assert!(status.modified.is_empty());
+    assert!(status.deleted.is_empty());
+}
+
+#[test]
+fn test_status_markdown_deleted() {
+    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
+    fs::remove_file(fx.repo_root.join("notes.md")).unwrap();
+
+    let status = fx.repo().status_markdown().unwrap();
+    assert_eq!(status.deleted, vec!["notes.md".to_string()]);
+    assert!(status.modified.is_empty());
+    assert!(status.added.is_empty());
+}
+
+#[test]
+fn test_status_markdown_skips_non_markdown() {
+    let fx = setup_repo_with_base(&[]);
+    fs::write(fx.repo_root.join("script.sh"), "#!/bin/bash\n").unwrap();
+    fs::write(fx.repo_root.join("image.png"), b"fake").unwrap();
+    fs::write(fx.repo_root.join("real.md"), "# real\n").unwrap();
+
+    let status = fx.repo().status_markdown().unwrap();
+    assert_eq!(status.added, vec!["real.md".to_string()]);
+    assert!(!status.added.iter().any(|p| p.ends_with(".sh")));
+    assert!(!status.added.iter().any(|p| p.ends_with(".png")));
+}
+
+#[test]
+fn test_status_markdown_skips_hidden_dirs() {
+    let fx = setup_repo_with_base(&[]);
+    fs::create_dir_all(fx.repo_root.join(".hidden")).unwrap();
+    fs::write(fx.repo_root.join(".hidden/secret.md"), "# secret\n").unwrap();
+    fs::write(fx.repo_root.join("visible.md"), "# visible\n").unwrap();
+
+    let status = fx.repo().status_markdown().unwrap();
+    assert_eq!(status.added, vec!["visible.md".to_string()]);
+    assert!(!status.added.iter().any(|p| p.contains(".hidden")));
 }
 
 #[test]

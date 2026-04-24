@@ -3,92 +3,10 @@ use crate::domain::sync_plan::SyncMode;
 use crate::git::test_support::setup_repo_with_base;
 use crate::transport::mock::MockTransport;
 
-// --- Helper function tests ---
-
-#[test]
-fn test_collect_markdown_files_empty_dir() {
-    let tmp = tempfile::tempdir().unwrap();
-    let mut files = Vec::new();
-    collect_markdown_files(tmp.path(), tmp.path(), &mut files).unwrap();
-    assert!(files.is_empty());
-}
-
-#[test]
-fn test_collect_markdown_files_finds_md() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join("notes.md"), "# Notes").unwrap();
-    std::fs::write(tmp.path().join("todo.md"), "# Todo").unwrap();
-
-    let mut files = Vec::new();
-    collect_markdown_files(tmp.path(), tmp.path(), &mut files).unwrap();
-    files.sort();
-    assert_eq!(files, vec!["notes.md", "todo.md"]);
-}
-
-#[test]
-fn test_collect_markdown_files_skips_hidden() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join("visible.md"), "visible").unwrap();
-    let hidden = tmp.path().join(".hidden");
-    std::fs::create_dir_all(&hidden).unwrap();
-    std::fs::write(hidden.join("secret.md"), "secret").unwrap();
-
-    let mut files = Vec::new();
-    collect_markdown_files(tmp.path(), tmp.path(), &mut files).unwrap();
-    assert_eq!(files, vec!["visible.md"]);
-}
-
-#[test]
-fn test_collect_markdown_files_skips_non_markdown() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join("code.rs"), "fn main() {}").unwrap();
-    std::fs::write(tmp.path().join("data.json"), "{}").unwrap();
-    std::fs::write(tmp.path().join("notes.md"), "# Notes").unwrap();
-
-    let mut files = Vec::new();
-    collect_markdown_files(tmp.path(), tmp.path(), &mut files).unwrap();
-    assert_eq!(files, vec!["notes.md"]);
-}
-
-#[test]
-fn test_collect_markdown_files_finds_markdown_extension() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join("doc.markdown"), "# Doc").unwrap();
-
-    let mut files = Vec::new();
-    collect_markdown_files(tmp.path(), tmp.path(), &mut files).unwrap();
-    assert_eq!(files, vec!["doc.markdown"]);
-}
-
-#[test]
-fn test_collect_markdown_files_nested_dirs() {
-    let tmp = tempfile::tempdir().unwrap();
-    let sub = tmp.path().join("subdir");
-    std::fs::create_dir_all(&sub).unwrap();
-    std::fs::write(sub.join("nested.md"), "# Nested").unwrap();
-
-    let mut files = Vec::new();
-    collect_markdown_files(tmp.path(), tmp.path(), &mut files).unwrap();
-    assert_eq!(files, vec!["subdir/nested.md"]);
-}
-
-#[test]
-fn test_list_tracked_files_default_patterns() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join("a.md"), "a").unwrap();
-    std::fs::write(tmp.path().join("b.rs"), "b").unwrap();
-
-    let mut files = list_tracked_files(tmp.path(), &[]).unwrap();
-    files.sort();
-    assert_eq!(files, vec!["a.md"]);
-}
-
-// --- create_sync_plan tests ---
-
 #[tokio::test]
 async fn test_plan_noop_no_changes() {
     // Working tree matches the committed base; transport reports same head.
-    let fx = setup_repo_with_base(&[("notes.md", "# Hello")]);
+    let fx = setup_repo_with_base(&[("notes.md", "# Hello\n")]);
 
     let state = crate::state::sync_state::SyncState {
         remote_head: Some(fx.base_sha.clone()),
@@ -97,7 +15,7 @@ async fn test_plan_noop_no_changes() {
     state.save(&fx.cb_dir).unwrap();
 
     let transport = MockTransport::new()
-        .with_file("notes.md", "# Hello")
+        .with_file("notes.md", "# Hello\n")
         .with_head(&fx.base_sha);
 
     let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
@@ -112,7 +30,7 @@ async fn test_plan_noop_no_changes() {
 #[tokio::test]
 async fn test_plan_pull_only() {
     // Local file matches base (not dirty); remote has moved.
-    let fx = setup_repo_with_base(&[("notes.md", "# Hello")]);
+    let fx = setup_repo_with_base(&[("notes.md", "# Hello\n")]);
 
     let state = crate::state::sync_state::SyncState {
         remote_head: Some(fx.base_sha.clone()),
@@ -122,7 +40,7 @@ async fn test_plan_pull_only() {
 
     let transport = MockTransport::new()
         .with_head("new_head")
-        .with_file("notes.md", "# Updated remotely");
+        .with_file("notes.md", "# Updated remotely\n");
 
     let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
         .await
@@ -137,8 +55,8 @@ async fn test_plan_pull_only() {
 #[tokio::test]
 async fn test_plan_push_only() {
     // Working tree differs from committed base (dirty); remote unchanged.
-    let fx = setup_repo_with_base(&[("notes.md", "# Original")]);
-    std::fs::write(fx.repo_root.join("notes.md"), "# Modified locally").unwrap();
+    let fx = setup_repo_with_base(&[("notes.md", "# Original\n")]);
+    std::fs::write(fx.repo_root.join("notes.md"), "# Modified locally\n").unwrap();
 
     let state = crate::state::sync_state::SyncState {
         remote_head: Some(fx.base_sha.clone()),
@@ -148,14 +66,18 @@ async fn test_plan_push_only() {
 
     let transport = MockTransport::new()
         .with_head(&fx.base_sha)
-        .with_file("notes.md", "# Original");
+        .with_file("notes.md", "# Original\n");
 
     let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
         .await
         .unwrap();
 
     assert_eq!(plan.mode, SyncMode::PushOnly);
-    let doc = &plan.documents[0];
+    let doc = plan
+        .documents
+        .iter()
+        .find(|d| d.path == "notes.md")
+        .unwrap();
     assert!(doc.requires_upload);
     assert!(!doc.requires_download);
 }
@@ -163,8 +85,8 @@ async fn test_plan_push_only() {
 #[tokio::test]
 async fn test_plan_pull_then_push() {
     // Both sides changed since base.
-    let fx = setup_repo_with_base(&[("notes.md", "# Original")]);
-    std::fs::write(fx.repo_root.join("notes.md"), "# Modified locally").unwrap();
+    let fx = setup_repo_with_base(&[("notes.md", "# Original\n")]);
+    std::fs::write(fx.repo_root.join("notes.md"), "# Modified locally\n").unwrap();
 
     let state = crate::state::sync_state::SyncState {
         remote_head: Some(fx.base_sha.clone()),
@@ -174,14 +96,18 @@ async fn test_plan_pull_then_push() {
 
     let transport = MockTransport::new()
         .with_head("new_head")
-        .with_file("notes.md", "# Modified remotely");
+        .with_file("notes.md", "# Modified remotely\n");
 
     let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
         .await
         .unwrap();
 
     assert_eq!(plan.mode, SyncMode::PullThenPush);
-    let doc = plan.documents.iter().find(|d| d.path == "notes.md").unwrap();
+    let doc = plan
+        .documents
+        .iter()
+        .find(|d| d.path == "notes.md")
+        .unwrap();
     assert!(doc.requires_merge);
     assert!(doc.requires_download);
     assert!(doc.requires_upload);
@@ -200,15 +126,18 @@ async fn test_plan_new_remote_file() {
 
     let transport = MockTransport::new()
         .with_head("new_head")
-        .with_file("new-file.md", "# Brand new");
+        .with_file("new-file.md", "# Brand new\n");
 
     let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
         .await
         .unwrap();
 
     assert_eq!(plan.mode, SyncMode::PullOnly);
-    let doc = &plan.documents[0];
-    assert_eq!(doc.path, "new-file.md");
+    let doc = plan
+        .documents
+        .iter()
+        .find(|d| d.path == "new-file.md")
+        .unwrap();
     assert_eq!(doc.local_state, DocumentState::Unknown);
     assert_eq!(doc.remote_state, DocumentState::Added);
     assert!(doc.requires_download);
@@ -216,10 +145,10 @@ async fn test_plan_new_remote_file() {
 
 #[tokio::test]
 async fn test_plan_deleted_on_remote() {
-    // File was in base (committed locally) but not on remote anymore.
-    // Also remove it from the working tree so it's not "tracked" locally.
-    let fx = setup_repo_with_base(&[("deleted.md", "# Was here")]);
-    std::fs::remove_file(fx.repo_root.join("deleted.md")).unwrap();
+    // File exists locally (both in base and working tree) but remote dropped it.
+    // Planner should emit a requires_delete entry so the pull phase removes it
+    // from the working tree.
+    let fx = setup_repo_with_base(&[("doomed.md", "# Was here\n")]);
 
     let state = crate::state::sync_state::SyncState {
         remote_head: Some(fx.base_sha.clone()),
@@ -227,7 +156,7 @@ async fn test_plan_deleted_on_remote() {
     };
     state.save(&fx.cb_dir).unwrap();
 
-    // Remote has no files.
+    // Remote has no markdown files.
     let transport = MockTransport::new().with_head("new_head");
 
     let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
@@ -237,17 +166,73 @@ async fn test_plan_deleted_on_remote() {
     let doc = plan
         .documents
         .iter()
-        .find(|d| d.path == "deleted.md")
+        .find(|d| d.path == "doomed.md")
         .unwrap();
     assert!(doc.requires_delete);
+    assert!(!doc.requires_remote_delete);
 }
 
-#[test]
-fn test_list_tracked_files_invalid_glob_returns_error() {
-    let tmp = tempfile::tempdir().unwrap();
-    // "[invalid" is an unclosed bracket — glob::glob returns PatternError for it.
-    let result = list_tracked_files(tmp.path(), &["[invalid".to_string()]);
-    assert!(result.is_err(), "expected Err for invalid glob pattern, got Ok");
-    let msg = result.unwrap_err().to_string();
-    assert!(msg.contains("Invalid glob pattern"), "unexpected error message: {msg}");
+#[tokio::test]
+async fn test_plan_local_delete_pushes_delete() {
+    // File was in the base commit and is still on remote. User deleted it
+    // locally. Planner must emit requires_remote_delete so the pipeline pushes
+    // the deletion.
+    let fx = setup_repo_with_base(&[("stale.md", "# stale\n")]);
+    std::fs::remove_file(fx.repo_root.join("stale.md")).unwrap();
+
+    let state = crate::state::sync_state::SyncState {
+        remote_head: Some(fx.base_sha.clone()),
+        last_sync_at: None,
+    };
+    state.save(&fx.cb_dir).unwrap();
+
+    // Remote still has the file at its own head (which differs from ours).
+    let transport = MockTransport::new()
+        .with_head("new_head")
+        .with_file("stale.md", "# stale\n");
+
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+        .await
+        .unwrap();
+
+    assert_eq!(plan.mode, SyncMode::PullThenPush);
+    let doc = plan
+        .documents
+        .iter()
+        .find(|d| d.path == "stale.md")
+        .unwrap();
+    assert!(doc.requires_remote_delete);
+    assert!(!doc.requires_delete);
+    assert!(!doc.requires_upload);
+    assert_eq!(doc.local_state, DocumentState::Deleted);
+}
+
+#[tokio::test]
+async fn test_plan_local_delete_pushes_delete_when_remote_unchanged() {
+    // Same scenario but remote hasn't moved — we still need to push the delete.
+    let fx = setup_repo_with_base(&[("stale.md", "# stale\n")]);
+    std::fs::remove_file(fx.repo_root.join("stale.md")).unwrap();
+
+    let state = crate::state::sync_state::SyncState {
+        remote_head: Some(fx.base_sha.clone()),
+        last_sync_at: None,
+    };
+    state.save(&fx.cb_dir).unwrap();
+
+    // Mock transport at same SHA as checkpoint — remote unchanged.
+    let transport = MockTransport::new()
+        .with_head(&fx.base_sha)
+        .with_file("stale.md", "# stale\n");
+
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+        .await
+        .unwrap();
+
+    assert_eq!(plan.mode, SyncMode::PushOnly);
+    let doc = plan
+        .documents
+        .iter()
+        .find(|d| d.path == "stale.md")
+        .unwrap();
+    assert!(doc.requires_remote_delete);
 }
