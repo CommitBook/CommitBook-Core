@@ -7,6 +7,7 @@ use commitbook_core::config::LocalConfig;
 use commitbook_core::cron;
 use commitbook_core::git::GitRepo;
 use commitbook_core::state::auth::AuthConfig;
+use commitbook_core::state::sync_state::SyncState;
 
 pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
     println!("{}", "CommitBook Doctor".bold().cyan());
@@ -119,17 +120,19 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
         );
     }
 
-    // 9. Base directory.
-    print!("  base/ directory... ");
-    let base_dir = cb_dir.join("local").join("base");
-    if base_dir.is_dir() {
-        println!("{}", "OK".green().bold());
-    } else {
-        println!("{}", "MISSING".yellow().bold());
-        println!(
-            "    {}",
-            "Will be created on first sync.".dimmed()
-        );
+    // 9. Sync checkpoint.
+    print!("  Sync checkpoint... ");
+    match SyncState::load(cb_dir) {
+        Ok(state) if state.remote_head.is_some() => {
+            println!("{}", "OK".green().bold());
+        }
+        _ => {
+            println!("{}", "not yet established".dimmed());
+            println!(
+                "    {}",
+                "Will be set after the first successful sync.".dimmed()
+            );
+        }
     }
 
     // 10. Local vs origin divergence.

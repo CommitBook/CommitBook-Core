@@ -1,3 +1,4 @@
+pub mod base;
 pub mod commit;
 pub mod operations;
 pub mod remote;

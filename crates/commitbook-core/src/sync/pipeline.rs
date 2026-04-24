@@ -3,17 +3,12 @@ use std::path::Path;
 
 use crate::domain::sync_plan::{SyncMode, SyncPlan};
 use crate::domain::transport::{RemoteTransport, WriteFileInput};
+use crate::git::{self, GitRepo};
 use crate::logger::FileLogger;
 use crate::markdown::parser::parse_document;
 use crate::markdown::reassemble::reassemble;
 use crate::merge::engine::merge_document;
-use crate::state::{base, sync_state::SyncState};
-
-/// A base write deferred until push succeeds.
-struct DeferredBaseWrite {
-    path: String,
-    content: String,
-}
+use crate::state::sync_state::SyncState;
 
 /// Result of executing a sync plan.
 #[derive(Debug)]
@@ -44,14 +39,7 @@ pub async fn execute_sync(
     match plan.mode {
         SyncMode::Noop => return Ok(result),
         SyncMode::PullOnly => {
-            let deferred = pull_documents(
-                plan, commitbook_dir, repo_root, branch, transport, &mut result, logger,
-            )
-            .await?;
-            // No push phase — flush all deferred bases immediately.
-            for d in &deferred {
-                base::write(commitbook_dir, &d.path, &d.content)?;
-            }
+            pull_documents(plan, repo_root, branch, transport, &mut result, logger).await?;
         }
         SyncMode::PushOnly => {
             push_documents(
@@ -66,11 +54,8 @@ pub async fn execute_sync(
             .await?;
         }
         SyncMode::PullThenPush => {
-            let deferred = pull_documents(
-                plan, commitbook_dir, repo_root, branch, transport, &mut result, logger,
-            )
-            .await?;
-            let push_ok = push_documents(
+            pull_documents(plan, repo_root, branch, transport, &mut result, logger).await?;
+            push_documents(
                 plan,
                 repo_root,
                 branch,
@@ -80,15 +65,11 @@ pub async fn execute_sync(
                 logger,
             )
             .await?;
-            if push_ok {
-                for d in &deferred {
-                    base::write(commitbook_dir, &d.path, &d.content)?;
-                }
-            }
         }
     }
 
-    // Update checkpoint only if no errors occurred.
+    // Update checkpoint only if no errors occurred. The new remote_head SHA
+    // is the base SHA for the next sync — there is no separate base cache.
     if result.errors.is_empty() {
         if let Ok(head) = transport.get_head(branch).await {
             let state = SyncState {
@@ -104,14 +85,13 @@ pub async fn execute_sync(
 
 async fn pull_documents(
     plan: &SyncPlan,
-    commitbook_dir: &Path,
     repo_root: &Path,
     branch: &str,
     transport: &dyn RemoteTransport,
     result: &mut SyncResult,
     logger: &FileLogger,
-) -> Result<Vec<DeferredBaseWrite>> {
-    let mut deferred_bases: Vec<DeferredBaseWrite> = Vec::new();
+) -> Result<()> {
+    let repo = GitRepo::open(repo_root).ok();
 
     for doc_plan in &plan.documents {
         if !doc_plan.requires_download {
@@ -130,8 +110,10 @@ async fn pull_documents(
         };
 
         if doc_plan.requires_merge {
-            // Three-way merge: base vs local (working tree) vs remote.
-            let base_content = base::read(commitbook_dir, &doc_plan.path)?
+            // Three-way merge: base (from git) vs local (working tree) vs remote.
+            let base_content = repo
+                .as_ref()
+                .and_then(|r| git::base::read(r, &plan.base_revision, &doc_plan.path))
                 .unwrap_or_default();
             let local_content = {
                 let local_path = repo_root.join(&doc_plan.path);
@@ -143,32 +125,21 @@ async fn pull_documents(
             };
 
             // Fast-path: skip parse→merge→reassemble when content hasn't diverged.
-            // Merge-path files always have requires_upload=true, so defer base writes.
             if local_content == remote_doc.content {
-                // Local and remote are identical — just update base, no file write needed.
-                deferred_bases.push(DeferredBaseWrite {
-                    path: doc_plan.path.clone(),
-                    content: local_content,
-                });
+                // Nothing to do — working tree already matches remote.
+                continue;
             } else if local_content == base_content {
-                // Only remote changed — take remote content verbatim (no reassemble).
+                // Only remote changed — take remote content verbatim.
                 let file_path = repo_root.join(&doc_plan.path);
                 if let Some(parent) = file_path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
                 std::fs::write(&file_path, &remote_doc.content)?;
-                deferred_bases.push(DeferredBaseWrite {
-                    path: doc_plan.path.clone(),
-                    content: remote_doc.content.clone(),
-                });
                 let _ = logger.info(&format!("Pulled {}", doc_plan.path));
                 result.pulled += 1;
             } else if remote_doc.content == base_content {
-                // Only local changed — keep local as-is, just update base.
-                deferred_bases.push(DeferredBaseWrite {
-                    path: doc_plan.path.clone(),
-                    content: local_content,
-                });
+                // Only local changed — keep local as-is.
+                continue;
             } else {
                 // Both sides changed — full three-way merge required.
                 let base_tree = parse_document(&base_content);
@@ -183,10 +154,6 @@ async fn pull_documents(
                     std::fs::create_dir_all(parent)?;
                 }
                 std::fs::write(&file_path, &merged_content)?;
-                deferred_bases.push(DeferredBaseWrite {
-                    path: doc_plan.path.clone(),
-                    content: merged_content,
-                });
                 result.pulled += 1;
 
                 if !merge_result.conflicts.is_empty() {
@@ -222,33 +189,21 @@ async fn pull_documents(
                 let _ = logger.info(&format!("Pulled {}", doc_plan.path));
                 result.pulled += 1;
             }
-
-            // Save as base version for future merges.
-            if doc_plan.requires_upload {
-                deferred_bases.push(DeferredBaseWrite {
-                    path: doc_plan.path.clone(),
-                    content: remote_doc.content.clone(),
-                });
-            } else {
-                base::write(commitbook_dir, &doc_plan.path, &remote_doc.content)?;
-            }
         }
     }
 
-    // Handle remote deletions.
+    // Handle remote deletions — just remove from working tree. The base SHA
+    // advances on successful sync so the deleted path disappears naturally.
     for doc_plan in &plan.documents {
         if doc_plan.requires_delete {
-            // Remove from working tree.
             let file_path = repo_root.join(&doc_plan.path);
             if file_path.exists() {
                 std::fs::remove_file(&file_path)?;
             }
-            // Remove base version.
-            base::delete(commitbook_dir, &doc_plan.path)?;
         }
     }
 
-    Ok(deferred_bases)
+    Ok(())
 }
 
 async fn push_documents(

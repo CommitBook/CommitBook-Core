@@ -1,6 +1,6 @@
 use super::operations::GitRepo;
 use git2::{Repository, Signature};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::{tempdir, TempDir};
 
@@ -9,6 +9,77 @@ pub struct RepoFixture {
     pub repo_dir: TempDir,
     pub repo: GitRepo,
     pub branch: String,
+}
+
+/// Planner/pipeline fixture: a local git repo with `files` committed as the
+/// "base" state, plus a `.CommitBook/local/` directory ready for state writes.
+/// Returns the SHA of the base commit so tests can feed it into
+/// `SyncState.remote_head` or `SyncPlan.base_revision`.
+pub struct BaseRepoFixture {
+    // Held to keep the temp dir alive for the duration of the test.
+    #[allow(dead_code)]
+    pub tmp: TempDir,
+    pub repo_root: PathBuf,
+    pub cb_dir: PathBuf,
+    pub base_sha: String,
+    #[allow(dead_code)]
+    pub branch: String,
+}
+
+/// Initialize a git repo at a temp dir, commit the provided files, and return
+/// the commit SHA. Use this for planner/pipeline tests that previously wrote
+/// `base/*` files directly.
+pub fn setup_repo_with_base(files: &[(&str, &str)]) -> BaseRepoFixture {
+    let tmp = tempdir().unwrap();
+    let repo_root = tmp.path().to_path_buf();
+    let cb_dir = repo_root.join(".CommitBook");
+    std::fs::create_dir_all(cb_dir.join("local")).unwrap();
+
+    let branch = {
+        let repo = Repository::init(&repo_root).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+        }
+
+        let mut index = repo.index().unwrap();
+        for (rel_path, content) in files {
+            let full = repo_root.join(rel_path);
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&full, content).unwrap();
+            index.add_path(Path::new(rel_path)).unwrap();
+        }
+
+        // If no files were given, commit an empty tree so there's always a HEAD.
+        index.write().unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let sig = Signature::now("Test User", "test@example.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+            .unwrap();
+
+        let branch = repo
+            .head()
+            .unwrap()
+            .shorthand()
+            .unwrap_or("main")
+            .to_string();
+        branch
+    };
+
+    let repo = GitRepo::open(&repo_root).unwrap();
+    let base_sha = repo.rev_parse("HEAD").unwrap();
+
+    BaseRepoFixture {
+        tmp,
+        repo_root,
+        cb_dir,
+        base_sha,
+        branch,
+    }
 }
 
 /// Create a working repo + bare remote on disk, with one initial commit pushed.

@@ -1,5 +1,4 @@
 pub mod auth;
-pub mod base;
 pub mod sync_state;
 
 use anyhow::{bail, Context, Result};
@@ -59,7 +58,6 @@ pub fn ensure_initialized() -> Result<PathBuf> {
 pub fn initialize(repo_root: &Path) -> Result<()> {
     let cb_dir = repo_root.join(".CommitBook");
     let local = cb_dir.join("local");
-    std::fs::create_dir_all(local.join("base"))?;
     std::fs::create_dir_all(local.join("logs"))?;
 
     // Set directory permissions to 700 (owner only)

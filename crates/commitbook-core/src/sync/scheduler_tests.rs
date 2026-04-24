@@ -2,7 +2,7 @@ use super::*;
 use crate::git::test_support::{clone_second_workdir, commit_and_push_from, setup_repo_with_bare_remote};
 
 #[test]
-fn test_migrate_shadow_clone_removes_legacy_dir() {
+fn test_migrate_removes_legacy_remote_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let cb_dir = tmp.path().join(".CommitBook");
     let shadow = cb_dir.join("local").join("remote");
@@ -10,19 +10,49 @@ fn test_migrate_shadow_clone_removes_legacy_dir() {
     std::fs::write(shadow.join("marker.txt"), "legacy").unwrap();
 
     let logger = FileLogger::new(tmp.path(), 30).unwrap();
-    migrate_shadow_clone(&cb_dir, &logger).unwrap();
+    migrate_legacy_local_dirs(&cb_dir, &logger).unwrap();
 
     assert!(!shadow.exists(), "legacy shadow clone should be removed");
 }
 
 #[test]
-fn test_migrate_shadow_clone_noop_when_absent() {
+fn test_migrate_removes_legacy_base_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cb_dir = tmp.path().join(".CommitBook");
+    let base = cb_dir.join("local").join("base");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(base.join("notes.md"), "cached\n").unwrap();
+
+    let logger = FileLogger::new(tmp.path(), 30).unwrap();
+    migrate_legacy_local_dirs(&cb_dir, &logger).unwrap();
+
+    assert!(!base.exists(), "legacy base dir should be removed");
+}
+
+#[test]
+fn test_migrate_removes_both_legacy_dirs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cb_dir = tmp.path().join(".CommitBook");
+    let shadow = cb_dir.join("local").join("remote");
+    let base = cb_dir.join("local").join("base");
+    std::fs::create_dir_all(&shadow).unwrap();
+    std::fs::create_dir_all(&base).unwrap();
+
+    let logger = FileLogger::new(tmp.path(), 30).unwrap();
+    migrate_legacy_local_dirs(&cb_dir, &logger).unwrap();
+
+    assert!(!shadow.exists());
+    assert!(!base.exists());
+}
+
+#[test]
+fn test_migrate_noop_when_absent() {
     let tmp = tempfile::tempdir().unwrap();
     let cb_dir = tmp.path().join(".CommitBook");
     std::fs::create_dir_all(cb_dir.join("local")).unwrap();
 
     let logger = FileLogger::new(tmp.path(), 30).unwrap();
-    migrate_shadow_clone(&cb_dir, &logger).unwrap();
+    migrate_legacy_local_dirs(&cb_dir, &logger).unwrap();
 }
 
 #[test]

@@ -61,7 +61,7 @@ fn test_initialize_creates_structure() {
     initialize(repo).unwrap();
 
     assert!(repo.join(".CommitBook").is_dir());
-    assert!(repo.join(".CommitBook/local/base").is_dir());
+    assert!(repo.join(".CommitBook/local").is_dir());
     assert!(repo.join(".CommitBook/local/logs").is_dir());
     assert!(repo.join(".CommitBook/config.toml").exists());
 }

@@ -13,6 +13,10 @@ pub enum SyncMode {
 pub struct SyncPlan {
     pub mode: SyncMode,
     pub documents: Vec<PlannedDocumentSync>,
+    /// SHA to treat as the base version for dirty detection and 3-way merge.
+    /// `None` on first sync when `origin/<branch>` doesn't resolve (brand-new repo).
+    #[serde(default)]
+    pub base_revision: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

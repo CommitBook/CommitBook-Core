@@ -5,7 +5,8 @@ use crate::domain::sync_plan::{
     DocumentState, PlannedDocumentSync, SyncMode, SyncPlan,
 };
 use crate::domain::transport::RemoteTransport;
-use crate::state::{base, sync_state::SyncState};
+use crate::git::{self, GitRepo};
+use crate::state::sync_state::SyncState;
 
 /// Create a sync plan by comparing local state against the remote.
 pub async fn create_sync_plan(
@@ -23,16 +24,33 @@ pub async fn create_sync_plan(
         None => true, // No checkpoint = first sync, always pull.
     };
 
-    // Find dirty local files by comparing working tree vs base/.
+    // Resolve the base SHA: checkpoint if we have one, else origin/<branch>
+    // (first sync), else None (brand-new repo with no remote history).
+    let repo = GitRepo::open(repo_root).ok();
+    let base_sha: Option<String> = state
+        .remote_head
+        .clone()
+        .or_else(|| {
+            repo.as_ref()
+                .and_then(|r| r.rev_parse(&format!("origin/{branch}")).ok())
+        });
+
+    // Find dirty local files by comparing working tree vs base (from git).
     let tracked_files = list_tracked_files(repo_root, tracked_patterns)?;
-    let base_files = base::list(commitbook_dir)?;
+    let base_files = match &repo {
+        Some(r) => git::base::list(r, &base_sha)?,
+        None => Vec::new(),
+    };
 
     let mut dirty_files = Vec::new();
     for path in &tracked_files {
         let working_path = repo_root.join(path);
         let working_content = std::fs::read_to_string(&working_path)?;
-        match base::read(commitbook_dir, path)? {
-            Some(base_content) if base_content == working_content => {} // unchanged
+        let base_content = repo
+            .as_ref()
+            .and_then(|r| git::base::read(r, &base_sha, path));
+        match base_content {
+            Some(content) if content == working_content => {} // unchanged
             _ => dirty_files.push(path.clone()), // new or modified
         }
     }
@@ -50,6 +68,7 @@ pub async fn create_sync_plan(
         return Ok(SyncPlan {
             mode,
             documents: Vec::new(),
+            base_revision: base_sha,
         });
     }
 
@@ -151,6 +170,7 @@ pub async fn create_sync_plan(
     Ok(SyncPlan {
         mode,
         documents: planned_docs,
+        base_revision: base_sha,
     })
 }
 

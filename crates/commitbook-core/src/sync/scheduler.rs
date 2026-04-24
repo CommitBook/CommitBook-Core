@@ -22,7 +22,7 @@ pub async fn sync_repository(
     logger: &FileLogger,
     commit_message: Option<String>,
 ) -> Result<pipeline::SyncResult> {
-    migrate_shadow_clone(commitbook_dir, logger)?;
+    migrate_legacy_local_dirs(commitbook_dir, logger)?;
     reconcile_local_branch(repo_root, branch, logger)?;
 
     let plan = planner::create_sync_plan(
@@ -48,16 +48,19 @@ pub async fn sync_repository(
     Ok(result)
 }
 
-/// Remove the legacy `.CommitBook/local/remote/` shadow clone if present.
+/// Remove legacy CommitBook local dirs that are no longer used:
 ///
-/// Earlier versions of CommitBook kept a second git clone here for
-/// fetch/merge/push operations. Now everything happens in the user's repo.
-fn migrate_shadow_clone(commitbook_dir: &Path, logger: &FileLogger) -> Result<()> {
-    let shadow = commitbook_dir.join("local").join("remote");
-    if shadow.exists() {
-        let _ = logger.info("Removing legacy shadow clone at .CommitBook/local/remote/");
-        log::info!("Removing legacy shadow clone at .CommitBook/local/remote/");
-        std::fs::remove_dir_all(&shadow)?;
+/// - `.CommitBook/local/remote/` — shadow clone from the pre-GitRemoteTransport era
+/// - `.CommitBook/local/base/` — file-content cache replaced by git history
+fn migrate_legacy_local_dirs(commitbook_dir: &Path, logger: &FileLogger) -> Result<()> {
+    for legacy in ["remote", "base"] {
+        let path = commitbook_dir.join("local").join(legacy);
+        if path.exists() {
+            let msg = format!("Removing legacy .CommitBook/local/{legacy}/");
+            let _ = logger.info(&msg);
+            log::info!("{}", msg);
+            std::fs::remove_dir_all(&path)?;
+        }
     }
     Ok(())
 }

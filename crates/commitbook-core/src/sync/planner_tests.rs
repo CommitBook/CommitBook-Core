@@ -1,5 +1,6 @@
 use super::*;
 use crate::domain::sync_plan::SyncMode;
+use crate::git::test_support::setup_repo_with_base;
 use crate::transport::mock::MockTransport;
 
 // --- Helper function tests ---
@@ -84,56 +85,48 @@ fn test_list_tracked_files_default_patterns() {
 
 // --- create_sync_plan tests ---
 
-fn setup_repo() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo_root = tmp.path().to_path_buf();
-    let cb_dir = repo_root.join(".CommitBook");
-    std::fs::create_dir_all(cb_dir.join("local").join("base")).unwrap();
-    (tmp, repo_root, cb_dir.clone())
-}
-
 #[tokio::test]
 async fn test_plan_noop_no_changes() {
-    let (_tmp, repo_root, cb_dir) = setup_repo();
+    // Working tree matches the committed base; transport reports same head.
+    let fx = setup_repo_with_base(&[("notes.md", "# Hello")]);
 
-    // Write a file + matching base version.
-    std::fs::write(repo_root.join("notes.md"), "# Hello").unwrap();
-    crate::state::base::write(&cb_dir, "notes.md", "# Hello").unwrap();
-
-    // Set checkpoint to same head.
     let state = crate::state::sync_state::SyncState {
-        remote_head: Some("mock_head_sha_000".to_string()),
+        remote_head: Some(fx.base_sha.clone()),
         last_sync_at: Some("2026-01-01T00:00:00Z".to_string()),
     };
-    state.save(&cb_dir).unwrap();
+    state.save(&fx.cb_dir).unwrap();
 
-    let transport = MockTransport::new().with_file("notes.md", "# Hello");
-    let plan = create_sync_plan(&cb_dir, &repo_root, "main", &transport, &[]).await.unwrap();
+    let transport = MockTransport::new()
+        .with_file("notes.md", "# Hello")
+        .with_head(&fx.base_sha);
+
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+        .await
+        .unwrap();
 
     assert_eq!(plan.mode, SyncMode::Noop);
     assert!(plan.documents.is_empty());
+    assert_eq!(plan.base_revision, Some(fx.base_sha));
 }
 
 #[tokio::test]
 async fn test_plan_pull_only() {
-    let (_tmp, repo_root, cb_dir) = setup_repo();
+    // Local file matches base (not dirty); remote has moved.
+    let fx = setup_repo_with_base(&[("notes.md", "# Hello")]);
 
-    // Local file matches base (not dirty).
-    std::fs::write(repo_root.join("notes.md"), "# Hello").unwrap();
-    crate::state::base::write(&cb_dir, "notes.md", "# Hello").unwrap();
-
-    // Checkpoint head differs from transport head → remote changed.
     let state = crate::state::sync_state::SyncState {
-        remote_head: Some("old_head".to_string()),
+        remote_head: Some(fx.base_sha.clone()),
         last_sync_at: None,
     };
-    state.save(&cb_dir).unwrap();
+    state.save(&fx.cb_dir).unwrap();
 
     let transport = MockTransport::new()
         .with_head("new_head")
         .with_file("notes.md", "# Updated remotely");
 
-    let plan = create_sync_plan(&cb_dir, &repo_root, "main", &transport, &[]).await.unwrap();
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+        .await
+        .unwrap();
 
     assert_eq!(plan.mode, SyncMode::PullOnly);
     assert!(!plan.documents.is_empty());
@@ -143,24 +136,23 @@ async fn test_plan_pull_only() {
 
 #[tokio::test]
 async fn test_plan_push_only() {
-    let (_tmp, repo_root, cb_dir) = setup_repo();
+    // Working tree differs from committed base (dirty); remote unchanged.
+    let fx = setup_repo_with_base(&[("notes.md", "# Original")]);
+    std::fs::write(fx.repo_root.join("notes.md"), "# Modified locally").unwrap();
 
-    // Local file differs from base (dirty).
-    std::fs::write(repo_root.join("notes.md"), "# Modified locally").unwrap();
-    crate::state::base::write(&cb_dir, "notes.md", "# Original").unwrap();
-
-    // Checkpoint matches transport head → remote unchanged.
     let state = crate::state::sync_state::SyncState {
-        remote_head: Some("same_head".to_string()),
+        remote_head: Some(fx.base_sha.clone()),
         last_sync_at: None,
     };
-    state.save(&cb_dir).unwrap();
+    state.save(&fx.cb_dir).unwrap();
 
     let transport = MockTransport::new()
-        .with_head("same_head")
+        .with_head(&fx.base_sha)
         .with_file("notes.md", "# Original");
 
-    let plan = create_sync_plan(&cb_dir, &repo_root, "main", &transport, &[]).await.unwrap();
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+        .await
+        .unwrap();
 
     assert_eq!(plan.mode, SyncMode::PushOnly);
     let doc = &plan.documents[0];
@@ -170,24 +162,23 @@ async fn test_plan_push_only() {
 
 #[tokio::test]
 async fn test_plan_pull_then_push() {
-    let (_tmp, repo_root, cb_dir) = setup_repo();
+    // Both sides changed since base.
+    let fx = setup_repo_with_base(&[("notes.md", "# Original")]);
+    std::fs::write(fx.repo_root.join("notes.md"), "# Modified locally").unwrap();
 
-    // Dirty local file.
-    std::fs::write(repo_root.join("notes.md"), "# Modified locally").unwrap();
-    crate::state::base::write(&cb_dir, "notes.md", "# Original").unwrap();
-
-    // Remote also changed.
     let state = crate::state::sync_state::SyncState {
-        remote_head: Some("old_head".to_string()),
+        remote_head: Some(fx.base_sha.clone()),
         last_sync_at: None,
     };
-    state.save(&cb_dir).unwrap();
+    state.save(&fx.cb_dir).unwrap();
 
     let transport = MockTransport::new()
         .with_head("new_head")
         .with_file("notes.md", "# Modified remotely");
 
-    let plan = create_sync_plan(&cb_dir, &repo_root, "main", &transport, &[]).await.unwrap();
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+        .await
+        .unwrap();
 
     assert_eq!(plan.mode, SyncMode::PullThenPush);
     let doc = plan.documents.iter().find(|d| d.path == "notes.md").unwrap();
@@ -198,20 +189,22 @@ async fn test_plan_pull_then_push() {
 
 #[tokio::test]
 async fn test_plan_new_remote_file() {
-    let (_tmp, repo_root, cb_dir) = setup_repo();
+    // No local files committed or in working tree. Remote has a new one.
+    let fx = setup_repo_with_base(&[]);
 
-    // No local files, no base. Remote has a new file.
     let state = crate::state::sync_state::SyncState {
-        remote_head: Some("old_head".to_string()),
+        remote_head: Some(fx.base_sha.clone()),
         last_sync_at: None,
     };
-    state.save(&cb_dir).unwrap();
+    state.save(&fx.cb_dir).unwrap();
 
     let transport = MockTransport::new()
         .with_head("new_head")
         .with_file("new-file.md", "# Brand new");
 
-    let plan = create_sync_plan(&cb_dir, &repo_root, "main", &transport, &[]).await.unwrap();
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+        .await
+        .unwrap();
 
     assert_eq!(plan.mode, SyncMode::PullOnly);
     let doc = &plan.documents[0];
@@ -223,23 +216,29 @@ async fn test_plan_new_remote_file() {
 
 #[tokio::test]
 async fn test_plan_deleted_on_remote() {
-    let (_tmp, repo_root, cb_dir) = setup_repo();
-
-    // File exists in base but not on remote.
-    crate::state::base::write(&cb_dir, "deleted.md", "# Was here").unwrap();
+    // File was in base (committed locally) but not on remote anymore.
+    // Also remove it from the working tree so it's not "tracked" locally.
+    let fx = setup_repo_with_base(&[("deleted.md", "# Was here")]);
+    std::fs::remove_file(fx.repo_root.join("deleted.md")).unwrap();
 
     let state = crate::state::sync_state::SyncState {
-        remote_head: Some("old_head".to_string()),
+        remote_head: Some(fx.base_sha.clone()),
         last_sync_at: None,
     };
-    state.save(&cb_dir).unwrap();
+    state.save(&fx.cb_dir).unwrap();
 
     // Remote has no files.
     let transport = MockTransport::new().with_head("new_head");
 
-    let plan = create_sync_plan(&cb_dir, &repo_root, "main", &transport, &[]).await.unwrap();
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+        .await
+        .unwrap();
 
-    let doc = plan.documents.iter().find(|d| d.path == "deleted.md").unwrap();
+    let doc = plan
+        .documents
+        .iter()
+        .find(|d| d.path == "deleted.md")
+        .unwrap();
     assert!(doc.requires_delete);
 }
 
