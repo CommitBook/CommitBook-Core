@@ -2,6 +2,7 @@ mod commands;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
+use colored::Colorize;
 
 /// CommitBook — Markdown workspace with git sync.
 #[derive(Parser)]
@@ -25,6 +26,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Initialize CommitBook in the current git repo
+    Init,
+
     /// Commit locally and sync with remote
     Sync,
 
@@ -94,7 +98,7 @@ async fn main() -> Result<()> {
     }
     env_logger::init();
 
-    // Completions and manpage don't need .CommitBook/
+    // Commands that don't require .CommitBook/ to be initialized.
     match &cli.command {
         Commands::Completions { shell } => {
             clap_complete::generate(
@@ -110,11 +114,20 @@ async fn main() -> Result<()> {
                 .render(&mut std::io::stdout())?;
             return Ok(());
         }
+        Commands::Init => {
+            return commands::init_cmd::run_init();
+        }
         _ => {}
     }
 
-    // All other commands auto-initialize .CommitBook/
-    let cb_dir = commitbook_core::state::ensure_initialized()?;
+    // All remaining commands require an initialized .CommitBook/.
+    let cb_dir = match commitbook_core::state::ensure_initialized() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("{} {}", "ERROR".red().bold(), e);
+            std::process::exit(1);
+        }
+    };
     let repo_root = commitbook_core::state::repo_root(&cb_dir);
 
     match cli.command {
@@ -136,7 +149,7 @@ async fn main() -> Result<()> {
         Commands::Run => {
             commands::sync_cmd::run_scheduled(&cb_dir, &repo_root).await?;
         }
-        Commands::Completions { .. } | Commands::Manpage => unreachable!(),
+        Commands::Init | Commands::Completions { .. } | Commands::Manpage => unreachable!(),
     }
 
     Ok(())

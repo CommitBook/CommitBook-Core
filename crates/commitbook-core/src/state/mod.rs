@@ -2,8 +2,12 @@ pub mod auth;
 pub mod sync_state;
 
 use anyhow::{bail, Context, Result};
-use colored::Colorize;
 use std::path::{Path, PathBuf};
+
+/// Sentinel message used when `.CommitBook/` is missing. CLI layer matches on
+/// this to present a friendly "run `commitbook init` first" error.
+pub const NOT_INITIALIZED_MESSAGE: &str =
+    "CommitBook is not initialized. Run `commitbook init` first.";
 
 /// Walk up directories to find `.CommitBook/` folder.
 pub fn find_commitbook_dir() -> Result<PathBuf> {
@@ -19,34 +23,17 @@ fn find_commitbook_dir_from(start: &Path) -> Result<PathBuf> {
             return Ok(cb_dir);
         }
         if !dir.pop() {
-            bail!("Not a CommitBook repository (no .CommitBook/ found).");
+            bail!("{}", NOT_INITIALIZED_MESSAGE);
         }
     }
 }
 
-/// Find `.CommitBook/` or auto-initialize if inside a git repo.
-pub fn ensure_initialized() -> Result<PathBuf> {
-    if let Ok(cb_dir) = find_commitbook_dir() {
-        return Ok(cb_dir);
-    }
-
-    // Walk up to find .git/
-    let mut dir =
-        std::env::current_dir().context("Cannot determine current directory")?;
-
+/// Walk up from `start` looking for a `.git/` directory and return its parent.
+pub fn find_git_root_from(start: &Path) -> Result<PathBuf> {
+    let mut dir = start.to_path_buf();
     loop {
         if dir.join(".git").exists() {
-            let cb_dir = dir.join(".CommitBook");
-            initialize(&dir)?;
-            eprintln!(
-                "{}",
-                format!(
-                    "Initialized CommitBook in {}",
-                    dir.display()
-                )
-                .green()
-            );
-            return Ok(cb_dir);
+            return Ok(dir);
         }
         if !dir.pop() {
             bail!("Not a git repository.");
@@ -54,8 +41,21 @@ pub fn ensure_initialized() -> Result<PathBuf> {
     }
 }
 
-/// Initialize `.CommitBook/` in a repo directory.
-pub fn initialize(repo_root: &Path) -> Result<()> {
+/// Walk up from the current directory looking for a `.git/` directory.
+pub fn find_git_root() -> Result<PathBuf> {
+    let start = std::env::current_dir().context("Cannot determine current directory")?;
+    find_git_root_from(&start)
+}
+
+/// Find the `.CommitBook/` directory for the current repo, or return
+/// `StateError::NotInitialized` if none is set up. Does NOT auto-initialize.
+pub fn ensure_initialized() -> Result<PathBuf> {
+    find_commitbook_dir()
+}
+
+/// Initialize `.CommitBook/` in a repo directory. Persists `remote_name` into
+/// the default config so the sync layer knows which remote to fetch/push.
+pub fn initialize(repo_root: &Path, remote_name: &str) -> Result<()> {
     let cb_dir = repo_root.join(".CommitBook");
     let local = cb_dir.join("local");
     std::fs::create_dir_all(local.join("logs"))?;
@@ -77,7 +77,8 @@ pub fn initialize(repo_root: &Path) -> Result<()> {
     // Write default config if missing
     let config_path = cb_dir.join("config.toml");
     if !config_path.exists() {
-        let config = crate::config::LocalConfig::new("0 * * * *");
+        let mut config = crate::config::LocalConfig::new("0 * * * *");
+        config.git.remote = remote_name.to_string();
         config.save(repo_root)?;
     }
 

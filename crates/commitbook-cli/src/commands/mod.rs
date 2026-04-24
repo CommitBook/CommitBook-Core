@@ -1,5 +1,6 @@
 pub mod conflicts;
 pub mod doctor;
+pub mod init_cmd;
 pub mod log;
 pub mod login;
 pub mod schedule;

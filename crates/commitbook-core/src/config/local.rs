@@ -3,11 +3,17 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+fn default_remote_name() -> String {
+    "origin".to_string()
+}
+
 /// Git-specific settings for the repo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitSettings {
     pub auto_push: bool,
     pub branch: String,
+    #[serde(default = "default_remote_name")]
+    pub remote: String,
 }
 
 impl Default for GitSettings {
@@ -15,6 +21,7 @@ impl Default for GitSettings {
         Self {
             auto_push: true,
             branch: "main".to_string(),
+            remote: default_remote_name(),
         }
     }
 }

@@ -16,18 +16,19 @@ use super::planner;
 pub async fn sync_repository(
     commitbook_dir: &Path,
     repo_root: &Path,
+    remote_name: &str,
     branch: &str,
     transport: &dyn RemoteTransport,
     tracked_patterns: &[String],
     logger: &dyn Logger,
     commit_message: Option<String>,
 ) -> Result<pipeline::SyncResult> {
-    migrate_legacy_local_dirs(commitbook_dir, logger)?;
-    reconcile_local_branch(repo_root, branch, logger)?;
+    reconcile_local_branch(repo_root, remote_name, branch, logger)?;
 
     let plan = planner::create_sync_plan(
         commitbook_dir,
         repo_root,
+        remote_name,
         branch,
         transport,
         tracked_patterns,
@@ -48,28 +49,16 @@ pub async fn sync_repository(
     Ok(result)
 }
 
-/// Remove legacy CommitBook local dirs that are no longer used:
-///
-/// - `.CommitBook/local/remote/` — shadow clone from the pre-GitRemoteTransport era
-/// - `.CommitBook/local/base/` — file-content cache replaced by git history
-fn migrate_legacy_local_dirs(commitbook_dir: &Path, logger: &dyn Logger) -> Result<()> {
-    for legacy in ["remote", "base"] {
-        let path = commitbook_dir.join("local").join(legacy);
-        if path.exists() {
-            let msg = format!("Removing legacy .CommitBook/local/{legacy}/");
-            let _ = logger.info(&msg);
-            log::info!("{}", msg);
-            std::fs::remove_dir_all(&path)?;
-        }
-    }
-    Ok(())
-}
-
-/// Fetch origin and bring the user's branch in sync with it before the planner
-/// runs. Best-effort: if the repo is not a real git repo (e.g., in tests) or
-/// the remote is unreachable, skip. Hard-errors only on true divergence so a
-/// diverged state never silently accumulates more commits.
-fn reconcile_local_branch(repo_root: &Path, branch: &str, logger: &dyn Logger) -> Result<()> {
+/// Fetch the configured remote and bring the user's branch in sync with it
+/// before the planner runs. Best-effort: if the repo is not a real git repo
+/// (e.g., in tests) or the remote is unreachable, skip. Hard-errors only on
+/// true divergence so a diverged state never silently accumulates more commits.
+fn reconcile_local_branch(
+    repo_root: &Path,
+    remote_name: &str,
+    branch: &str,
+    logger: &dyn Logger,
+) -> Result<()> {
     let Ok(repo) = GitRepo::open(repo_root) else {
         return Ok(());
     };
@@ -77,13 +66,13 @@ fn reconcile_local_branch(repo_root: &Path, branch: &str, logger: &dyn Logger) -
         return Ok(());
     }
 
-    if let Err(e) = repo.fetch("origin", branch) {
+    if let Err(e) = repo.fetch(remote_name, branch) {
         let _ = logger.warn(&format!("Pre-sync fetch failed: {e}"));
         log::warn!("Pre-sync fetch failed: {e}");
         return Ok(());
     }
 
-    let remote_ref = format!("origin/{branch}");
+    let remote_ref = format!("{remote_name}/{branch}");
     let (ahead, behind) = match repo.ahead_behind("HEAD", &remote_ref) {
         Ok(v) => v,
         Err(_) => return Ok(()),
@@ -107,7 +96,7 @@ fn reconcile_local_branch(repo_root: &Path, branch: &str, logger: &dyn Logger) -
         // Local has commits origin doesn't — push them. Catches commits the
         // user made on non-tracked files (config, non-markdown) that the
         // pipeline's markdown-only push would otherwise leave behind.
-        if let Err(e) = repo.push("origin", branch) {
+        if let Err(e) = repo.push(remote_name, branch) {
             let _ = logger.warn(&format!("Pre-sync push of local commits failed: {e}"));
             log::warn!("Pre-sync push of local commits failed: {e}");
         } else {

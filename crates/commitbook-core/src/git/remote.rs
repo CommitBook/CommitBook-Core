@@ -27,6 +27,13 @@ pub fn get_remote_url(repo_path: &Path, remote: &str) -> Result<String> {
         .with_context(|| format!("Remote '{}' has no URL", remote))
 }
 
+/// List the names of all configured remotes in the repo.
+pub fn list_remote_names(repo_path: &Path) -> Result<Vec<String>> {
+    let repo = Repository::open(repo_path).context("Failed to open repository")?;
+    let remotes = repo.remotes().context("Failed to read git remotes")?;
+    Ok(remotes.iter().flatten().map(|s| s.to_string()).collect())
+}
+
 #[cfg(test)]
 #[path = "remote_tests.rs"]
 mod tests;

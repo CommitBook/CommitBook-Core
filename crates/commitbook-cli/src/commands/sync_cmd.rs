@@ -7,7 +7,6 @@ use commitbook_core::git::GitRepo;
 use commitbook_core::logger::FileLogger;
 use commitbook_core::sync::scheduler::sync_repository;
 use commitbook_core::transport::git_remote::GitRemoteTransport;
-use commitbook_core::transport::local_repo::LocalRepoTransport;
 
 /// Run a manual sync: one commit covering dirty tracked files, then pull/merge/push.
 pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
@@ -33,6 +32,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     match sync_repository(
         cb_dir,
         repo_root,
+        &config.git.remote,
         &config.git.branch,
         transport.as_ref(),
         &tracked_patterns,
@@ -145,25 +145,28 @@ async fn generate_commit_message(
     msg
 }
 
-/// Create the appropriate transport based on config and auth.
+/// Build the transport used by the sync pipeline. Assumes the repo is
+/// initialized and still has the remote named in `config.git.remote` — init
+/// enforces exactly one remote, so any drift between config and reality here
+/// is a setup error the user must fix.
 fn create_transport(
     _cb_dir: &Path,
     repo_root: &Path,
     config: &LocalConfig,
 ) -> Result<Box<dyn commitbook_core::domain::transport::RemoteTransport>> {
-    // Remote-backed repos use GitRemoteTransport directly on the user's repo.
-    // No shadow clone — the user's repo is the single source of truth.
-    match commitbook_core::git::remote::get_remote_url(repo_root, "origin") {
-        Ok(_) => Ok(Box::new(GitRemoteTransport::new(
-            repo_root.to_path_buf(),
-            "origin".to_string(),
-            config.git.branch.clone(),
-        ))),
-        Err(_) => Ok(Box::new(LocalRepoTransport::new(
-            repo_root.to_path_buf(),
-            config.git.branch.clone(),
-        ))),
-    }
+    commitbook_core::git::remote::get_remote_url(repo_root, &config.git.remote).map_err(|_| {
+        anyhow::anyhow!(
+            "Configured remote `{}` not found in this git repo. \
+             Re-run `commitbook init` after fixing your remotes.",
+            config.git.remote
+        )
+    })?;
+
+    Ok(Box::new(GitRemoteTransport::new(
+        repo_root.to_path_buf(),
+        config.git.remote.clone(),
+        config.git.branch.clone(),
+    )))
 }
 
 #[cfg(test)]

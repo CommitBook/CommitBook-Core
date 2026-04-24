@@ -29,8 +29,9 @@ All UI crates depend on `commitbook-core`. No database — all state is file-bas
 
 - **No database.** State lives in `.CommitBook/` (config.toml committed; local/ gitignored with state.toml, auth.toml, base/ versions).
 - **No global config.** Each repo is self-contained. No `~/.commitbook/`.
-- **Auto-init.** CLI auto-creates `.CommitBook/` on first use. No `init` command.
-- **Sync = commit + try-push.** Every sync commits locally (works offline), then pulls/merges/pushes if remote is reachable.
+- **Explicit init.** `commitbook init` is a separate command. Other commands hard-fail with "CommitBook is not initialized" if `.CommitBook/` is missing.
+- **Exactly one remote required.** `init` blocks if the repo has 0 or >1 remotes; the remote's name is persisted in `config.git.remote` (need not be `origin`).
+- **Sync = commit + push.** Every sync commits locally then pulls/merges/pushes against the configured remote.
 - `.CommitBook/` folder always uses capital C and B.
 
 ### Key Modules (commitbook-core)
@@ -40,7 +41,7 @@ All UI crates depend on `commitbook-core`. No database — all state is file-bas
 | `state/` | File-based state: SyncState, AuthConfig, base version management |
 | `sync/` | Planner (creates sync plan), pipeline (executes pull/merge/push), scheduler |
 | `merge/` | Section-aware three-way merge engine for markdown |
-| `transport/` | RemoteTransport trait: local_repo, git_remote, github_pat, github_app |
+| `transport/` | RemoteTransport trait: git_remote, github_pat, github_app |
 | `config/` | LocalConfig reads/writes `.CommitBook/config.toml` |
 | `ai/` | Commit message generation: Copilot, Claude, Codex, fallback |
 | `git/` | Git operations via git2 + CLI |
@@ -50,6 +51,7 @@ All UI crates depend on `commitbook-core`. No database — all state is file-bas
 ## CLI Commands
 
 ```
+commitbook init        # Initialize .CommitBook/ (required before any other command)
 commitbook sync        # Commit locally + pull/merge/push
 commitbook start       # Install scheduler
 commitbook stop        # Stop scheduler

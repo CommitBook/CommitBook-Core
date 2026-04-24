@@ -69,8 +69,7 @@ impl RemoteTransport for GitRemoteTransport {
         let mut files: Vec<String> = all
             .into_iter()
             .filter(|p| {
-                // Match collect_markdown_files in local_repo.rs: .md / .markdown,
-                // skip hidden directories.
+                // .md / .markdown, skip hidden directories.
                 if p.split('/').any(|seg| seg.starts_with('.')) {
                     return false;
                 }

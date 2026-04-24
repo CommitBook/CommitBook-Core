@@ -23,6 +23,7 @@ use crate::state::sync_state::SyncState;
 pub async fn create_sync_plan(
     commitbook_dir: &Path,
     repo_root: &Path,
+    remote_name: &str,
     branch: &str,
     transport: &dyn RemoteTransport,
     _tracked_patterns: &[String],
@@ -35,7 +36,7 @@ pub async fn create_sync_plan(
         None => true, // No checkpoint = first sync, always pull.
     };
 
-    // Resolve the base SHA: checkpoint if we have one, else origin/<branch>
+    // Resolve the base SHA: checkpoint if we have one, else <remote>/<branch>
     // (first sync), else None (brand-new repo with no remote history).
     let repo = GitRepo::open(repo_root).ok();
     let base_sha: Option<String> = state
@@ -43,7 +44,7 @@ pub async fn create_sync_plan(
         .clone()
         .or_else(|| {
             repo.as_ref()
-                .and_then(|r| r.rev_parse(&format!("origin/{branch}")).ok())
+                .and_then(|r| r.rev_parse(&format!("{remote_name}/{branch}")).ok())
         });
 
     // Git status is the single source of truth for local changes.

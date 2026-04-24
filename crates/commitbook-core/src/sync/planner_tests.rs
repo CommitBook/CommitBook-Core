@@ -18,7 +18,7 @@ async fn test_plan_noop_no_changes() {
         .with_file("notes.md", "# Hello\n")
         .with_head(&fx.base_sha);
 
-    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "origin", "main", &transport, &[])
         .await
         .unwrap();
 
@@ -42,7 +42,7 @@ async fn test_plan_pull_only() {
         .with_head("new_head")
         .with_file("notes.md", "# Updated remotely\n");
 
-    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "origin", "main", &transport, &[])
         .await
         .unwrap();
 
@@ -68,7 +68,7 @@ async fn test_plan_push_only() {
         .with_head(&fx.base_sha)
         .with_file("notes.md", "# Original\n");
 
-    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "origin", "main", &transport, &[])
         .await
         .unwrap();
 
@@ -98,7 +98,7 @@ async fn test_plan_pull_then_push() {
         .with_head("new_head")
         .with_file("notes.md", "# Modified remotely\n");
 
-    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "origin", "main", &transport, &[])
         .await
         .unwrap();
 
@@ -128,7 +128,7 @@ async fn test_plan_new_remote_file() {
         .with_head("new_head")
         .with_file("new-file.md", "# Brand new\n");
 
-    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "origin", "main", &transport, &[])
         .await
         .unwrap();
 
@@ -159,7 +159,7 @@ async fn test_plan_deleted_on_remote() {
     // Remote has no markdown files.
     let transport = MockTransport::new().with_head("new_head");
 
-    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "origin", "main", &transport, &[])
         .await
         .unwrap();
 
@@ -191,7 +191,7 @@ async fn test_plan_local_delete_pushes_delete() {
         .with_head("new_head")
         .with_file("stale.md", "# stale\n");
 
-    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "origin", "main", &transport, &[])
         .await
         .unwrap();
 
@@ -224,7 +224,7 @@ async fn test_plan_local_delete_pushes_delete_when_remote_unchanged() {
         .with_head(&fx.base_sha)
         .with_file("stale.md", "# stale\n");
 
-    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "main", &transport, &[])
+    let plan = create_sync_plan(&fx.cb_dir, &fx.repo_root, "origin", "main", &transport, &[])
         .await
         .unwrap();
 

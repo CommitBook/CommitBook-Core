@@ -37,20 +37,51 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
         all_ok = false;
     }
 
-    // 3. Remote.
+    // 3. Remote — CommitBook requires exactly one remote. Also verify the
+    //    name in config matches what's actually configured.
     print!("  Git remote... ");
-    if let Ok(repo) = GitRepo::open(repo_root) {
-        if repo.has_remote() {
-            println!("{}", "OK".green().bold());
-        } else {
-            println!("{}", "WARN".yellow().bold());
+    match commitbook_core::git::remote::list_remote_names(repo_root) {
+        Ok(names) if names.len() == 1 => {
+            let actual = &names[0];
+            let configured = LocalConfig::load(repo_root)
+                .ok()
+                .map(|c| c.git.remote);
+            if let Some(cfg_remote) = configured {
+                if cfg_remote == *actual {
+                    println!("{} ({})", "OK".green().bold(), actual);
+                } else {
+                    println!("{}", "MISMATCH".red().bold());
+                    println!(
+                        "    Config says `{}`, git has `{}`. Re-run `commitbook init`.",
+                        cfg_remote, actual
+                    );
+                    all_ok = false;
+                }
+            } else {
+                println!("{} ({})", "OK".green().bold(), actual);
+            }
+        }
+        Ok(names) if names.is_empty() => {
+            println!("{}", "FAILED".red().bold());
             println!(
                 "    {}",
-                "No remote configured. Sync will be local only.".dimmed()
+                "No remote configured. CommitBook requires exactly 1 remote."
+                    .dimmed()
             );
+            all_ok = false;
         }
-    } else {
-        println!("{}", "SKIP".dimmed());
+        Ok(names) => {
+            println!("{}", "FAILED".red().bold());
+            println!(
+                "    Found {} remotes ({}). CommitBook requires exactly 1.",
+                names.len(),
+                names.join(", ")
+            );
+            all_ok = false;
+        }
+        Err(_) => {
+            println!("{}", "SKIP".dimmed());
+        }
     }
 
     // 4. .CommitBook/ structure.
@@ -135,7 +166,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
         }
     }
 
-    // 10. Local vs origin divergence.
+    // 10. Local vs <remote> divergence.
     if let Ok(repo) = GitRepo::open(repo_root) {
         if repo.has_remote() {
             let config = LocalConfig::load(repo_root).ok();
@@ -143,7 +174,11 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
                 .as_ref()
                 .map(|c| c.git.branch.clone())
                 .unwrap_or_else(|| "main".to_string());
-            let remote_ref = format!("origin/{branch}");
+            let remote_name = config
+                .as_ref()
+                .map(|c| c.git.remote.clone())
+                .unwrap_or_else(|| "origin".to_string());
+            let remote_ref = format!("{remote_name}/{branch}");
 
             print!("  Local vs {}... ", remote_ref);
             match repo.ahead_behind("HEAD", &remote_ref) {
