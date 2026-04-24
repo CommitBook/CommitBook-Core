@@ -103,6 +103,18 @@ fn reconcile_local_branch(repo_root: &Path, branch: &str, logger: &dyn Logger) -
         } else {
             let _ = logger.info(&format!("Fast-forwarded local {branch} to {remote_ref}"));
         }
+    } else if ahead > 0 && behind == 0 {
+        // Local has commits origin doesn't — push them. Catches commits the
+        // user made on non-tracked files (config, non-markdown) that the
+        // pipeline's markdown-only push would otherwise leave behind.
+        if let Err(e) = repo.push("origin", branch) {
+            let _ = logger.warn(&format!("Pre-sync push of local commits failed: {e}"));
+            log::warn!("Pre-sync push of local commits failed: {e}");
+        } else {
+            let _ = logger.info(&format!(
+                "Pushed {ahead} local commit(s) to {remote_ref}"
+            ));
+        }
     }
 
     Ok(())
