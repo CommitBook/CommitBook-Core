@@ -4,7 +4,7 @@ use std::path::Path;
 use crate::domain::sync_plan::{SyncMode, SyncPlan};
 use crate::domain::transport::{RemoteTransport, WriteFileInput};
 use crate::git::{self, GitRepo};
-use crate::logger::FileLogger;
+use crate::platform::Logger;
 use crate::markdown::parser::parse_document;
 use crate::markdown::reassemble::reassemble;
 use crate::merge::engine::merge_document;
@@ -26,7 +26,7 @@ pub async fn execute_sync(
     repo_root: &Path,
     branch: &str,
     transport: &dyn RemoteTransport,
-    logger: &FileLogger,
+    logger: &dyn Logger,
     commit_message: Option<String>,
 ) -> Result<SyncResult> {
     let mut result = SyncResult {
@@ -89,7 +89,7 @@ async fn pull_documents(
     branch: &str,
     transport: &dyn RemoteTransport,
     result: &mut SyncResult,
-    logger: &FileLogger,
+    logger: &dyn Logger,
 ) -> Result<()> {
     let repo = GitRepo::open(repo_root).ok();
 
@@ -213,7 +213,7 @@ async fn push_documents(
     transport: &dyn RemoteTransport,
     commit_message: &Option<String>,
     result: &mut SyncResult,
-    logger: &FileLogger,
+    logger: &dyn Logger,
 ) -> Result<bool> {
     // Collect files to push.
     let mut to_push: Vec<WriteFileInput> = Vec::new();

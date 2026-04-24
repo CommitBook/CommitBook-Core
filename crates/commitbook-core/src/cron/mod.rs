@@ -1,5 +1,7 @@
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[allow(dead_code)]
 pub mod macos;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[allow(dead_code)]
 pub mod linux;
 

@@ -1,5 +1,6 @@
 use super::*;
 use crate::git::test_support::{clone_second_workdir, commit_and_push_from, setup_repo_with_bare_remote};
+use crate::logger::FileLogger;
 
 #[test]
 fn test_migrate_removes_legacy_remote_dir() {

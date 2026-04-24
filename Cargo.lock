@@ -442,7 +442,6 @@ dependencies = [
  "colored",
  "dirs",
  "env_logger",
- "fs2",
  "git2",
  "glob",
  "hex",

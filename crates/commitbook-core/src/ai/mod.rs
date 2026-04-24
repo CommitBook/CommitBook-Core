@@ -1,5 +1,8 @@
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod claude;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod codex;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod copilot;
 pub mod fallback;
 
@@ -33,14 +36,16 @@ pub struct ProviderChain {
 impl ProviderChain {
     /// Build the default provider chain.
     pub fn new() -> Self {
-        Self {
-            providers: vec![
-                Box::new(copilot::CopilotProvider),
-                Box::new(claude::ClaudeProvider),
-                Box::new(codex::CodexProvider),
-                Box::new(fallback::FallbackProvider),
-            ],
+        #[allow(unused_mut)]
+        let mut providers: Vec<Box<dyn CommitMessageProvider>> = Vec::new();
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            providers.push(Box::new(copilot::CopilotProvider));
+            providers.push(Box::new(claude::ClaudeProvider));
+            providers.push(Box::new(codex::CodexProvider));
         }
+        providers.push(Box::new(fallback::FallbackProvider));
+        Self { providers }
     }
 
     /// Try each provider in the given order. Returns (message, provider_name).

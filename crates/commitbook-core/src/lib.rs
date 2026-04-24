@@ -6,6 +6,7 @@ pub mod git;
 pub mod logger;
 pub mod markdown;
 pub mod merge;
+pub mod platform;
 pub mod state;
 pub mod sync;
 pub mod transport;

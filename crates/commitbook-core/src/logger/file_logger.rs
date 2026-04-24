@@ -4,6 +4,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::platform::{LogLevel, Logger};
 use crate::utils::datetime;
 
 /// File-based logger that writes JSON-lines to .CommitBook/logs/YYYY-MM-DD.log
@@ -253,6 +254,12 @@ impl FileLogger {
     /// Returns the path to the logs directory.
     pub fn logs_dir(&self) -> &Path {
         &self.logs_dir
+    }
+}
+
+impl Logger for FileLogger {
+    fn emit(&self, level: LogLevel, message: &str) -> Result<()> {
+        self.log(level.as_str(), message)
     }
 }
 

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::domain::transport::RemoteTransport;
 use crate::git::GitRepo;
-use crate::logger::FileLogger;
+use crate::platform::Logger;
 
 use super::pipeline;
 use super::planner;
@@ -19,7 +19,7 @@ pub async fn sync_repository(
     branch: &str,
     transport: &dyn RemoteTransport,
     tracked_patterns: &[String],
-    logger: &FileLogger,
+    logger: &dyn Logger,
     commit_message: Option<String>,
 ) -> Result<pipeline::SyncResult> {
     migrate_legacy_local_dirs(commitbook_dir, logger)?;
@@ -52,7 +52,7 @@ pub async fn sync_repository(
 ///
 /// - `.CommitBook/local/remote/` — shadow clone from the pre-GitRemoteTransport era
 /// - `.CommitBook/local/base/` — file-content cache replaced by git history
-fn migrate_legacy_local_dirs(commitbook_dir: &Path, logger: &FileLogger) -> Result<()> {
+fn migrate_legacy_local_dirs(commitbook_dir: &Path, logger: &dyn Logger) -> Result<()> {
     for legacy in ["remote", "base"] {
         let path = commitbook_dir.join("local").join(legacy);
         if path.exists() {
@@ -69,7 +69,7 @@ fn migrate_legacy_local_dirs(commitbook_dir: &Path, logger: &FileLogger) -> Resu
 /// runs. Best-effort: if the repo is not a real git repo (e.g., in tests) or
 /// the remote is unreachable, skip. Hard-errors only on true divergence so a
 /// diverged state never silently accumulates more commits.
-fn reconcile_local_branch(repo_root: &Path, branch: &str, logger: &FileLogger) -> Result<()> {
+fn reconcile_local_branch(repo_root: &Path, branch: &str, logger: &dyn Logger) -> Result<()> {
     let Ok(repo) = GitRepo::open(repo_root) else {
         return Ok(());
     };
