@@ -145,30 +145,34 @@ impl RemoteTransport for GitRemoteTransport {
             std::fs::remove_file(&full)?;
         }
 
-        // Stage the deletion and commit via git CLI (simplest path that handles
-        // both stage-delete and empty-tree edge cases identically to local_repo).
-        let rm = std::process::Command::new("git")
-            .args(["rm", "--ignore-unmatch", path])
-            .current_dir(&self.repo_path)
-            .output()
-            .context("Failed to run git rm")?;
-        if !rm.status.success() {
-            let stderr = String::from_utf8_lossy(&rm.stderr);
-            anyhow::bail!("git rm failed: {}", stderr.trim());
+        // Stage the deletion via the index: remove_path matches `git rm` when
+        // the path exists in the index, and silently skips otherwise (ignore-unmatch).
+        let repo = git2::Repository::open(&self.repo_path)
+            .with_context(|| format!("Failed to open repo at {}", self.repo_path.display()))?;
+        let mut index = repo.index().context("Failed to get index")?;
+        if index.get_path(std::path::Path::new(path), 0).is_some() {
+            index
+                .remove_path(std::path::Path::new(path))
+                .with_context(|| format!("Failed to stage deletion of {}", path))?;
+            index.write().context("Failed to write index")?;
         }
 
-        let commit = std::process::Command::new("git")
-            .args(["commit", "-m", message])
-            .current_dir(&self.repo_path)
-            .output()
-            .context("Failed to run git commit")?;
-        if !commit.status.success() {
-            let stderr = String::from_utf8_lossy(&commit.stderr);
-            anyhow::bail!("git commit failed: {}", stderr.trim());
+        // Commit the staged deletion.
+        let tree_oid = index.write_tree().context("Failed to write tree")?;
+        let tree = repo.find_tree(tree_oid).context("Failed to find tree")?;
+        let sig = repo
+            .signature()
+            .or_else(|_| git2::Signature::now("CommitBook", "commitbook@localhost"))
+            .context("Failed to create signature")?;
+        let parent = repo.head()?.peel_to_commit()?;
+
+        if tree_oid != parent.tree_id() {
+            repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+                .context("Failed to create deletion commit")?;
         }
 
-        let repo = self.repo()?;
-        repo.push(&self.remote_name, &self.branch)?;
+        let wrapper = self.repo()?;
+        wrapper.push(&self.remote_name, &self.branch)?;
         Ok(())
     }
 

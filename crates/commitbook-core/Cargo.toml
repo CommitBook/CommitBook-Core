@@ -6,6 +6,12 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+# Bundle OpenSSL for targets without a usable system OpenSSL (iOS, Android).
+# Desktop builds omit this and use the system library.
+vendored-tls = ["git2/vendored-openssl"]
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"

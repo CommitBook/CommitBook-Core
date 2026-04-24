@@ -1,0 +1,23 @@
+[package]
+name = "commitbook-mobile"
+description = "iOS/Android FFI bindings for commitbook-core via UniFFI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "commitbook_mobile"
+crate-type = ["cdylib", "staticlib", "lib"]
+
+[dependencies]
+commitbook-core = { path = "../commitbook-core", features = ["vendored-tls"] }
+anyhow = "1.0"
+async-trait = "0.1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+uniffi = { version = "0.31", features = ["tokio", "cli"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"

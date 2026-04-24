@@ -101,6 +101,7 @@ impl Default for ProviderChain {
 }
 
 /// Truncate a string to max_len, appending "..." if truncated.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
@@ -115,6 +116,7 @@ pub(crate) fn truncate(s: &str, max_len: usize) -> String {
 
 /// Returns true if the message reads like the AI is describing the diff
 /// itself rather than the change. Triggers a fall-through to the next provider.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn looks_like_diff_narration(msg: &str) -> bool {
     let lower = msg.to_lowercase();
     if lower.contains("staged") && lower.contains("unstaged") {
@@ -131,6 +133,7 @@ pub(crate) fn looks_like_diff_narration(msg: &str) -> bool {
 }
 
 /// Clean up AI-generated commit message text.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn clean_message(raw: &str) -> String {
     let mut msg = raw.trim().to_string();
 
