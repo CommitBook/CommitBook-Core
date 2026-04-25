@@ -70,13 +70,13 @@ enum Commands {
         tail: bool,
     },
 
-    /// Authenticate with a provider
+    /// Store an optional token for token-backed transports
     Login {
-        /// Personal access token (for any provider)
+        /// Personal access token for token-backed transports
         #[arg(long)]
         token: Option<String>,
 
-        /// Provider name (github, gitlab, etc.)
+        /// Provider name for the stored token (github, gitlab, etc.)
         #[arg(long)]
         provider: Option<String>,
     },

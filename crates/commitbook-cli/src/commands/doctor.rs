@@ -101,17 +101,22 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
         println!("{}", "MISSING".yellow().bold());
     }
 
-    // 6. Auth.
-    print!("  auth.toml... ");
+    // 6. Optional token-backed auth. Normal desktop sync uses the user's
+    // system Git credentials (SSH agent, keychain, .git-credentials, etc.).
+    print!("  Token auth (optional)... ");
     match AuthConfig::load(cb_dir) {
         Ok(auth) if auth.has_token() => {
             println!("{}", "OK".green().bold());
         }
         Ok(_) => {
             println!("{}", "not configured".dimmed());
+            println!(
+                "    {}",
+                "Normal for desktop git sync; `commitbook login` is only needed for token-backed transports.".dimmed()
+            );
         }
         Err(_) => {
-            println!("{}", "error reading".red());
+            println!("{}", "error reading auth.toml".red());
             all_ok = false;
         }
     }

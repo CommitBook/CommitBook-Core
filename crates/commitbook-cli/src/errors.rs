@@ -30,7 +30,7 @@ pub fn humanize(e: &anyhow::Error) -> String {
         return "Remote has diverged. CommitBook will reconcile on the next sync.".to_string();
     }
     if joined.contains("authentication") || joined.contains("auth required") {
-        return "Authentication failed. Try `commitbook login` or check your SSH agent."
+        return "Authentication failed. Check your Git credentials, credential helper, or SSH agent."
             .to_string();
     }
     if joined.contains("no such file") || joined.contains("not found") {
@@ -53,7 +53,7 @@ pub fn humanize(e: &anyhow::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{anyhow, Context};
+    use anyhow::anyhow;
 
     #[test]
     fn test_humanize_network() {
@@ -74,6 +74,8 @@ mod tests {
         let e = anyhow!("authentication required");
         let msg = humanize(&e);
         assert!(msg.contains("Authentication"), "unexpected: {msg}");
+        assert!(msg.contains("Git credentials"), "unexpected: {msg}");
+        assert!(!msg.contains("commitbook login"), "unexpected: {msg}");
     }
 
     #[test]

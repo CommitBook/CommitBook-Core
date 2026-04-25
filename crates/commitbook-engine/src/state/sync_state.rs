@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Sync state stored in `.CommitBook/state.toml`.
+/// Sync state stored in `.CommitBook/local/state.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SyncState {
     pub remote_head: Option<String>,

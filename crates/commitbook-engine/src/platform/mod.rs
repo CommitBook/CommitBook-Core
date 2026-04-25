@@ -1,9 +1,9 @@
 //! Platform abstraction traits.
 //!
-//! Desktop builds use the file-backed implementations in this module
-//! (`FileSecretStore`, and the existing `FileLogger` which implements `Logger`).
-//! Mobile builds supply their own implementations across the FFI boundary
-//! (iOS Keychain / Android Keystore for secrets; host callback sinks for logs).
+//! Desktop git sync uses system Git credentials. File-backed secrets are
+//! available here for token-backed transports; mobile builds supply their own
+//! implementations across the FFI boundary (iOS Keychain / Android Keystore for
+//! secrets; host callback sinks for logs).
 
 pub mod credentials;
 pub mod logger;

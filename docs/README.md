@@ -47,8 +47,8 @@ That's it. CommitBook auto-initializes on first use — no setup command needed.
 | `commitbook doctor` | Check system health and dependencies |
 | `commitbook conflicts` | Show files with merge conflicts |
 | `commitbook log` | View recent activity log |
-| `commitbook login --token <T>` | Store a personal access token |
-| `commitbook login --provider github` | Authenticate with a specific provider |
+| `commitbook login --token <T>` | Store an optional token for token-backed transports |
+| `commitbook login --provider github` | Label the stored token with a provider |
 
 ### Schedule Presets
 
@@ -76,12 +76,12 @@ commitbook sync
      - Pull remote changes
      - Three-way section-aware merge (base vs local vs remote)
      - Push merged result
-     - Update .CommitBook/base/ and state.toml
+     - Update .CommitBook/local/base/ and state.toml
        |
        v
   3. On failure:
      - Local commit is preserved
-     - Error logged to .CommitBook/logs/
+     - Error logged to .CommitBook/local/logs/
      - Retry on next scheduled cycle
 ```
 
@@ -124,11 +124,12 @@ CommitBook stores all state inside `.CommitBook/` in the repository root. No glo
 ```
 .CommitBook/
   config.toml       # Settings (committed to git)
-  auth.toml         # Credentials (gitignored)
-  state.toml        # Sync state (gitignored)
-  base/             # Base versions for merge (gitignored)
-  logs/             # Activity logs (gitignored)
-  .lock             # Prevents concurrent runs (gitignored)
+  local/            # Local state and secrets (gitignored)
+    auth.toml       # Optional token-backed credentials
+    state.toml      # Sync state
+    base/           # Base versions for merge
+    logs/           # Activity logs
+    .lock           # Prevents concurrent runs
 ```
 
 Auto-initialization creates this directory and updates `.gitignore` on first use.
@@ -156,6 +157,14 @@ max_log_days = 30
 
 ### `auth.toml` (gitignored)
 
+Normal desktop sync does not require `auth.toml`. `commitbook sync` fetches and
+pushes through Git using your existing Git credentials, such as an SSH agent,
+macOS keychain, `.git-credentials`, or `.netrc`.
+
+`commitbook login` writes `.CommitBook/local/auth.toml` only for token-backed
+transports, such as direct GitHub API/PAT flows or hosts that cannot use the
+system Git credential helper.
+
 ```toml
 [auth]
 provider = "github"
@@ -164,7 +173,7 @@ token = "ghp_..."
 
 ## Logs
 
-Activity logs are stored at `.CommitBook/logs/YYYY-MM-DD.log` in JSON-lines format:
+Activity logs are stored at `.CommitBook/local/logs/YYYY-MM-DD.log` in JSON-lines format:
 
 ```json
 {"ts":"2026-04-07 14:00:01","level":"INFO","msg":"Auto-commit cycle started"}

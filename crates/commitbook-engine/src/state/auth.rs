@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Authentication config stored in `.CommitBook/auth.toml`.
+/// Optional token-backed authentication config stored in
+/// `.CommitBook/local/auth.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AuthConfig {
     #[serde(default)]

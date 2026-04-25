@@ -12,7 +12,7 @@ pub struct SecretBundle {
 
 /// Credential storage abstraction.
 ///
-/// Desktop uses `FileSecretStore`, which reads and writes
+/// File-backed hosts can use `FileSecretStore`, which reads and writes
 /// `.CommitBook/local/auth.toml` with `0o600` permissions. Mobile hosts
 /// implement this trait against iOS Keychain / Android Keystore and pass it
 /// across the FFI boundary.

@@ -51,6 +51,10 @@ pub async fn run(
         "  {}",
         "Token stored in .CommitBook/local/auth.toml (gitignored).".dimmed()
     );
+    println!(
+        "  {}",
+        "Desktop git sync uses your normal Git credentials; this token is only for token-backed transports.".dimmed()
+    );
 
     Ok(())
 }

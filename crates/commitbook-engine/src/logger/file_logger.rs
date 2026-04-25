@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::platform::{LogLevel, Logger};
 use crate::utils::datetime;
 
-/// File-based logger that writes JSON-lines to .CommitBook/logs/YYYY-MM-DD.log
+/// File-based logger that writes JSON-lines to .CommitBook/local/logs/YYYY-MM-DD.log
 ///
 /// Each line is a self-contained JSON object:
 /// ```json
