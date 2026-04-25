@@ -3,13 +3,13 @@ use colored::Colorize;
 use std::path::Path;
 use std::process::Command;
 
-use commitbook_core::config::LocalConfig;
-use commitbook_core::cron;
-use commitbook_core::git::GitRepo;
-use commitbook_core::state::auth::AuthConfig;
-use commitbook_core::state::sync_state::SyncState;
+use commitbook_engine::config::LocalConfig;
+use commitbook_engine::cron;
+use commitbook_engine::git::GitRepo;
+use commitbook_engine::state::auth::AuthConfig;
+use commitbook_engine::state::sync_state::SyncState;
 
-pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
+pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()> {
     println!("{}", "CommitBook Doctor".bold().cyan());
     println!();
 
@@ -40,7 +40,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
     // 3. Remote — CommitBook requires exactly one remote. Also verify the
     //    name in config matches what's actually configured.
     print!("  Git remote... ");
-    match commitbook_core::git::remote::list_remote_names(repo_root) {
+    match commitbook_engine::git::remote::list_remote_names(repo_root) {
         Ok(names) if names.len() == 1 => {
             let actual = &names[0];
             let configured = LocalConfig::load(repo_root)
@@ -126,7 +126,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
 
     // 8. AI providers.
     print!("  AI providers... ");
-    let chain = commitbook_core::ai::ProviderChain::new();
+    let chain = commitbook_engine::ai::ProviderChain::new();
     let keys = vec![
         "gh-copilot".to_string(),
         "claude-cli".to_string(),
@@ -241,18 +241,168 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool) -> Result<()> {
         }
     }
 
+    if fix {
+        println!();
+        println!("  {}", "Auto-repair:".bold().cyan());
+        let repaired = run_fixes(cb_dir, repo_root);
+        if repaired > 0 {
+            // Re-evaluate "all_ok" — the fix may have resolved earlier failures.
+            all_ok = true;
+        }
+    }
+
     println!();
     if all_ok {
         println!(
             "  {}",
             "All checks passed.".green().bold()
         );
+        Ok(())
     } else {
         println!(
             "  {}",
             "Some checks failed. See above.".red().bold()
         );
+        if !fix {
+            println!(
+                "  {}",
+                "Try `commitbook doctor --fix` to auto-repair common issues.".dimmed()
+            );
+        }
+        Err(anyhow::anyhow!("doctor reported one or more failures"))
+    }
+}
+
+/// Run auto-repair for known-fixable cases. Returns the number of fixes
+/// successfully applied. Each fix prints its own status line.
+fn run_fixes(_cb_dir: &Path, repo_root: &Path) -> u32 {
+    let mut fixed = 0u32;
+
+    if fix_logs_dir(repo_root) {
+        fixed += 1;
+    }
+    if fix_stale_lock(repo_root) {
+        fixed += 1;
+    }
+    if fix_plist_binary_path(repo_root) {
+        fixed += 1;
     }
 
-    Ok(())
+    if fixed == 0 {
+        println!("    {}", "Nothing to repair.".dimmed());
+    }
+
+    fixed
+}
+
+/// Recreate `.CommitBook/local/logs/` if missing. Cheap and idempotent.
+fn fix_logs_dir(repo_root: &Path) -> bool {
+    let logs = LocalConfig::logs_dir(repo_root);
+    if logs.is_dir() {
+        return false;
+    }
+    print!("    Creating logs/... ");
+    match std::fs::create_dir_all(&logs) {
+        Ok(()) => {
+            println!("{}", "OK".green().bold());
+            true
+        }
+        Err(e) => {
+            println!("{} {}", "FAILED".red().bold(), e);
+            false
+        }
+    }
+}
+
+/// Delete `.lock` if it's older than an hour AND nobody currently holds it.
+/// A live scheduler run would hold the lock; we don't want to clobber that.
+fn fix_stale_lock(repo_root: &Path) -> bool {
+    let lock_path = LocalConfig::lock_path(repo_root);
+    let Ok(metadata) = std::fs::metadata(&lock_path) else {
+        return false;
+    };
+
+    let stale = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .map(|d| d > std::time::Duration::from_secs(3600))
+        .unwrap_or(false);
+    if !stale {
+        return false;
+    }
+
+    // Probe the lock — if anyone holds it, leave it alone.
+    use fs2::FileExt;
+    let still_held = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map(|f| f.try_lock_exclusive().is_err())
+        .unwrap_or(false);
+    if still_held {
+        return false;
+    }
+
+    print!("    Removing stale .lock... ");
+    match std::fs::remove_file(&lock_path) {
+        Ok(()) => {
+            println!("{}", "OK".green().bold());
+            true
+        }
+        Err(e) => {
+            println!("{} {}", "FAILED".red().bold(), e);
+            false
+        }
+    }
+}
+
+/// If a launchd plist exists for this repo and points at a stale binary path
+/// (e.g., a workspace that no longer exists, or a target/debug from a
+/// different checkout), reinstall it pointing at the binary actually running
+/// `commitbook doctor` right now.
+fn fix_plist_binary_path(repo_root: &Path) -> bool {
+    let Ok(current_exe) = std::env::current_exe() else {
+        return false;
+    };
+
+    // Read the plist; if it doesn't exist or is unreadable, nothing to fix.
+    #[cfg(target_os = "macos")]
+    let plist_path = commitbook_engine::cron::macos::plist_path(repo_root);
+    #[cfg(not(target_os = "macos"))]
+    let plist_path: std::path::PathBuf = {
+        let _ = repo_root;
+        return false;
+    };
+
+    let Ok(contents) = std::fs::read_to_string(&plist_path) else {
+        return false;
+    };
+    if contents.contains(&current_exe.to_string_lossy().to_string()) {
+        return false;
+    }
+
+    // Only reinstall if the scheduler is loaded — otherwise it's a no-op anyway.
+    if !cron::is_loaded(repo_root) {
+        return false;
+    }
+
+    print!("    Reinstalling scheduler with current binary path... ");
+    let config = match LocalConfig::load(repo_root) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("{} {}", "FAILED".red().bold(), e);
+            return false;
+        }
+    };
+    match cron::install(repo_root, &config.schedule, &current_exe) {
+        Ok(_) => {
+            println!("{}", "OK".green().bold());
+            true
+        }
+        Err(e) => {
+            println!("{} {}", "FAILED".red().bold(), e);
+            false
+        }
+    }
 }

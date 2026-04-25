@@ -1,14 +1,17 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use colored::Colorize;
 use std::path::Path;
 
-use commitbook_core::config::LocalConfig;
-use commitbook_core::git::GitRepo;
-use commitbook_core::logger::FileLogger;
-use commitbook_core::sync::scheduler::sync_repository;
-use commitbook_core::transport::git_remote::GitRemoteTransport;
+use commitbook_engine::config::LocalConfig;
+use commitbook_engine::git::GitRepo;
+use commitbook_engine::logger::FileLogger;
+use commitbook_engine::sync::scheduler::sync_repository;
+use commitbook_engine::transport::git_remote::GitRemoteTransport;
 
 /// Run a manual sync: one commit covering dirty tracked files, then pull/merge/push.
+///
+/// Returns an error if the sync surfaced any per-file errors or if the outer
+/// pipeline failed — so `commitbook sync && next-step` chains correctly.
 pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     let config = LocalConfig::load(repo_root)?;
     let logger = FileLogger::new(repo_root, config.logging.max_log_days)?;
@@ -29,7 +32,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     let transport = create_transport(cb_dir, repo_root, &config)?;
     let tracked_patterns: Vec<String> = config.files.include.clone();
 
-    match sync_repository(
+    let outcome = sync_repository(
         cb_dir,
         repo_root,
         &config.git.remote,
@@ -39,8 +42,9 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
         &logger,
         commit_message,
     )
-    .await
-    {
+    .await;
+
+    let exit_err: Option<anyhow::Error> = match outcome {
         Ok(result) => {
             if result.pulled > 0 {
                 println!(
@@ -75,6 +79,17 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
                 let _ = logger.info("Already up to date");
                 println!("{}", "Already up to date.".dimmed());
             }
+
+            // Propagate per-file errors as a non-zero exit so callers
+            // (CI, shell `&&` chains) can react.
+            if result.errors.is_empty() {
+                None
+            } else {
+                Some(anyhow!(
+                    "sync completed with {} error(s)",
+                    result.errors.len()
+                ))
+            }
         }
         Err(e) => {
             let _ = logger.error(&format!("Sync failed: {e}"));
@@ -83,11 +98,15 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
                 "{}",
                 "  Working tree preserved. Will retry on next sync.".dimmed()
             );
+            Some(e)
         }
-    }
+    };
 
     let _ = logger.cleanup_old_logs();
-    Ok(())
+    match exit_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 /// Run a scheduled sync cycle (hidden `commitbook run` command).
@@ -133,7 +152,7 @@ pub async fn run_scheduled(cb_dir: &Path, repo_root: &Path) -> Result<()> {
 
 /// Format "(A added, M modified, D deleted)" — only categories > 0.
 /// Returns an empty string when only one category or everything is zero.
-fn summarize_push_breakdown(result: &commitbook_core::sync::pipeline::SyncResult) -> String {
+fn summarize_push_breakdown(result: &commitbook_engine::sync::pipeline::SyncResult) -> String {
     let mut parts = Vec::new();
     if result.pushed_added > 0 {
         parts.push(format!("{} added", result.pushed_added));
@@ -154,9 +173,9 @@ fn summarize_push_breakdown(result: &commitbook_core::sync::pipeline::SyncResult
 /// Generate a commit message using AI or fallback.
 async fn generate_commit_message(
     repo_root: &Path,
-    summary: &commitbook_core::git::ChangesSummary,
+    summary: &commitbook_engine::git::ChangesSummary,
 ) -> String {
-    let chain = commitbook_core::ai::ProviderChain::new();
+    let chain = commitbook_engine::ai::ProviderChain::new();
     // Default provider order — fallback is always last.
     let keys = vec![
         "gh-copilot".to_string(),
@@ -176,8 +195,8 @@ fn create_transport(
     _cb_dir: &Path,
     repo_root: &Path,
     config: &LocalConfig,
-) -> Result<Box<dyn commitbook_core::domain::transport::RemoteTransport>> {
-    commitbook_core::git::remote::get_remote_url(repo_root, &config.git.remote).map_err(|_| {
+) -> Result<Box<dyn commitbook_engine::domain::transport::RemoteTransport>> {
+    commitbook_engine::git::remote::get_remote_url(repo_root, &config.git.remote).map_err(|_| {
         anyhow::anyhow!(
             "Configured remote `{}` not found in this git repo. \
              Re-run `commitbook init` after fixing your remotes.",

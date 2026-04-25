@@ -1,4 +1,5 @@
 mod commands;
+mod errors;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
@@ -48,7 +49,12 @@ enum Commands {
     },
 
     /// Check system health and dependencies
-    Doctor,
+    Doctor {
+        /// Attempt to auto-repair common issues (plist binary path, stale lock,
+        /// missing logs directory). Diagnostic-only without this flag.
+        #[arg(long)]
+        fix: bool,
+    },
 
     /// Show open merge conflicts
     Conflicts,
@@ -92,9 +98,26 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     let cli = Cli::parse();
+    let verbose = cli.verbose;
 
+    if let Err(e) = run(cli).await {
+        if verbose {
+            eprintln!("{} {:#}", "ERROR".red().bold(), e);
+        } else {
+            eprintln!(
+                "{} {}",
+                "ERROR".red().bold(),
+                errors::humanize(&e)
+            );
+            eprintln!("  {}", "Run with --verbose for the full error.".dimmed());
+        }
+        std::process::exit(1);
+    }
+}
+
+async fn run(cli: Cli) -> Result<()> {
     if cli.verbose {
         std::env::set_var("RUST_LOG", "debug");
     } else if !cli.quiet {
@@ -125,14 +148,8 @@ async fn main() -> Result<()> {
     }
 
     // All remaining commands require an initialized .CommitBook/.
-    let cb_dir = match commitbook_core::state::ensure_initialized() {
-        Ok(dir) => dir,
-        Err(e) => {
-            eprintln!("{} {}", "ERROR".red().bold(), e);
-            std::process::exit(1);
-        }
-    };
-    let repo_root = commitbook_core::state::repo_root(&cb_dir);
+    let cb_dir = commitbook_engine::state::ensure_initialized()?;
+    let repo_root = commitbook_engine::state::repo_root(&cb_dir);
 
     match cli.command {
         Commands::Sync => commands::sync_cmd::run_sync(&cb_dir, &repo_root).await?,
@@ -142,7 +159,7 @@ async fn main() -> Result<()> {
         Commands::Schedule { expression } => {
             commands::schedule::run(&cb_dir, &repo_root, &expression)?;
         }
-        Commands::Doctor => commands::doctor::run(&cb_dir, &repo_root, cli.json)?,
+        Commands::Doctor { fix } => commands::doctor::run(&cb_dir, &repo_root, cli.json, fix)?,
         Commands::Conflicts => commands::conflicts::run(&cb_dir, &repo_root)?,
         Commands::Log { lines, tail } => {
             commands::log::run(&cb_dir, &repo_root, lines, cli.json, tail)?;
@@ -153,7 +170,9 @@ async fn main() -> Result<()> {
         Commands::Run => {
             commands::sync_cmd::run_scheduled(&cb_dir, &repo_root).await?;
         }
-        Commands::Init | Commands::Completions { .. } | Commands::Manpage => unreachable!(),
+        Commands::Init
+        | Commands::Completions { .. }
+        | Commands::Manpage => unreachable!(),
     }
 
     Ok(())
