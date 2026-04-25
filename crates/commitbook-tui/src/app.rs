@@ -5,10 +5,10 @@ use ratatui::Terminal;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use commitbook_core::config::local::LocalConfig;
-use commitbook_core::cron;
-use commitbook_core::git::{ChangesSummary, GitRepo};
-use commitbook_core::logger::FileLogger;
+use commitbook_engine::config::local::LocalConfig;
+use commitbook_engine::cron;
+use commitbook_engine::git::{ChangesSummary, GitRepo};
+use commitbook_engine::logger::FileLogger;
 
 const TICK_RATE: Duration = Duration::from_secs(5);
 const POLL_RATE: Duration = Duration::from_millis(250);
@@ -131,7 +131,7 @@ impl App {
         }
 
         // Check provider availability
-        let chain = commitbook_core::ai::ProviderChain::new();
+        let chain = commitbook_engine::ai::ProviderChain::new();
         let default_keys = vec![
             "gh-copilot".to_string(),
             "claude-cli".to_string(),

@@ -18,7 +18,7 @@ fn git_init(path: &Path) {
 fn setup_test_app() -> (tempfile::TempDir, Router) {
     let tmp = tempfile::tempdir().unwrap();
     git_init(tmp.path());
-    commitbook_core::config::local::LocalConfig::init(tmp.path(), "0 * * * *").unwrap();
+    commitbook_engine::config::local::LocalConfig::init(tmp.path(), "0 * * * *").unwrap();
 
     let state = Arc::new(AppState {
         repo_path: tmp.path().to_path_buf(),
@@ -156,7 +156,7 @@ async fn test_api_config_updates_schedule() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let config = commitbook_core::config::local::LocalConfig::load(tmp.path()).unwrap();
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
     assert_eq!(config.schedule, "*/5 * * * *");
 }
 
@@ -183,7 +183,7 @@ async fn test_api_config_partial_update() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let config = commitbook_core::config::local::LocalConfig::load(tmp.path()).unwrap();
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
     assert!(!config.git.auto_push);
     assert_eq!(config.schedule, "0 * * * *"); // unchanged
 }

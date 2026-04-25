@@ -1,6 +1,6 @@
 [package]
-name = "commitbook-core"
-description = "Core library for CommitBook — config, git, AI, scheduling, logging"
+name = "commitbook-engine"
+description = "Shared engine for CommitBook — config, git, AI, scheduling, logging"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

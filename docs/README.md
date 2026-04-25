@@ -180,15 +180,16 @@ CommitBook is built as a Cargo workspace:
 
 ```
 crates/
-  commitbook-core/    # Config, git, AI, state, sync pipeline, merge engine
+  commitbook-engine/  # Config, git, AI, state, sync pipeline, merge engine
   commitbook-cli/     # Command-line interface
   commitbook-tui/     # Terminal dashboard (ratatui)
   commitbook-web/     # Web dashboard (axum + htmx)
+  commitbook-mobile/  # iOS/Android FFI bindings
 ```
 
 All state is file-based (no database). The `.CommitBook/` directory is self-contained per repository.
 
-### Key Modules (commitbook-core)
+### Key Modules (commitbook-engine)
 
 | Module | Purpose |
 |---|---|

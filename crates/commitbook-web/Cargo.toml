@@ -11,7 +11,7 @@ name = "commitbook-web"
 path = "src/main.rs"
 
 [dependencies]
-commitbook-core = { path = "../commitbook-core" }
+commitbook-engine = { path = "../commitbook-engine" }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }

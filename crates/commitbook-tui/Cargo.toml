@@ -11,7 +11,7 @@ name = "commitbook-tui"
 path = "src/main.rs"
 
 [dependencies]
-commitbook-core = { path = "../commitbook-core" }
+commitbook-engine = { path = "../commitbook-engine" }
 ratatui = "0.29"
 crossterm = "0.28"
 anyhow = "1.0"

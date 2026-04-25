@@ -2,8 +2,8 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
 
-use commitbook_core::config::LocalConfig;
-use commitbook_core::cron;
+use commitbook_engine::config::LocalConfig;
+use commitbook_engine::cron;
 
 pub fn run(_cb_dir: &Path, repo_root: &Path, expression: &str) -> Result<()> {
     let mut config = LocalConfig::load(repo_root)?;

@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use askama::Template;
 
-use commitbook_core::ai::ProviderChain;
-use commitbook_core::config::local::LocalConfig;
-use commitbook_core::cron;
-use commitbook_core::git::GitRepo;
-use commitbook_core::logger::FileLogger;
+use commitbook_engine::ai::ProviderChain;
+use commitbook_engine::config::local::LocalConfig;
+use commitbook_engine::cron;
+use commitbook_engine::git::GitRepo;
+use commitbook_engine::logger::FileLogger;
 
 use crate::models::*;
 

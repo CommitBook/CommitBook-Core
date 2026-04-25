@@ -2,11 +2,11 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
 
-use commitbook_core::config::LocalConfig;
-use commitbook_core::cron;
-use commitbook_core::git::GitRepo;
-use commitbook_core::logger::FileLogger;
-use commitbook_core::state::sync_state::SyncState;
+use commitbook_engine::config::LocalConfig;
+use commitbook_engine::cron;
+use commitbook_engine::git::GitRepo;
+use commitbook_engine::logger::FileLogger;
+use commitbook_engine::state::sync_state::SyncState;
 
 pub fn run(cb_dir: &Path, repo_root: &Path, json: bool) -> Result<()> {
     let config = LocalConfig::load(repo_root)?;

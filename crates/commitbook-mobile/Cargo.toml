@@ -1,6 +1,6 @@
 [package]
 name = "commitbook-mobile"
-description = "iOS/Android FFI bindings for commitbook-core via UniFFI"
+description = "iOS/Android FFI bindings for commitbook-engine via UniFFI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ name = "commitbook_mobile"
 crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]
-commitbook-core = { path = "../commitbook-core", features = ["vendored-tls"] }
+commitbook-engine = { path = "../commitbook-engine", features = ["vendored-tls"] }
 anyhow = "1.0"
 async-trait = "0.1"
 thiserror = "2"

@@ -2,7 +2,7 @@
 
 ## Context
 
-This plan addresses 32 code review comments left on the CommitBook PR (`C/V1` -> `main`) by @copilot-pull-request-reviewer and @coderabbitai. CommitBook is a Rust workspace with 4 crates (`commitbook-core`, `commitbook-cli`, `commitbook-tui`, `commitbook-web`) that provides automated git commits for markdown notebooks.
+This plan addresses 32 code review comments left on the CommitBook PR (`C/V1` -> `main`) by @copilot-pull-request-reviewer and @coderabbitai. CommitBook is a Rust workspace with 4 crates (`commitbook-engine`, `commitbook-cli`, `commitbook-tui`, `commitbook-web`) that provides automated git commits for markdown notebooks.
 
 The issues range from critical bugs (broken features, panics) to minor documentation mismatches. This plan groups them by priority and provides exact file locations and code changes needed.
 
@@ -12,13 +12,13 @@ The issues range from critical bugs (broken features, panics) to minor documenta
 
 ### Issue A: `now_iso()` produces incorrect timestamps (Comments #3, #25)
 - **Rating: 10/10**
-- **File:** `crates/commitbook-core/src/utils/datetime.rs:17`
+- **File:** `crates/commitbook-engine/src/utils/datetime.rs:17`
 - **Problem:** `Local::now().format("%Y-%m-%dT%H:%M:%SZ")` stamps local time with a `Z` (UTC) suffix. Every stored `created_at` and `last_commit` timestamp is semantically wrong in non-UTC timezones. Downstream relative-time calculations will be incorrect.
 - **Plan:**
   1. Change `use chrono::Local;` to `use chrono::{Local, Utc};` at line 1
   2. Replace line 17: `Local::now().format(...)` -> `Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()`
   3. Update test `test_now_iso_pattern` in `datetime_tests.rs` — it checks `ends_with('Z')` which still passes, but verify it still works
-- **Files to modify:** `crates/commitbook-core/src/utils/datetime.rs`
+- **Files to modify:** `crates/commitbook-engine/src/utils/datetime.rs`
 
 ### Issue B: DateTime parsing silently fails in status display (Comment #16)
 - **Rating: 10/10**
@@ -31,7 +31,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
 
 ### Issue C: UTF-8 truncate will panic on multi-byte characters (Comment #19)
 - **Rating: 9/10**
-- **File:** `crates/commitbook-core/src/ai/mod.rs:90-96`
+- **File:** `crates/commitbook-engine/src/ai/mod.rs:90-96`
 - **Problem:** `&s[..max_len]` indexes by bytes. If `max_len` lands inside a multi-byte UTF-8 sequence (emoji, non-ASCII), Rust panics. AI providers may return emoji or unicode in commit messages.
 - **Plan:**
   1. Replace the `truncate` function body:
@@ -49,7 +49,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
      }
      ```
   2. Also fix `clean_message` at line 112-113 which does `msg.truncate(72)` — `String::truncate` also panics on non-char-boundary. Replace with the same boundary-safe approach.
-- **Files to modify:** `crates/commitbook-core/src/ai/mod.rs`
+- **Files to modify:** `crates/commitbook-engine/src/ai/mod.rs`
 
 ### Issue D: Config page can never save — form/handler encoding mismatch (Comments #2, #31)
 - **Rating: 9/10**
@@ -100,7 +100,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
 
 ### Issue G: Blocking async runtime in Claude provider (Comment #18)
 - **Rating: 8/10**
-- **File:** `crates/commitbook-core/src/ai/claude.rs:69-93`
+- **File:** `crates/commitbook-engine/src/ai/claude.rs:69-93`
 - **Problem:** `wait_with_timeout` uses `std::thread::sleep(Duration::from_millis(100))` in a polling loop inside an `async fn`. This blocks the tokio executor thread for up to 30 seconds. Additionally, `child.kill()` on line 85 is not followed by `child.wait()`, leaving a zombie process.
 - **Plan:**
   1. Wrap the blocking operation in `tokio::task::spawn_blocking`:
@@ -115,11 +115,11 @@ The issues range from critical bugs (broken features, panics) to minor documenta
      ```
   2. Fix zombie: after `child.kill()`, add `let _ = child.wait();` before bailing
   3. Since `spawn_blocking` needs owned values, clone `repo_path` to `PathBuf` before the closure
-- **Files to modify:** `crates/commitbook-core/src/ai/claude.rs`
+- **Files to modify:** `crates/commitbook-engine/src/ai/claude.rs`
 
 ### Issue H: Unquoted paths in crontab entries (Comments #8, #23)
 - **Rating: 8/10**
-- **File:** `crates/commitbook-core/src/cron/linux.rs:17`
+- **File:** `crates/commitbook-engine/src/cron/linux.rs:17`
 - **Problem:** `format!("{} {} auto-commit --repo {}", schedule, bin_str, repo_str)` — paths with spaces will split into wrong arguments. E.g., `/home/user/My Notes` becomes two args.
 - **Plan:**
   1. Quote both paths in the crontab entry:
@@ -128,11 +128,11 @@ The issues range from critical bugs (broken features, panics) to minor documenta
      ```
   2. Update `filter_crontab_lines` — the marker check on line 34 (`line.trim() == marker`) should still work since comments aren't quoted. But line 38's `line.contains(&*repo_str)` will still match inside quotes. Verify the filter still works correctly.
   3. Update test assertions in `linux_tests.rs` to expect quoted paths
-- **Files to modify:** `crates/commitbook-core/src/cron/linux.rs`, `crates/commitbook-core/src/cron/linux_tests.rs`
+- **Files to modify:** `crates/commitbook-engine/src/cron/linux.rs`, `crates/commitbook-engine/src/cron/linux_tests.rs`
 
 ### Issue I: No XML escaping in macOS plist (Comment #13)
 - **Rating: 8/10**
-- **File:** `crates/commitbook-core/src/cron/macos.rs:47-83`
+- **File:** `crates/commitbook-engine/src/cron/macos.rs:47-83`
 - **Problem:** `generate_plist` interpolates `bin_str`, `repo_str`, `path_env` directly into XML via `format!`. If any path contains `&`, `<`, or `>`, the plist is invalid and `launchctl load` fails silently.
 - **Plan:**
   1. Add an XML escape helper function:
@@ -147,7 +147,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
      ```
   2. Apply it to all interpolated values in `generate_plist`: `bin_str`, `repo_str`, `stdout`, `stderr`, `path_env`
   3. Note: the `label` is a SHA256 hash so it's safe, and `interval` is a number
-- **Files to modify:** `crates/commitbook-core/src/cron/macos.rs`
+- **Files to modify:** `crates/commitbook-engine/src/cron/macos.rs`
 
 ### Issue J: `unsafe` blocks around `set_var` fail clippy (Comment #4)
 - **Rating: 7/10**
@@ -214,7 +214,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
 
 ### Issue N: `set_repo_enabled` silently no-ops for missing repos (Comment #15)
 - **Rating: 6/10**
-- **File:** `crates/commitbook-cli/src/commands/start.rs:46` + `crates/commitbook-core/src/config/global.rs:126-131`
+- **File:** `crates/commitbook-cli/src/commands/start.rs:46` + `crates/commitbook-engine/src/config/global.rs:126-131`
 - **Problem:** `GlobalConfig::set_repo_enabled` only updates existing entries via `get_mut`. If the repo was never registered (or global config was reset), it returns `Ok(())` silently. The start command proceeds but global state is stale.
 - **Plan:**
   1. In `start.rs`, after line 46, add a fallback:
@@ -286,7 +286,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
      }
      ```
   2. Apply same pattern in `routes.rs:258-261`
-  3. Add `which` to `commitbook-tui/Cargo.toml` and `commitbook-web/Cargo.toml` dependencies (it's already a transitive dep via `commitbook-core`)
+  3. Add `which` to `commitbook-tui/Cargo.toml` and `commitbook-web/Cargo.toml` dependencies (it's already a transitive dep via `commitbook-engine`)
 - **Files to modify:** `crates/commitbook-tui/src/app.rs`, `crates/commitbook-web/src/routes.rs`, `crates/commitbook-tui/Cargo.toml`, `crates/commitbook-web/Cargo.toml`
 
 ### Issue R: Wrong command name in error messages (Comments #5, #12)
@@ -300,13 +300,13 @@ The issues range from critical bugs (broken features, panics) to minor documenta
 
 ### Issue S: `max_log_files` naming mismatch (Comment #11)
 - **Rating: 5/10**
-- **File:** `crates/commitbook-core/src/config/local.rs:35`
+- **File:** `crates/commitbook-engine/src/config/local.rs:35`
 - **Problem:** Field is named `max_log_files` but it's used as `max_log_days` (passed to `FileLogger::new(repo_path, config.logging.max_log_files)` which uses it for date-based cleanup, not file-count). Confusing for users editing config.
 - **Plan:**
   1. Rename `max_log_files` to `max_log_days` in `LoggingSettings` struct (line 35)
   2. Add `#[serde(alias = "max_log_files")]` for backwards compatibility with existing configs
   3. Update all references across the codebase (grep for `max_log_files`)
-- **Files to modify:** `crates/commitbook-core/src/config/local.rs`, and any files referencing `logging.max_log_files`
+- **Files to modify:** `crates/commitbook-engine/src/config/local.rs`, and any files referencing `logging.max_log_files`
 
 ### Issue T: Terminal not restored on setup failure in TUI (Comment #27)
 - **Rating: 5/10**
@@ -337,7 +337,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
 
 ### Issue U: `read_entries` loads all logs into memory (Comment #9)
 - **Rating: 4/10**
-- **File:** `crates/commitbook-core/src/logger/file_logger.rs:155-193`
+- **File:** `crates/commitbook-engine/src/logger/file_logger.rs:155-193`
 - **Problem:** Reads every `.log` file and every line into `all_lines` before applying `offset`/`limit`. With many days of logs and web UI polling, this is O(total_logs) per request.
 - **Plan:**
   1. Add early termination: track how many entries we've skipped and collected, stop reading files once `offset + limit` is reached:
@@ -355,11 +355,11 @@ The issues range from critical bugs (broken features, panics) to minor documenta
          }
      }
      ```
-- **Files to modify:** `crates/commitbook-core/src/logger/file_logger.rs`
+- **Files to modify:** `crates/commitbook-engine/src/logger/file_logger.rs`
 
 ### Issue V: Test assertions have wrong ordering (Comment #24)
 - **Rating: 4/10**
-- **File:** `crates/commitbook-core/src/logger/file_logger_tests.rs:137-140`
+- **File:** `crates/commitbook-engine/src/logger/file_logger_tests.rs:137-140`
 - **Problem:** The test expects `entries[0].contains("new2")` (newest first within a file), which is actually correct — `read_entries` reverses lines within each file (line 182 of `file_logger.rs`). The CodeRabbit comment was wrong here — the implementation does reverse. **However**, verify this by checking: `read_entries` does `lines.reverse()` at line 182, so within today's file, `new2` (last written) becomes first. The test assertions are correct.
 - **Plan:** No change needed — the test matches the implementation. The reviewer misread the code.
 
@@ -371,7 +371,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
 
 ### Issue X: Hardcoded `/tmp` in config test (Comment #20)
 - **Rating: 2/10**
-- **File:** `crates/commitbook-core/src/config/mod_tests.rs:5-6`
+- **File:** `crates/commitbook-engine/src/config/mod_tests.rs:5-6`
 - **Problem:** Uses hardcoded `/tmp` which is platform-dependent, and assertion `contains("tmp")` is weak.
 - **Plan:**
   1. Use `tempfile::tempdir()`:
@@ -383,11 +383,11 @@ The issues range from critical bugs (broken features, panics) to minor documenta
          assert_eq!(result, tmp.path().canonicalize().unwrap());
      }
      ```
-- **Files to modify:** `crates/commitbook-core/src/config/mod_tests.rs`
+- **Files to modify:** `crates/commitbook-engine/src/config/mod_tests.rs`
 
 ### Issue Y: Missing regression tests for crontab path handling (Comments #21, #22)
 - **Rating: 2/10**
-- **File:** `crates/commitbook-core/src/cron/linux_tests.rs`
+- **File:** `crates/commitbook-engine/src/cron/linux_tests.rs`
 - **Problem:** No tests for paths with spaces or prefix-matching false positives.
 - **Plan:**
   1. Add test for spaces (after Issue H quotes paths):
@@ -413,7 +413,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
      }
      ```
   3. Note: the prefix test will currently fail because `filter_crontab_lines` line 38 uses `line.contains(&*repo_str)` which matches `/tmp/repo` inside `/tmp/repository`. This is a real bug that should also be fixed by matching on the full `--repo <path>` argument.
-- **Files to modify:** `crates/commitbook-core/src/cron/linux_tests.rs`, `crates/commitbook-core/src/cron/linux.rs` (fix the substring matching bug)
+- **Files to modify:** `crates/commitbook-engine/src/cron/linux_tests.rs`, `crates/commitbook-engine/src/cron/linux.rs` (fix the substring matching bug)
 
 ---
 
@@ -421,7 +421,7 @@ The issues range from critical bugs (broken features, panics) to minor documenta
 
 The recommended order for implementation, grouped by file to minimize context switching:
 
-### Batch 1: Core library fixes (most impactful, no dependencies)
+### Batch 1: Engine library fixes (most impactful, no dependencies)
 1. **Issue A** — `datetime.rs` UTC fix
 2. **Issue C** — `ai/mod.rs` UTF-8 safe truncate
 3. **Issue G** — `ai/claude.rs` async/zombie fix
@@ -481,15 +481,15 @@ After all changes are applied:
 
 | File | Issues |
 |------|--------|
-| `crates/commitbook-core/src/utils/datetime.rs` | A |
-| `crates/commitbook-core/src/ai/mod.rs` | C |
-| `crates/commitbook-core/src/ai/claude.rs` | G |
-| `crates/commitbook-core/src/cron/linux.rs` | H, Y |
-| `crates/commitbook-core/src/cron/linux_tests.rs` | H, Y |
-| `crates/commitbook-core/src/cron/macos.rs` | I |
-| `crates/commitbook-core/src/config/local.rs` | S |
-| `crates/commitbook-core/src/logger/file_logger.rs` | U |
-| `crates/commitbook-core/src/config/mod_tests.rs` | X |
+| `crates/commitbook-engine/src/utils/datetime.rs` | A |
+| `crates/commitbook-engine/src/ai/mod.rs` | C |
+| `crates/commitbook-engine/src/ai/claude.rs` | G |
+| `crates/commitbook-engine/src/cron/linux.rs` | H, Y |
+| `crates/commitbook-engine/src/cron/linux_tests.rs` | H, Y |
+| `crates/commitbook-engine/src/cron/macos.rs` | I |
+| `crates/commitbook-engine/src/config/local.rs` | S |
+| `crates/commitbook-engine/src/logger/file_logger.rs` | U |
+| `crates/commitbook-engine/src/config/mod_tests.rs` | X |
 | `crates/commitbook-cli/src/main.rs` | J |
 | `crates/commitbook-cli/src/commands/status.rs` | B |
 | `crates/commitbook-cli/src/commands/setup.rs` | K |

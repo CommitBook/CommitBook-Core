@@ -3,7 +3,7 @@ use colored::Colorize;
 use std::io::{self, Write};
 use std::path::Path;
 
-use commitbook_core::state::auth::{AuthConfig, AuthEntry};
+use commitbook_engine::state::auth::{AuthConfig, AuthEntry};
 
 pub async fn run(
     cb_dir: &Path,

@@ -2,9 +2,9 @@ use anyhow::{bail, Result};
 use colored::Colorize;
 use std::path::Path;
 
-use commitbook_core::config::LocalConfig;
-use commitbook_core::cron;
-use commitbook_core::git::GitRepo;
+use commitbook_engine::config::LocalConfig;
+use commitbook_engine::cron;
+use commitbook_engine::git::GitRepo;
 
 pub fn run(_cb_dir: &Path, repo_root: &Path) -> Result<()> {
     if !GitRepo::is_repo(repo_root) {

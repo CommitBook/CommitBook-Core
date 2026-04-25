@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/commitbook-core",
+    "crates/commitbook-engine",
     "crates/commitbook-cli",
     "crates/commitbook-tui",
     "crates/commitbook-web",

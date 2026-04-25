@@ -509,7 +509,7 @@ dependencies = [
  "clap_complete",
  "clap_mangen",
  "colored",
- "commitbook-core",
+ "commitbook-engine",
  "dirs",
  "env_logger",
  "fs2",
@@ -521,7 +521,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "commitbook-core"
+name = "commitbook-engine"
 version = "0.5.0"
 dependencies = [
  "anyhow",
@@ -552,7 +552,7 @@ version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "commitbook-core",
+ "commitbook-engine",
  "thiserror 2.0.18",
  "tokio",
  "uniffi",
@@ -565,7 +565,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "commitbook-core",
+ "commitbook-engine",
  "crossterm",
  "ratatui",
  "serde_json",
@@ -583,7 +583,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
- "commitbook-core",
+ "commitbook-engine",
  "http-body-util",
  "serde",
  "serde_json",

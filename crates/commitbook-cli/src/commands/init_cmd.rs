@@ -1,9 +1,9 @@
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 
-use commitbook_core::config::LocalConfig;
-use commitbook_core::git::remote::list_remote_names;
-use commitbook_core::state;
+use commitbook_engine::config::LocalConfig;
+use commitbook_engine::git::remote::list_remote_names;
+use commitbook_engine::state;
 
 /// Initialize CommitBook in the current git repo.
 ///

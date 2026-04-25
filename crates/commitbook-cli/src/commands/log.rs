@@ -3,7 +3,7 @@ use colored::Colorize;
 use std::path::Path;
 use std::time::Duration;
 
-use commitbook_core::config::LocalConfig;
+use commitbook_engine::config::LocalConfig;
 
 pub fn run(
     _cb_dir: &Path,

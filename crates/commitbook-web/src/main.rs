@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     };
     let port = cli.port;
 
-    if !commitbook_core::config::local::LocalConfig::exists(&repo_path) {
+    if !commitbook_engine::config::local::LocalConfig::exists(&repo_path) {
         bail!(
             "CommitBook not initialized in {}. Run `commitbook sync` first.",
             repo_path.display()
