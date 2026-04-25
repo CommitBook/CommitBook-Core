@@ -56,6 +56,30 @@ fn default_conflict_resolver() -> String {
     "manual".to_string()
 }
 
+fn default_sync_engine() -> String {
+    "v2".to_string()
+}
+
+/// Sync engine selection.
+///
+/// `v1` = legacy planner+pipeline+transport orchestrator.
+/// `v2` = thin git-CLI wrapper using `pull --rebase --autostash` and the
+///        `ConflictResolver` registry. Default stays on `v1` until the new
+///        engine is validated end-to-end.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncSettings {
+    #[serde(default = "default_sync_engine")]
+    pub engine: String,
+}
+
+impl Default for SyncSettings {
+    fn default() -> Self {
+        Self {
+            engine: default_sync_engine(),
+        }
+    }
+}
+
 /// Conflict-resolution settings.
 ///
 /// `resolver` selects which AI CLI is invoked when `git pull --rebase
@@ -155,6 +179,8 @@ pub struct LocalConfig {
     pub logging: LoggingSettings,
     #[serde(default)]
     pub conflict: ConflictSettings,
+    #[serde(default)]
+    pub sync: SyncSettings,
     pub scheduler_id: Option<String>,
 }
 
@@ -170,6 +196,7 @@ impl LocalConfig {
             files: FileSettings::default(),
             logging: LoggingSettings::default(),
             conflict: ConflictSettings::default(),
+            sync: SyncSettings::default(),
             scheduler_id: None,
         }
     }

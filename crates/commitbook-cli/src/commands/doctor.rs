@@ -159,7 +159,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
     // 9. Sync checkpoint.
     print!("  Sync checkpoint... ");
     match SyncState::load(cb_dir) {
-        Ok(state) if state.remote_head.is_some() => {
+        Ok(state) if state.last_sync_at.is_some() => {
             println!("{}", "OK".green().bold());
         }
         _ => {
@@ -205,7 +205,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
                     );
                     println!(
                         "    Run: {}",
-                        format!("git pull --ff-only").dimmed()
+                        "git pull --ff-only".dimmed()
                     );
                 }
                 Ok((ahead, behind)) => {

@@ -56,9 +56,6 @@ enum Commands {
         fix: bool,
     },
 
-    /// Show open merge conflicts
-    Conflicts,
-
     /// Show recent activity log
     Log {
         /// Number of recent entries to show
@@ -160,7 +157,6 @@ async fn run(cli: Cli) -> Result<()> {
             commands::schedule::run(&cb_dir, &repo_root, &expression)?;
         }
         Commands::Doctor { fix } => commands::doctor::run(&cb_dir, &repo_root, cli.json, fix)?,
-        Commands::Conflicts => commands::conflicts::run(&cb_dir, &repo_root)?,
         Commands::Log { lines, tail } => {
             commands::log::run(&cb_dir, &repo_root, lines, cli.json, tail)?;
         }

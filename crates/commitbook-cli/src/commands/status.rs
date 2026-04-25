@@ -19,8 +19,8 @@ pub fn run(cb_dir: &Path, repo_root: &Path, json: bool) -> Result<()> {
             "schedule": config.schedule,
             "branch": config.git.branch,
             "auto_push": config.git.auto_push,
-            "remote_head": state.remote_head,
             "last_sync_at": state.last_sync_at,
+            "last_error": state.last_error,
             "has_remote": repo.has_remote(),
         });
         println!("{}", serde_json::to_string_pretty(&obj)?);
@@ -63,11 +63,8 @@ pub fn run(cb_dir: &Path, repo_root: &Path, json: bool) -> Result<()> {
         println!("  Last sync: {}", "never".dimmed());
     }
 
-    if let Some(ref head) = state.remote_head {
-        println!(
-            "  Remote HEAD: {}",
-            &head[..7.min(head.len())]
-        );
+    if let Some(ref err) = state.last_error {
+        println!("  Last error: {}", err.red());
     }
 
     // Local vs origin divergence check — only meaningful when a remote is configured.

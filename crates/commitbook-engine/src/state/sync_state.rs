@@ -3,10 +3,17 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Sync state stored in `.CommitBook/local/state.toml`.
+///
+/// Persistent across runs. `remote_head` from older versions of CommitBook
+/// is no longer needed (derivable via `git rev-parse origin/<branch>`); it
+/// loads silently from old `state.toml` files via serde's default
+/// unknown-field tolerance.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SyncState {
-    pub remote_head: Option<String>,
+    #[serde(default)]
     pub last_sync_at: Option<String>,
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 impl SyncState {
