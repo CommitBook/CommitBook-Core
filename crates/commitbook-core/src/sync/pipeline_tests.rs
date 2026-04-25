@@ -32,7 +32,7 @@ async fn test_execute_noop_returns_zeros() {
     .unwrap();
 
     assert_eq!(result.pulled, 0);
-    assert_eq!(result.pushed, 0);
+    assert_eq!(result.pushed(), 0);
     assert_eq!(result.conflicts, 0);
     assert!(result.errors.is_empty());
 }
@@ -122,7 +122,7 @@ async fn test_execute_push_reads_working_tree() {
     .await
     .unwrap();
 
-    assert_eq!(result.pushed, 1);
+    assert_eq!(result.pushed(), 1);
 
     // Verify the transport received the file.
     let written = transport.written_files();
@@ -229,7 +229,7 @@ async fn test_pull_then_push_failure_does_not_advance_checkpoint() {
 
     // Push failed.
     assert!(!result.errors.is_empty());
-    assert_eq!(result.pushed, 0);
+    assert_eq!(result.pushed(), 0);
 
     // Checkpoint must still point at the pre-sync SHA — we never advanced
     // past a push that didn't land.
@@ -328,7 +328,7 @@ async fn test_pull_then_push_success_advances_checkpoint() {
     .unwrap();
 
     assert!(result.errors.is_empty());
-    assert!(result.pushed > 0);
+    assert!(result.pushed() > 0);
 
     // Checkpoint advanced to the new head; that SHA is the new base for the
     // next sync cycle.
@@ -372,7 +372,7 @@ async fn test_push_phase_deletes_on_remote() {
     .unwrap();
 
     assert!(result.errors.is_empty());
-    assert_eq!(result.pushed, 1);
+    assert_eq!(result.pushed(), 1);
 
     let deletes = transport.deleted_files();
     assert_eq!(deletes.len(), 1);

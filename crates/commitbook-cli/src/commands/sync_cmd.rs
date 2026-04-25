@@ -49,11 +49,14 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
                     result.pulled
                 );
             }
-            if result.pushed > 0 {
+            let pushed_total = result.pushed();
+            if pushed_total > 0 {
+                let breakdown = summarize_push_breakdown(&result);
                 println!(
-                    "  {} Pushed {} file(s).",
+                    "  {} Pushed {} file(s){}.",
                     "OK".green().bold(),
-                    result.pushed
+                    pushed_total,
+                    breakdown,
                 );
             }
             if result.conflicts > 0 {
@@ -68,7 +71,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
                 let _ = logger.error(err);
                 println!("  {} {}", "ERROR".red().bold(), err);
             }
-            if result.pulled == 0 && result.pushed == 0 && result.conflicts == 0 {
+            if result.pulled == 0 && result.pushed() == 0 && result.conflicts == 0 {
                 let _ = logger.info("Already up to date");
                 println!("{}", "Already up to date.".dimmed());
             }
@@ -126,6 +129,26 @@ pub async fn run_scheduled(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     let _ = std::fs::remove_file(&lock_path);
 
     Ok(())
+}
+
+/// Format "(A added, M modified, D deleted)" — only categories > 0.
+/// Returns an empty string when only one category or everything is zero.
+fn summarize_push_breakdown(result: &commitbook_core::sync::pipeline::SyncResult) -> String {
+    let mut parts = Vec::new();
+    if result.pushed_added > 0 {
+        parts.push(format!("{} added", result.pushed_added));
+    }
+    if result.pushed_modified > 0 {
+        parts.push(format!("{} modified", result.pushed_modified));
+    }
+    if result.pushed_deleted > 0 {
+        parts.push(format!("{} deleted", result.pushed_deleted));
+    }
+    if parts.len() <= 1 {
+        String::new()
+    } else {
+        format!(" ({})", parts.join(", "))
+    }
 }
 
 /// Generate a commit message using AI or fallback.
