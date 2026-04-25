@@ -8,14 +8,19 @@ use commitbook_core::cron;
 pub fn run(_cb_dir: &Path, repo_root: &Path, expression: &str) -> Result<()> {
     let mut config = LocalConfig::load(repo_root)?;
 
-    // Resolve and validate.
+    // Resolve and validate. Try presets first, then natural-time shorthands
+    // (`5m`, `1h`, `1d`), and finally fall through to strict cron validation.
     let schedule = match expression {
         "hourly" | "daily" | "every-30m" | "every-4h" => {
             cron::resolve_schedule(expression)
         }
         _ => {
-            cron::validate_cron_expression(expression)?;
-            expression.to_string()
+            if let Some(cron_expr) = cron::parse_human_interval(expression) {
+                cron_expr
+            } else {
+                cron::validate_cron_expression(expression)?;
+                expression.to_string()
+            }
         }
     };
 

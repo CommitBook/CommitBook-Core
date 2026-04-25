@@ -1,6 +1,62 @@
 use super::*;
 
 #[test]
+fn test_parse_human_interval_minutes() {
+    assert_eq!(parse_human_interval("5m"), Some("*/5 * * * *".to_string()));
+    assert_eq!(parse_human_interval("30m"), Some("*/30 * * * *".to_string()));
+    assert_eq!(parse_human_interval("1m"), Some("*/1 * * * *".to_string()));
+    assert_eq!(
+        parse_human_interval("15min"),
+        Some("*/15 * * * *".to_string())
+    );
+    assert_eq!(
+        parse_human_interval("10minutes"),
+        Some("*/10 * * * *".to_string())
+    );
+}
+
+#[test]
+fn test_parse_human_interval_hours() {
+    assert_eq!(parse_human_interval("1h"), Some("0 * * * *".to_string()));
+    assert_eq!(parse_human_interval("2h"), Some("0 */2 * * *".to_string()));
+    assert_eq!(parse_human_interval("4hr"), Some("0 */4 * * *".to_string()));
+    assert_eq!(
+        parse_human_interval("12hours"),
+        Some("0 */12 * * *".to_string())
+    );
+}
+
+#[test]
+fn test_parse_human_interval_days() {
+    assert_eq!(parse_human_interval("1d"), Some("0 9 * * *".to_string()));
+    assert_eq!(parse_human_interval("1day"), Some("0 9 * * *".to_string()));
+}
+
+#[test]
+fn test_parse_human_interval_rejects_unsupported() {
+    // Sub-minute intervals (launchd minimum is 1m via cron).
+    assert!(parse_human_interval("30s").is_none());
+    // Out-of-range minutes / hours.
+    assert!(parse_human_interval("0m").is_none());
+    assert!(parse_human_interval("60m").is_none());
+    assert!(parse_human_interval("0h").is_none());
+    assert!(parse_human_interval("24h").is_none());
+    // Multi-day windows aren't expressible as a single launchd interval.
+    assert!(parse_human_interval("2d").is_none());
+    // Garbage input.
+    assert!(parse_human_interval("").is_none());
+    assert!(parse_human_interval("abc").is_none());
+    assert!(parse_human_interval("5").is_none());
+    assert!(parse_human_interval("m5").is_none());
+}
+
+#[test]
+fn test_parse_human_interval_tolerates_whitespace_and_case() {
+    assert_eq!(parse_human_interval("  5M "), Some("*/5 * * * *".to_string()));
+    assert_eq!(parse_human_interval("1H"), Some("0 * * * *".to_string()));
+}
+
+#[test]
 fn test_resolve_schedule_presets() {
     assert_eq!(resolve_schedule("hourly"), "0 * * * *");
     assert_eq!(resolve_schedule("daily"), "0 9 * * *");

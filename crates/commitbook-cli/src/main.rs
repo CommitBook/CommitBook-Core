@@ -58,6 +58,10 @@ enum Commands {
         /// Number of recent entries to show
         #[arg(short = 'n', long, default_value = "20")]
         lines: usize,
+
+        /// Stream new entries as they're appended (Ctrl-C to stop)
+        #[arg(short = 'f', long)]
+        tail: bool,
     },
 
     /// Authenticate with a provider
@@ -140,8 +144,8 @@ async fn main() -> Result<()> {
         }
         Commands::Doctor => commands::doctor::run(&cb_dir, &repo_root, cli.json)?,
         Commands::Conflicts => commands::conflicts::run(&cb_dir, &repo_root)?,
-        Commands::Log { lines } => {
-            commands::log::run(&cb_dir, &repo_root, lines, cli.json)?;
+        Commands::Log { lines, tail } => {
+            commands::log::run(&cb_dir, &repo_root, lines, cli.json, tail)?;
         }
         Commands::Login { token, provider } => {
             commands::login::run(&cb_dir, &repo_root, token, provider).await?;

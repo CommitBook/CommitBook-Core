@@ -108,6 +108,59 @@ pub fn describe_schedule(cron_expr: &str) -> String {
     }
 }
 
+/// Parse a natural-language interval like `5m`, `30min`, `1h`, `2hours`, `1d`
+/// into an equivalent cron expression. Returns `None` for unsupported shapes
+/// (sub-minute, > 23 hours, > 1 day) so the caller can fall through to the
+/// strict cron validator with a clear error.
+pub fn parse_human_interval(input: &str) -> Option<String> {
+    let trimmed = input.trim().to_lowercase();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Split into leading digits and trailing unit. We require at least one
+    // digit and a known unit suffix.
+    let split_at = trimmed
+        .char_indices()
+        .find(|(_, c)| !c.is_ascii_digit())
+        .map(|(i, _)| i)?;
+    if split_at == 0 {
+        return None;
+    }
+    let (n_str, unit) = trimmed.split_at(split_at);
+    let n: u64 = n_str.parse().ok()?;
+    let unit = unit.trim_start();
+
+    match unit {
+        "m" | "min" | "mins" | "minute" | "minutes" => {
+            // `*/N` covers 1..=59. 60+ would overflow; the user can write `1h`.
+            if (1..=59).contains(&n) {
+                Some(format!("*/{n} * * * *"))
+            } else {
+                None
+            }
+        }
+        "h" | "hr" | "hrs" | "hour" | "hours" => {
+            if n == 1 {
+                Some("0 * * * *".to_string())
+            } else if (2..=23).contains(&n) {
+                Some(format!("0 */{n} * * *"))
+            } else {
+                None
+            }
+        }
+        "d" | "day" | "days" => {
+            if n == 1 {
+                // Match the existing `daily` preset (9 AM).
+                Some("0 9 * * *".to_string())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// List available schedule presets as formatted text.
 pub fn list_presets() -> &'static str {
     "Available presets:

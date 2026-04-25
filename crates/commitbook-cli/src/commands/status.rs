@@ -5,6 +5,7 @@ use std::path::Path;
 use commitbook_core::config::LocalConfig;
 use commitbook_core::cron;
 use commitbook_core::git::GitRepo;
+use commitbook_core::logger::FileLogger;
 use commitbook_core::state::sync_state::SyncState;
 
 pub fn run(cb_dir: &Path, repo_root: &Path, json: bool) -> Result<()> {
@@ -89,5 +90,45 @@ pub fn run(cb_dir: &Path, repo_root: &Path, json: bool) -> Result<()> {
         }
     }
 
+    // Recent activity — pull the last few JSON lines from today's log file
+    // and render them human-readable. Skipped silently when there's no log
+    // yet (FileLogger lazily creates the dir on first write).
+    if let Ok(logger) = FileLogger::new(repo_root, config.logging.max_log_days) {
+        if let Ok(lines) = logger.read_recent(5) {
+            if !lines.is_empty() {
+                println!();
+                println!("  {}", "Recent activity:".bold());
+                // read_recent returns newest-first; reverse so the most recent
+                // entry sits at the bottom (matches `tail` conventions).
+                for line in lines.iter().rev() {
+                    if let Some(formatted) = format_recent(line) {
+                        println!("    {}", formatted);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// Render a JSON log line as `HH:MM:SS LEVEL msg`, or `None` if the line
+/// can't be parsed.
+fn format_recent(line: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let ts = v["ts"].as_str().unwrap_or("");
+    let level = v["level"].as_str().unwrap_or("INFO");
+    let msg = v["msg"].as_str().unwrap_or("");
+
+    // ts comes in as "YYYY-MM-DD HH:MM:SS" — keep just the time portion.
+    let time = ts.split(' ').nth(1).unwrap_or(ts);
+
+    let level_colored = match level {
+        "ERROR" => level.red().bold().to_string(),
+        "WARN" => level.yellow().bold().to_string(),
+        "INFO" => level.green().bold().to_string(),
+        other => other.to_string(),
+    };
+
+    Some(format!("{}  {:5}  {}", time.dimmed(), level_colored, msg))
 }

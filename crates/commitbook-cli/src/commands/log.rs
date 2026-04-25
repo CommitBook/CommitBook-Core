@@ -1,10 +1,17 @@
 use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
+use std::time::Duration;
 
 use commitbook_core::config::LocalConfig;
 
-pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, json: bool) -> Result<()> {
+pub fn run(
+    _cb_dir: &Path,
+    repo_root: &Path,
+    lines: usize,
+    json: bool,
+    tail: bool,
+) -> Result<()> {
     let logs_dir = LocalConfig::logs_dir(repo_root);
 
     if !logs_dir.exists() {
@@ -29,36 +36,96 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, json: bool) -> Result
         return Ok(());
     }
 
-    let mut shown = 0;
-
+    // Print the last N entries oldest-first so the most recent appears at the
+    // bottom of the terminal (matches `tail` conventions).
+    let mut collected: Vec<String> = Vec::new();
     for entry in &log_files {
-        if shown >= lines {
+        if collected.len() >= lines {
             break;
         }
-
         let content = std::fs::read_to_string(entry.path())?;
         for line in content.lines().rev() {
-            if shown >= lines {
+            if collected.len() >= lines {
                 break;
             }
             if line.trim().is_empty() {
                 continue;
             }
-
-            if json {
-                println!("{}", line);
-            } else {
-                println!("  {}", format_log_line(line));
-            }
-            shown += 1;
+            collected.push(line.to_string());
         }
     }
 
-    if shown == 0 {
+    if collected.is_empty() {
         println!("{}", "No log entries found.".dimmed());
+    } else {
+        for line in collected.iter().rev() {
+            print_line(line, json);
+        }
+    }
+
+    if tail {
+        follow_today(repo_root, json)?;
     }
 
     Ok(())
+}
+
+fn print_line(line: &str, json: bool) {
+    if json {
+        println!("{}", line);
+    } else {
+        println!("  {}", format_log_line(line));
+    }
+}
+
+/// Poll the day's log file (and roll to tomorrow's at midnight) and print
+/// every appended line. Runs until the user kills it with Ctrl-C.
+fn follow_today(repo_root: &Path, json: bool) -> Result<()> {
+    let logs_dir = LocalConfig::logs_dir(repo_root);
+    let mut current_path = logs_dir.join(format!(
+        "{}.log",
+        chrono::Utc::now().format("%Y-%m-%d")
+    ));
+    let mut pos = std::fs::metadata(&current_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    loop {
+        let today_path = logs_dir.join(format!(
+            "{}.log",
+            chrono::Utc::now().format("%Y-%m-%d")
+        ));
+        if today_path != current_path {
+            // Day rolled over — start reading the new file from the start.
+            current_path = today_path;
+            pos = 0;
+        }
+
+        let len = std::fs::metadata(&current_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        if len > pos {
+            use std::io::{Read, Seek, SeekFrom};
+            if let Ok(mut f) = std::fs::File::open(&current_path) {
+                if f.seek(SeekFrom::Start(pos)).is_ok() {
+                    let mut buf = String::new();
+                    if f.read_to_string(&mut buf).is_ok() {
+                        for line in buf.lines() {
+                            if !line.trim().is_empty() {
+                                print_line(line, json);
+                            }
+                        }
+                    }
+                }
+            }
+            pos = len;
+        } else if len < pos {
+            // File rotated/truncated — restart.
+            pos = 0;
+        }
+
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }
 
 /// Format a JSON log line for human-readable output with colorized level.
