@@ -454,3 +454,155 @@ fn test_changes_summary_deleted() {
     let changes = git_repo.changes_summary().unwrap();
     assert_eq!(changes.deleted_files.len(), 1);
 }
+
+// --- has_dirty_markdown / pull_rebase_autostash / list_conflicted_paths tests ---
+
+#[test]
+fn test_has_dirty_markdown_clean_repo() {
+    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
+    assert!(!fx.repo().has_dirty_markdown().unwrap());
+}
+
+#[test]
+fn test_has_dirty_markdown_modified_md() {
+    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
+    fs::write(fx.repo_root.join("notes.md"), "# modified\n").unwrap();
+    assert!(fx.repo().has_dirty_markdown().unwrap());
+}
+
+#[test]
+fn test_has_dirty_markdown_ignores_non_md() {
+    let fx = setup_repo_with_base(&[]);
+    fs::write(fx.repo_root.join("script.sh"), "#!/bin/bash\n").unwrap();
+    assert!(!fx.repo().has_dirty_markdown().unwrap());
+}
+
+#[test]
+fn test_pull_rebase_autostash_noop_when_in_sync() {
+    let fx = setup_repo_with_bare_remote();
+    let outcome = fx
+        .repo
+        .pull_rebase_autostash("origin", &fx.branch)
+        .unwrap();
+    assert_eq!(outcome, PullOutcome::Clean);
+}
+
+#[test]
+fn test_pull_rebase_autostash_fast_forwards_when_behind() {
+    let fx = setup_repo_with_bare_remote();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "new.md", "# new\n");
+
+    let outcome = fx
+        .repo
+        .pull_rebase_autostash("origin", &fx.branch)
+        .unwrap();
+    assert_eq!(outcome, PullOutcome::Clean);
+    // Working tree should now contain the pulled file.
+    assert!(fx.repo_dir.path().join("new.md").exists());
+}
+
+#[test]
+fn test_pull_rebase_autostash_with_dirty_disjoint_files() {
+    let fx = setup_repo_with_bare_remote();
+
+    // Local: dirty different file.
+    fs::write(fx.repo_dir.path().join("local.md"), "# local\n").unwrap();
+
+    // Remote: a different file.
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "remote.md", "# remote\n");
+
+    let outcome = fx
+        .repo
+        .pull_rebase_autostash("origin", &fx.branch)
+        .unwrap();
+    assert_eq!(outcome, PullOutcome::Clean);
+    assert!(fx.repo_dir.path().join("remote.md").exists());
+    // Local dirty file restored after autostash pop.
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("local.md")).unwrap(),
+        "# local\n"
+    );
+}
+
+#[test]
+fn test_pull_rebase_autostash_stash_pop_conflict() {
+    let fx = setup_repo_with_bare_remote();
+
+    // Establish a shared file at HEAD.
+    fs::write(fx.repo_dir.path().join("shared.md"), "line A\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add shared").unwrap();
+    let push = std::process::Command::new("git")
+        .args(["push", "origin", &fx.branch])
+        .current_dir(fx.repo_dir.path())
+        .output()
+        .unwrap();
+    assert!(push.status.success());
+
+    // Local: edit shared.md but don't commit.
+    fs::write(fx.repo_dir.path().join("shared.md"), "line A LOCAL\n").unwrap();
+
+    // Remote: edit the same line and push.
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "shared.md", "line A REMOTE\n");
+
+    let outcome = fx
+        .repo
+        .pull_rebase_autostash("origin", &fx.branch)
+        .unwrap();
+    assert_eq!(outcome, PullOutcome::StashPopConflict);
+
+    let conflicted = fx.repo.list_conflicted_paths().unwrap();
+    assert_eq!(conflicted, vec!["shared.md".to_string()]);
+}
+
+#[test]
+fn test_list_conflicted_paths_empty_when_clean() {
+    let fx = setup_repo_with_bare_remote();
+    let paths = fx.repo.list_conflicted_paths().unwrap();
+    assert!(paths.is_empty());
+}
+
+#[test]
+fn test_continue_rebase_or_stash_noop_after_stash_pop_resolve() {
+    // Reproduces: stash-pop conflict, AI writes resolved content, caller
+    // git-adds and calls continue_rebase_or_stash. With no rebase in flight
+    // the call should be a no-op and leave the WT in a clean staged state.
+    let fx = setup_repo_with_bare_remote();
+
+    fs::write(fx.repo_dir.path().join("shared.md"), "line A\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add shared").unwrap();
+    let _ = std::process::Command::new("git")
+        .args(["push", "origin", &fx.branch])
+        .current_dir(fx.repo_dir.path())
+        .output()
+        .unwrap();
+
+    fs::write(fx.repo_dir.path().join("shared.md"), "line A LOCAL\n").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "shared.md", "line A REMOTE\n");
+
+    let outcome = fx
+        .repo
+        .pull_rebase_autostash("origin", &fx.branch)
+        .unwrap();
+    assert_eq!(outcome, PullOutcome::StashPopConflict);
+
+    // Simulate AI resolving the file.
+    fs::write(fx.repo_dir.path().join("shared.md"), "line A RESOLVED\n").unwrap();
+    let add = std::process::Command::new("git")
+        .args(["add", "shared.md"])
+        .current_dir(fx.repo_dir.path())
+        .output()
+        .unwrap();
+    assert!(add.status.success());
+
+    // No rebase in progress — should succeed silently.
+    fx.repo.continue_rebase_or_stash().unwrap();
+
+    let paths = fx.repo.list_conflicted_paths().unwrap();
+    assert!(paths.is_empty());
+}

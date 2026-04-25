@@ -38,6 +38,21 @@ impl StatusSummary {
     }
 }
 
+/// Outcome of `GitRepo::pull_rebase_autostash`.
+///
+/// `Clean` covers both fast-forward and a successful rebase + stash pop.
+/// The two conflict variants distinguish where in the pipeline failure
+/// happened so the caller can decide whether to invoke the AI resolver
+/// (`StashPopConflict`) or surface a more serious rebase failure
+/// (`RebaseConflict` — the user's previously-committed local work conflicts
+/// with remote and needs human attention).
+#[derive(Debug, PartialEq, Eq)]
+pub enum PullOutcome {
+    Clean,
+    StashPopConflict,
+    RebaseConflict,
+}
+
 impl ChangesSummary {
     pub fn is_empty(&self) -> bool {
         self.new_files.is_empty() && self.modified_files.is_empty() && self.deleted_files.is_empty()
@@ -505,6 +520,149 @@ impl GitRepo {
             .revparse_single(refname)
             .with_context(|| format!("Failed to resolve ref '{}'", refname))?;
         Ok(obj.id().to_string())
+    }
+
+    /// Are there any uncommitted markdown changes in the working tree?
+    pub fn has_dirty_markdown(&self) -> Result<bool> {
+        Ok(!self.status_markdown()?.is_empty())
+    }
+
+    /// List paths with unmerged conflict markers.
+    ///
+    /// Desktop-only: shells out to `git diff --name-only --diff-filter=U`.
+    /// On mobile, returns an empty list (the new sync flow is not used there).
+    pub fn list_conflicted_paths(&self) -> Result<Vec<String>> {
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            let output = Command::new("git")
+                .args(["diff", "--name-only", "--diff-filter=U"])
+                .current_dir(&self.path)
+                .output()
+                .context("Failed to run git diff --diff-filter=U")?;
+            if !output.status.success() {
+                bail!(
+                    "git diff --diff-filter=U failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            let paths = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| l.to_string())
+                .collect();
+            Ok(paths)
+        }
+        #[cfg(any(target_os = "ios", target_os = "android"))]
+        {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Run `git pull --rebase --autostash <remote> <branch>` and classify the
+    /// result. Desktop-only.
+    ///
+    /// Note: `git pull --rebase --autostash` can leave conflict markers in
+    /// the working tree even with exit code 0 — older git versions did not
+    /// propagate stash-pop conflicts as a non-zero exit. So we always check
+    /// for unmerged paths and rebase-in-progress markers regardless of exit
+    /// status.
+    pub fn pull_rebase_autostash(
+        &self,
+        remote: &str,
+        branch: &str,
+    ) -> Result<PullOutcome> {
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            let output = Command::new("git")
+                .args(["pull", "--rebase", "--autostash", remote, branch])
+                .current_dir(&self.path)
+                .output()
+                .context("Failed to run git pull --rebase --autostash")?;
+
+            let rebase_in_progress = self.path.join(".git/rebase-merge").exists()
+                || self.path.join(".git/rebase-apply").exists();
+            if rebase_in_progress {
+                return Ok(PullOutcome::RebaseConflict);
+            }
+
+            // No rebase in progress. If there are unmerged paths, the
+            // autostash pop conflicted — regardless of exit code.
+            if !self.list_conflicted_paths()?.is_empty() {
+                return Ok(PullOutcome::StashPopConflict);
+            }
+
+            if output.status.success() {
+                return Ok(PullOutcome::Clean);
+            }
+
+            bail!(
+                "git pull --rebase --autostash failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        #[cfg(any(target_os = "ios", target_os = "android"))]
+        {
+            let _ = (remote, branch);
+            bail!("pull_rebase_autostash is not supported on this platform");
+        }
+    }
+
+    /// Continue an in-flight rebase or no-op if the conflict was a stash pop.
+    ///
+    /// After AI resolution the resolved files have been `git add`-ed; this
+    /// method advances the operation to completion.
+    pub fn continue_rebase_or_stash(&self) -> Result<()> {
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            let rebase_in_progress = self.path.join(".git/rebase-merge").exists()
+                || self.path.join(".git/rebase-apply").exists();
+            if !rebase_in_progress {
+                // Stash pop conflict: once files are git-add'd the working
+                // tree is the merged state. Nothing more to do.
+                return Ok(());
+            }
+            let mut cmd = Command::new("git");
+            cmd.args(["rebase", "--continue"])
+                .current_dir(&self.path)
+                .env("GIT_EDITOR", "true");
+            let output = cmd
+                .output()
+                .context("Failed to run git rebase --continue")?;
+            if !output.status.success() {
+                bail!(
+                    "git rebase --continue failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            Ok(())
+        }
+        #[cfg(any(target_os = "ios", target_os = "android"))]
+        {
+            bail!("continue_rebase_or_stash is not supported on this platform");
+        }
+    }
+
+    /// Abort an in-flight rebase. Used in error-recovery paths.
+    pub fn rebase_abort(&self) -> Result<()> {
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            let output = Command::new("git")
+                .args(["rebase", "--abort"])
+                .current_dir(&self.path)
+                .output()
+                .context("Failed to run git rebase --abort")?;
+            if !output.status.success() {
+                bail!(
+                    "git rebase --abort failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            Ok(())
+        }
+        #[cfg(any(target_os = "ios", target_os = "android"))]
+        {
+            bail!("rebase_abort is not supported on this platform");
+        }
     }
 
     /// Rebase the current branch onto the given ref.

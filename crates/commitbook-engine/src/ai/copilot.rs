@@ -4,10 +4,12 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
+use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
 use super::{clean_message, looks_like_diff_narration, truncate, CommitMessageProvider};
 use crate::git::ChangesSummary;
 
 const COPILOT_TIMEOUT: Duration = Duration::from_secs(10);
+const COPILOT_RESOLVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub struct CopilotProvider;
 
@@ -69,6 +71,54 @@ impl CommitMessageProvider for CopilotProvider {
         }
 
         Ok(message)
+    }
+}
+
+#[async_trait]
+impl ConflictResolver for CopilotProvider {
+    fn name(&self) -> &str {
+        "GitHub Copilot"
+    }
+
+    fn key(&self) -> &str {
+        "copilot"
+    }
+
+    fn is_available(&self) -> bool {
+        if which::which("gh").is_err() {
+            return false;
+        }
+        Command::new("gh")
+            .args(["copilot", "-v"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    async fn resolve(
+        &self,
+        file_path: &Path,
+        content_with_markers: &str,
+        repo_path: &Path,
+    ) -> Result<String> {
+        let prompt = build_resolve_prompt(file_path, content_with_markers);
+        let child = Command::new("gh")
+            .args(["copilot", "-p", &prompt, "--no-color"])
+            .current_dir(repo_path)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("Failed to run gh copilot")?;
+
+        let output = wait_with_timeout(child, COPILOT_RESOLVE_TIMEOUT).context("gh copilot timed out")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("gh copilot failed: {}", stderr.trim());
+        }
+
+        let raw = String::from_utf8_lossy(&output.stdout).to_string();
+        Ok(strip_outer_code_fence(&raw))
     }
 }
 

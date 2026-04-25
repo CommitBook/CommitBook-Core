@@ -4,10 +4,12 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
+use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
 use super::{clean_message, looks_like_diff_narration, truncate, CommitMessageProvider};
 use crate::git::ChangesSummary;
 
 const CODEX_TIMEOUT: Duration = Duration::from_secs(30);
+const CODEX_RESOLVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub struct CodexProvider;
 
@@ -63,6 +65,47 @@ impl CommitMessageProvider for CodexProvider {
         }
 
         Ok(msg)
+    }
+}
+
+#[async_trait]
+impl ConflictResolver for CodexProvider {
+    fn name(&self) -> &str {
+        "Codex"
+    }
+
+    fn key(&self) -> &str {
+        "codex"
+    }
+
+    fn is_available(&self) -> bool {
+        which::which("codex").is_ok()
+    }
+
+    async fn resolve(
+        &self,
+        file_path: &Path,
+        content_with_markers: &str,
+        repo_path: &Path,
+    ) -> Result<String> {
+        let prompt = build_resolve_prompt(file_path, content_with_markers);
+        let child = Command::new("codex")
+            .args(["--quiet", &prompt])
+            .current_dir(repo_path)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("Failed to start codex CLI")?;
+
+        let output = wait_with_timeout(child, CODEX_RESOLVE_TIMEOUT).context("codex CLI timed out")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("codex CLI failed: {}", stderr.trim());
+        }
+
+        let raw = String::from_utf8_lossy(&output.stdout).to_string();
+        Ok(strip_outer_code_fence(&raw))
     }
 }
 

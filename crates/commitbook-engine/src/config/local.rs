@@ -52,6 +52,30 @@ impl Default for LoggingSettings {
     }
 }
 
+fn default_conflict_resolver() -> String {
+    "manual".to_string()
+}
+
+/// Conflict-resolution settings.
+///
+/// `resolver` selects which AI CLI is invoked when `git pull --rebase
+/// --autostash` leaves conflict markers. Recognized values: `manual`,
+/// `claude`, `codex`, `copilot`, `gemini`, `cursor`. `manual` (the default)
+/// leaves the markers in place for the user to resolve.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConflictSettings {
+    #[serde(default = "default_conflict_resolver")]
+    pub resolver: String,
+}
+
+impl Default for ConflictSettings {
+    fn default() -> Self {
+        Self {
+            resolver: default_conflict_resolver(),
+        }
+    }
+}
+
 fn default_config_version() -> String {
     "1".to_string()
 }
@@ -129,6 +153,8 @@ pub struct LocalConfig {
     pub files: FileSettings,
     #[serde(default)]
     pub logging: LoggingSettings,
+    #[serde(default)]
+    pub conflict: ConflictSettings,
     pub scheduler_id: Option<String>,
 }
 
@@ -143,6 +169,7 @@ impl LocalConfig {
             git: GitSettings::default(),
             files: FileSettings::default(),
             logging: LoggingSettings::default(),
+            conflict: ConflictSettings::default(),
             scheduler_id: None,
         }
     }

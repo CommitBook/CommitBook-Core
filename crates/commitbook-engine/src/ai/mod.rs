@@ -2,9 +2,16 @@
 pub mod claude;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod codex;
+pub mod conflict;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod copilot;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod cursor;
 pub mod fallback;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod gemini;
+
+pub use conflict::{ConflictResolver, ResolverRegistry};
 
 use anyhow::Result;
 use async_trait::async_trait;
