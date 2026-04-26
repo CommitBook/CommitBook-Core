@@ -4,7 +4,7 @@ members = [
     "crates/commitbook-cli",
     "crates/commitbook-tui",
     "crates/commitbook-web",
-    "crates/commitbook-mobile",
+    "crates/commitbook-client",
 ]
 resolver = "2"
 

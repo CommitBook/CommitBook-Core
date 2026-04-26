@@ -1,13 +1,13 @@
 [package]
-name = "commitbook-mobile"
-description = "iOS/Android FFI bindings for commitbook-engine via UniFFI"
+name = "commitbook-client"
+description = "Platform-agnostic UniFFI SDK exposing CommitBookEngineClient on top of commitbook-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [lib]
-name = "commitbook_mobile"
+name = "commitbook_client"
 crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]

@@ -499,6 +499,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "commitbook-client"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "commitbook-engine",
+ "thiserror 2.0.18",
+ "tokio",
+ "uniffi",
+]
+
+[[package]]
 name = "commitbook-engine"
 version = "0.5.0"
 dependencies = [
@@ -516,18 +528,6 @@ dependencies = [
  "tokio",
  "toml",
  "which",
-]
-
-[[package]]
-name = "commitbook-mobile"
-version = "0.5.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "commitbook-engine",
- "thiserror 2.0.18",
- "tokio",
- "uniffi",
 ]
 
 [[package]]
