@@ -11,12 +11,12 @@
 #   - Rust targets: aarch64-apple-ios, aarch64-apple-ios-sim,
 #     x86_64-apple-ios, aarch64-apple-darwin, x86_64-apple-darwin
 #
-# Run from the repo root:
-#   ./scripts/build-xcframework.sh
+# Run from anywhere:
+#   ./crates/commitbook-client/scripts/build-xcframework.sh
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
 CRATE="commitbook-client"
