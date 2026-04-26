@@ -89,6 +89,7 @@ impl Default for ResolverRegistry {
 /// without a language tag). When we ask one to return the resolved file
 /// content, we want the inner content, not the fence. Strips at most one
 /// outer fence pair; preserves nested fences.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn strip_outer_code_fence(s: &str) -> String {
     let trimmed = s.trim();
     if !trimmed.starts_with("```") {
@@ -106,6 +107,7 @@ pub(crate) fn strip_outer_code_fence(s: &str) -> String {
 }
 
 /// Build the prompt sent to a resolver CLI for a single conflicted file.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn build_resolve_prompt(file_path: &Path, content_with_markers: &str) -> String {
     let display = file_path.display();
     format!(

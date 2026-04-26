@@ -455,7 +455,7 @@ fn test_changes_summary_deleted() {
     assert_eq!(changes.deleted_files.len(), 1);
 }
 
-// --- has_dirty_markdown / pull_rebase_autostash / list_conflicted_paths tests ---
+// --- has_dirty_markdown / merge_from_remote / list_conflicted_paths tests ---
 
 #[test]
 fn test_has_dirty_markdown_clean_repo() {
@@ -478,81 +478,80 @@ fn test_has_dirty_markdown_ignores_non_md() {
 }
 
 #[test]
-fn test_pull_rebase_autostash_noop_when_in_sync() {
+fn test_merge_from_remote_clean_when_in_sync() {
     let fx = setup_repo_with_bare_remote();
     let outcome = fx
         .repo
-        .pull_rebase_autostash("origin", &fx.branch)
+        .merge_from_remote("origin", &fx.branch)
         .unwrap();
-    assert_eq!(outcome, PullOutcome::Clean);
+    assert_eq!(outcome, MergeOutcome::Clean);
 }
 
 #[test]
-fn test_pull_rebase_autostash_fast_forwards_when_behind() {
+fn test_merge_from_remote_fast_forwards_when_behind() {
     let fx = setup_repo_with_bare_remote();
     let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
     commit_and_push_from(other.path(), &fx.branch, "new.md", "# new\n");
 
     let outcome = fx
         .repo
-        .pull_rebase_autostash("origin", &fx.branch)
+        .merge_from_remote("origin", &fx.branch)
         .unwrap();
-    assert_eq!(outcome, PullOutcome::Clean);
+    assert_eq!(outcome, MergeOutcome::Clean);
     // Working tree should now contain the pulled file.
     assert!(fx.repo_dir.path().join("new.md").exists());
 }
 
 #[test]
-fn test_pull_rebase_autostash_with_dirty_disjoint_files() {
+fn test_merge_from_remote_creates_merge_commit_on_diverge() {
     let fx = setup_repo_with_bare_remote();
 
-    // Local: dirty different file.
-    fs::write(fx.repo_dir.path().join("local.md"), "# local\n").unwrap();
+    // Local: a committed change to a unique file.
+    fs::write(fx.repo_dir.path().join("local-only.md"), "# local\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("local commit").unwrap();
+    let local_sha = fx.repo.rev_parse("HEAD").unwrap();
 
-    // Remote: a different file.
+    // Remote: a different unique file pushed via a second clone.
     let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
-    commit_and_push_from(other.path(), &fx.branch, "remote.md", "# remote\n");
+    commit_and_push_from(other.path(), &fx.branch, "remote-only.md", "# remote\n");
 
-    let outcome = fx
-        .repo
-        .pull_rebase_autostash("origin", &fx.branch)
-        .unwrap();
-    assert_eq!(outcome, PullOutcome::Clean);
-    assert!(fx.repo_dir.path().join("remote.md").exists());
-    // Local dirty file restored after autostash pop.
-    assert_eq!(
-        fs::read_to_string(fx.repo_dir.path().join("local.md")).unwrap(),
-        "# local\n"
-    );
+    let outcome = fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
+    assert_eq!(outcome, MergeOutcome::Clean);
+
+    // After merge: HEAD has both files and is a merge commit (2 parents).
+    assert!(fx.repo_dir.path().join("local-only.md").exists());
+    assert!(fx.repo_dir.path().join("remote-only.md").exists());
+    let new_sha = fx.repo.rev_parse("HEAD").unwrap();
+    assert_ne!(new_sha, local_sha, "HEAD should advance to the merge commit");
 }
 
 #[test]
-fn test_pull_rebase_autostash_stash_pop_conflict() {
+fn test_merge_from_remote_returns_conflicts_when_paths_overlap() {
     let fx = setup_repo_with_bare_remote();
 
-    // Establish a shared file at HEAD.
+    // Establish a shared committed file.
     fs::write(fx.repo_dir.path().join("shared.md"), "line A\n").unwrap();
     fx.repo.stage_all().unwrap();
     fx.repo.commit("add shared").unwrap();
-    let push = std::process::Command::new("git")
-        .args(["push", "origin", &fx.branch])
-        .current_dir(fx.repo_dir.path())
-        .output()
-        .unwrap();
-    assert!(push.status.success());
+    fx.repo.push("origin", &fx.branch).unwrap();
 
-    // Local: edit shared.md but don't commit.
+    // Local: commit a divergent change.
     fs::write(fx.repo_dir.path().join("shared.md"), "line A LOCAL\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("local edit").unwrap();
 
-    // Remote: edit the same line and push.
+    // Remote: commit a different divergent change to the same line.
     let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
     commit_and_push_from(other.path(), &fx.branch, "shared.md", "line A REMOTE\n");
 
-    let outcome = fx
-        .repo
-        .pull_rebase_autostash("origin", &fx.branch)
-        .unwrap();
-    assert_eq!(outcome, PullOutcome::StashPopConflict);
+    let outcome = fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
+    match outcome {
+        MergeOutcome::Conflicts(paths) => {
+            assert_eq!(paths, vec!["shared.md".to_string()]);
+        }
+        MergeOutcome::Clean => panic!("expected conflicts"),
+    }
 
     let conflicted = fx.repo.list_conflicted_paths().unwrap();
     assert_eq!(conflicted, vec!["shared.md".to_string()]);
@@ -566,43 +565,77 @@ fn test_list_conflicted_paths_empty_when_clean() {
 }
 
 #[test]
-fn test_continue_rebase_or_stash_noop_after_stash_pop_resolve() {
-    // Reproduces: stash-pop conflict, AI writes resolved content, caller
-    // git-adds and calls continue_rebase_or_stash. With no rebase in flight
-    // the call should be a no-op and leave the WT in a clean staged state.
+fn test_finalize_merge_commit_after_resolution() {
     let fx = setup_repo_with_bare_remote();
 
+    // Shared committed file.
     fs::write(fx.repo_dir.path().join("shared.md"), "line A\n").unwrap();
     fx.repo.stage_all().unwrap();
     fx.repo.commit("add shared").unwrap();
-    let _ = std::process::Command::new("git")
-        .args(["push", "origin", &fx.branch])
-        .current_dir(fx.repo_dir.path())
-        .output()
-        .unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
 
+    // Local + remote divergent edits.
     fs::write(fx.repo_dir.path().join("shared.md"), "line A LOCAL\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("local edit").unwrap();
+
     let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
     commit_and_push_from(other.path(), &fx.branch, "shared.md", "line A REMOTE\n");
 
-    let outcome = fx
-        .repo
-        .pull_rebase_autostash("origin", &fx.branch)
-        .unwrap();
-    assert_eq!(outcome, PullOutcome::StashPopConflict);
+    // Trigger conflict.
+    let outcome = fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
+    match outcome {
+        MergeOutcome::Conflicts(paths) => assert_eq!(paths, vec!["shared.md".to_string()]),
+        MergeOutcome::Clean => panic!("expected conflicts"),
+    }
 
-    // Simulate AI resolving the file.
+    // Simulate resolution: rewrite content + stage.
     fs::write(fx.repo_dir.path().join("shared.md"), "line A RESOLVED\n").unwrap();
-    let add = std::process::Command::new("git")
-        .args(["add", "shared.md"])
-        .current_dir(fx.repo_dir.path())
-        .output()
+    fx.repo.stage_paths(&["shared.md".to_string()]).unwrap();
+
+    // Finalize the merge commit.
+    fx.repo.finalize_merge_commit(None).unwrap();
+
+    // Index is clean.
+    assert!(fx.repo.list_conflicted_paths().unwrap().is_empty());
+    // HEAD is a merge commit (2 parents).
+    let head_oid = fx.repo.rev_parse("HEAD").unwrap();
+    let repo = git2::Repository::open(fx.repo_dir.path()).unwrap();
+    let head_commit = repo
+        .find_commit(git2::Oid::from_str(&head_oid).unwrap())
         .unwrap();
-    assert!(add.status.success());
+    assert_eq!(head_commit.parent_count(), 2);
+}
 
-    // No rebase in progress — should succeed silently.
-    fx.repo.continue_rebase_or_stash().unwrap();
+#[test]
+fn test_merge_abort_resets_conflicted_state() {
+    let fx = setup_repo_with_bare_remote();
 
-    let paths = fx.repo.list_conflicted_paths().unwrap();
-    assert!(paths.is_empty());
+    // Shared committed file.
+    fs::write(fx.repo_dir.path().join("shared.md"), "line A\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add shared").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+
+    // Diverge on the same path.
+    fs::write(fx.repo_dir.path().join("shared.md"), "line A LOCAL\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("local edit").unwrap();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "shared.md", "line A REMOTE\n");
+
+    let _ = fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
+    assert!(!fx.repo.list_conflicted_paths().unwrap().is_empty());
+
+    fx.repo.merge_abort().unwrap();
+
+    // No conflicts, HEAD unchanged, working tree restored.
+    assert!(fx.repo.list_conflicted_paths().unwrap().is_empty());
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("shared.md")).unwrap(),
+        "line A LOCAL\n"
+    );
 }

@@ -1,8 +1,6 @@
 use anyhow::{bail, Context, Result};
 use git2::{FetchOptions, PushOptions, RemoteCallbacks, Repository, Signature, StatusOptions};
 use std::path::{Path, PathBuf};
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-use std::process::Command;
 
 use crate::platform::{CredentialProvider, SystemCredentials};
 
@@ -38,19 +36,16 @@ impl StatusSummary {
     }
 }
 
-/// Outcome of `GitRepo::pull_rebase_autostash`.
+/// Outcome of `GitRepo::merge_from_remote`.
 ///
-/// `Clean` covers both fast-forward and a successful rebase + stash pop.
-/// The two conflict variants distinguish where in the pipeline failure
-/// happened so the caller can decide whether to invoke the AI resolver
-/// (`StashPopConflict`) or surface a more serious rebase failure
-/// (`RebaseConflict` — the user's previously-committed local work conflicts
-/// with remote and needs human attention).
+/// `Clean` covers up-to-date, fast-forward, and a successful 3-way merge with
+/// no conflicts (in which case a merge commit is auto-created). `Conflicts`
+/// signals unmerged paths in the index — the caller resolves them, stages,
+/// and calls `finalize_merge_commit` to complete the merge.
 #[derive(Debug, PartialEq, Eq)]
-pub enum PullOutcome {
+pub enum MergeOutcome {
     Clean,
-    StashPopConflict,
-    RebaseConflict,
+    Conflicts(Vec<String>),
 }
 
 impl ChangesSummary {
@@ -192,6 +187,18 @@ impl GitRepo {
         }
 
         Ok(out)
+    }
+
+    /// Stage specific paths (equivalent to `git add <paths...>`).
+    pub fn stage_paths(&self, paths: &[String]) -> Result<()> {
+        let mut index = self.repo.index().context("Failed to get index")?;
+        for p in paths {
+            index
+                .add_path(Path::new(p))
+                .with_context(|| format!("Failed to stage {p}"))?;
+        }
+        index.write().context("Failed to write index")?;
+        Ok(())
     }
 
     /// Stage all changes (equivalent to `git add -A`).
@@ -527,174 +534,174 @@ impl GitRepo {
         Ok(!self.status_markdown()?.is_empty())
     }
 
-    /// List paths with unmerged conflict markers.
-    ///
-    /// Desktop-only: shells out to `git diff --name-only --diff-filter=U`.
-    /// On mobile, returns an empty list (the new sync flow is not used there).
+    /// List paths with unmerged conflict entries in the index.
     pub fn list_conflicted_paths(&self) -> Result<Vec<String>> {
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        {
-            let output = Command::new("git")
-                .args(["diff", "--name-only", "--diff-filter=U"])
-                .current_dir(&self.path)
-                .output()
-                .context("Failed to run git diff --diff-filter=U")?;
-            if !output.status.success() {
-                bail!(
-                    "git diff --diff-filter=U failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
+        let index = self.repo.index().context("Failed to get index")?;
+        if !index.has_conflicts() {
+            return Ok(Vec::new());
+        }
+        let mut paths = Vec::new();
+        for entry in index.conflicts().context("Failed to iterate conflicts")? {
+            let conflict = entry.context("Failed to read conflict entry")?;
+            let path_bytes = conflict
+                .our
+                .as_ref()
+                .or(conflict.their.as_ref())
+                .or(conflict.ancestor.as_ref())
+                .map(|e| e.path.clone());
+            if let Some(bytes) = path_bytes {
+                if let Ok(s) = String::from_utf8(bytes) {
+                    if !paths.contains(&s) {
+                        paths.push(s);
+                    }
+                }
             }
-            let paths = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .filter(|l| !l.is_empty())
-                .map(|l| l.to_string())
-                .collect();
-            Ok(paths)
         }
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        {
-            Ok(Vec::new())
-        }
+        Ok(paths)
     }
 
-    /// Run `git pull --rebase --autostash <remote> <branch>` and classify the
-    /// result. Desktop-only.
+    /// Fetch `<remote>/<branch>` and merge it into HEAD. See `merge_fetched`
+    /// for behavior. This is the convenience wrapper that does fetch+merge
+    /// in one call; callers who fetched separately should use `merge_fetched`.
+    pub fn merge_from_remote(&self, remote: &str, branch: &str) -> Result<MergeOutcome> {
+        self.fetch(remote, branch)?;
+        self.merge_fetched(remote, branch)
+    }
+
+    /// Merge an already-fetched `<remote>/<branch>` into HEAD.
     ///
-    /// Note: `git pull --rebase --autostash` can leave conflict markers in
-    /// the working tree even with exit code 0 — older git versions did not
-    /// propagate stash-pop conflicts as a non-zero exit. So we always check
-    /// for unmerged paths and rebase-in-progress markers regardless of exit
-    /// status.
-    pub fn pull_rebase_autostash(
-        &self,
-        remote: &str,
-        branch: &str,
-    ) -> Result<PullOutcome> {
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        {
-            let output = Command::new("git")
-                .args(["pull", "--rebase", "--autostash", remote, branch])
-                .current_dir(&self.path)
-                .output()
-                .context("Failed to run git pull --rebase --autostash")?;
+    /// - Up-to-date or fast-forward: returns `MergeOutcome::Clean`.
+    /// - 3-way merge with no conflicts: creates a merge commit and returns `Clean`.
+    /// - 3-way merge with conflicts: leaves MERGE_HEAD + conflict markers in
+    ///   the working tree, returns `Conflicts(paths)`. Caller resolves, stages,
+    ///   then calls `finalize_merge_commit` to complete.
+    pub fn merge_fetched(&self, remote: &str, branch: &str) -> Result<MergeOutcome> {
+        let upstream_refname = format!("refs/remotes/{}/{}", remote, branch);
+        let upstream_oid = self
+            .repo
+            .refname_to_id(&upstream_refname)
+            .with_context(|| format!("Failed to resolve {}", upstream_refname))?;
+        let upstream = self
+            .repo
+            .find_annotated_commit(upstream_oid)
+            .context("Failed to load upstream as annotated commit")?;
 
-            let rebase_in_progress = self.path.join(".git/rebase-merge").exists()
-                || self.path.join(".git/rebase-apply").exists();
-            if rebase_in_progress {
-                return Ok(PullOutcome::RebaseConflict);
-            }
+        let (analysis, _pref) = self
+            .repo
+            .merge_analysis(&[&upstream])
+            .context("Failed to analyze merge")?;
 
-            // No rebase in progress. If there are unmerged paths, the
-            // autostash pop conflicted — regardless of exit code.
-            if !self.list_conflicted_paths()?.is_empty() {
-                return Ok(PullOutcome::StashPopConflict);
-            }
-
-            if output.status.success() {
-                return Ok(PullOutcome::Clean);
-            }
-
-            bail!(
-                "git pull --rebase --autostash failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
+        if analysis.is_up_to_date() {
+            return Ok(MergeOutcome::Clean);
         }
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        {
-            let _ = (remote, branch);
-            bail!("pull_rebase_autostash is not supported on this platform");
+
+        if analysis.is_fast_forward() {
+            // Update HEAD ref + checkout the new tree. Use `force` because
+            // by the time we get here the scheduler has already committed
+            // any dirty markdown — there's nothing to lose. `safe` mode
+            // skips creating files that aren't tracked locally.
+            let head_ref = self.repo.head().context("Failed to get HEAD")?;
+            let head_name = head_ref
+                .name()
+                .context("HEAD is detached")?
+                .to_string();
+            drop(head_ref);
+            self.repo
+                .reference(&head_name, upstream_oid, true, "commitbook: fast-forward")
+                .with_context(|| format!("Failed to update {}", head_name))?;
+            self.repo.set_head(&head_name)?;
+            self.repo
+                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+                .context("Failed to check out fast-forwarded HEAD")?;
+            return Ok(MergeOutcome::Clean);
         }
+
+        if analysis.is_normal() {
+            // True 3-way merge.
+            self.repo
+                .merge(&[&upstream], None, None)
+                .context("Failed to perform merge")?;
+
+            let conflicted = self.list_conflicted_paths()?;
+            if !conflicted.is_empty() {
+                return Ok(MergeOutcome::Conflicts(conflicted));
+            }
+
+            // Clean merge — write tree and create merge commit.
+            self.create_merge_commit("Merge remote-tracking branch via CommitBook")?;
+            return Ok(MergeOutcome::Clean);
+        }
+
+        bail!(
+            "Unexpected merge analysis state: up_to_date={} fast_forward={} normal={} unborn={}",
+            analysis.is_up_to_date(),
+            analysis.is_fast_forward(),
+            analysis.is_normal(),
+            analysis.is_unborn()
+        )
     }
 
-    /// Continue an in-flight rebase or no-op if the conflict was a stash pop.
-    ///
-    /// After AI resolution the resolved files have been `git add`-ed; this
-    /// method advances the operation to completion.
-    pub fn continue_rebase_or_stash(&self) -> Result<()> {
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        {
-            let rebase_in_progress = self.path.join(".git/rebase-merge").exists()
-                || self.path.join(".git/rebase-apply").exists();
-            if !rebase_in_progress {
-                // Stash pop conflict: once files are git-add'd the working
-                // tree is the merged state. Nothing more to do.
-                return Ok(());
-            }
-            let mut cmd = Command::new("git");
-            cmd.args(["rebase", "--continue"])
-                .current_dir(&self.path)
-                .env("GIT_EDITOR", "true");
-            let output = cmd
-                .output()
-                .context("Failed to run git rebase --continue")?;
-            if !output.status.success() {
-                bail!(
-                    "git rebase --continue failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
-            Ok(())
+    /// Complete a merge after the caller has resolved conflicts and staged
+    /// the resolved files. Creates the merge commit (HEAD + MERGE_HEAD as
+    /// parents) and clears MERGE_HEAD.
+    pub fn finalize_merge_commit(&self, message: Option<&str>) -> Result<()> {
+        let index = self.repo.index().context("Failed to get index")?;
+        if index.has_conflicts() {
+            bail!("Cannot finalize merge: index still has conflicts");
         }
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        {
-            bail!("continue_rebase_or_stash is not supported on this platform");
-        }
+        drop(index);
+        let msg = message.unwrap_or("Merge resolved via CommitBook");
+        self.create_merge_commit(msg)?;
+        Ok(())
     }
 
-    /// Abort an in-flight rebase. Used in error-recovery paths.
-    pub fn rebase_abort(&self) -> Result<()> {
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        {
-            let output = Command::new("git")
-                .args(["rebase", "--abort"])
-                .current_dir(&self.path)
-                .output()
-                .context("Failed to run git rebase --abort")?;
-            if !output.status.success() {
-                bail!(
-                    "git rebase --abort failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
-            Ok(())
-        }
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        {
-            bail!("rebase_abort is not supported on this platform");
-        }
+    /// Abort an in-flight merge: clear MERGE_HEAD and reset working tree
+    /// to HEAD. Used in error-recovery paths.
+    pub fn merge_abort(&self) -> Result<()> {
+        let head = self.repo.head()?.peel_to_commit()?;
+        self.repo
+            .reset(head.as_object(), git2::ResetType::Hard, None)
+            .context("Failed to reset to HEAD during merge abort")?;
+        self.repo
+            .cleanup_state()
+            .context("Failed to cleanup merge state")?;
+        Ok(())
     }
 
-    /// Rebase the current branch onto the given ref.
-    ///
-    /// On conflict, aborts the rebase and returns an error.
-    /// Desktop-only: shells out to system `git`. On mobile, returns an error.
-    pub fn rebase_onto(&self, refname: &str) -> Result<()> {
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        {
-            let output = Command::new("git")
-                .args(["rebase", refname])
-                .current_dir(&self.path)
-                .output()
-                .context("Failed to run git rebase")?;
+    /// Internal: write the index tree and create a commit. If `MERGE_HEAD`
+    /// exists, the commit has two parents (HEAD + MERGE_HEAD), and
+    /// `MERGE_HEAD` is cleaned up afterwards.
+    fn create_merge_commit(&self, message: &str) -> Result<()> {
+        let mut index = self.repo.index().context("Failed to get index")?;
+        let tree_oid = index.write_tree().context("Failed to write tree")?;
+        let tree = self
+            .repo
+            .find_tree(tree_oid)
+            .context("Failed to find tree")?;
+        let sig = self
+            .repo
+            .signature()
+            .or_else(|_| Signature::now("CommitBook", "commitbook@localhost"))
+            .context("Failed to create signature")?;
+        let head_commit = self.repo.head()?.peel_to_commit()?;
+        let merge_head_commit = self
+            .repo
+            .find_reference("MERGE_HEAD")
+            .ok()
+            .and_then(|r| r.peel_to_commit().ok());
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let _ = Command::new("git")
-                    .args(["rebase", "--abort"])
-                    .current_dir(&self.path)
-                    .output();
-                bail!("git rebase {} failed (aborted): {}", refname, stderr.trim());
-            }
+        let parents: Vec<&git2::Commit> = match &merge_head_commit {
+            Some(mh) => vec![&head_commit, mh],
+            None => vec![&head_commit],
+        };
 
-            Ok(())
-        }
+        self.repo
+            .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+            .context("Failed to create merge commit")?;
 
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        {
-            let _ = refname;
-            bail!("rebase_onto is not supported on this platform");
-        }
+        // Clear MERGE_HEAD if it existed.
+        let _ = self.repo.cleanup_state();
+        Ok(())
     }
 }
 

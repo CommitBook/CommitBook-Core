@@ -1,26 +1,23 @@
-//! Pull-first, rebase-style sync orchestrator.
+//! Merge-based sync orchestrator over libgit2.
 //!
-//! Executes one cycle of `git pull --rebase --autostash` → AI conflict
-//! resolution (if configured) → commit dirty markdown → `git push`. Retries
-//! once on a non-fast-forward push (race with another client).
-//!
-//! Replaces the legacy planner / pipeline / transport stack. Remains opt-in
-//! via `[sync] engine = "v2"` until validated.
+//! Executes one cycle of: commit dirty markdown → fetch + 3-way merge →
+//! AI conflict resolution (if configured) or surface conflicts to caller →
+//! push (retry once on race). Single code path on desktop and mobile —
+//! see `docs/details/sync-architecture.md`.
 
 use anyhow::{Context, Result};
 use std::path::Path;
-use std::process::Command;
 
 use crate::ai::{ConflictResolver, ResolverRegistry};
 use crate::config::LocalConfig;
-use crate::git::operations::PullOutcome;
+use crate::git::operations::MergeOutcome;
 use crate::git::GitRepo;
 use crate::platform::Logger;
 use crate::state::sync_state::SyncState;
 
 const MAX_PUSH_RETRIES: u32 = 1;
 
-/// Result of one v2 sync cycle.
+/// Result of one sync cycle.
 #[derive(Debug, Default)]
 pub struct SyncOutcome {
     pub committed: bool,
@@ -44,9 +41,8 @@ impl SyncOutcome {
 
 /// Run one sync cycle.
 ///
-/// Loads the configured conflict resolver from the registry; for tests
-/// or programmatic callers wanting to inject a fake resolver, use
-/// `sync_with_resolver` directly.
+/// Loads the configured conflict resolver from the registry; programmatic
+/// callers wanting to inject a fake resolver use `sync_with_resolver` directly.
 pub async fn sync_repository(
     cb_dir: &Path,
     repo_root: &Path,
@@ -83,74 +79,9 @@ pub async fn sync_with_resolver(
     let mut outcome = SyncOutcome::default();
 
     for attempt in 0..=MAX_PUSH_RETRIES {
-        let head_before_pull = repo.rev_parse("HEAD").ok();
-
-        // 1. Pull-rebase-autostash
-        match repo.pull_rebase_autostash(remote, branch) {
-            Ok(PullOutcome::Clean) => {}
-            Ok(PullOutcome::StashPopConflict) => {
-                let conflicted = repo.list_conflicted_paths()?;
-                if conflicted.is_empty() {
-                    let _ = logger.warn("Stash-pop conflict reported but no unmerged paths");
-                } else {
-                    match resolver {
-                        Some(r) => {
-                            match resolve_conflicts_inner(repo_root, &conflicted, r, logger).await {
-                                Ok(()) => {
-                                    outcome.conflicts_resolved += conflicted.len() as u32;
-                                    repo.continue_rebase_or_stash()?;
-                                }
-                                Err(e) => {
-                                    outcome.manual_conflicts += conflicted.len() as u32;
-                                    let msg = format!(
-                                        "AI resolver failed ({}); {} conflict(s) need manual resolution: {}",
-                                        e,
-                                        conflicted.len(),
-                                        conflicted.join(", ")
-                                    );
-                                    let _ = logger.warn(&msg);
-                                    outcome.errors.push(msg);
-                                    return Ok(finalize_outcome(cb_dir, outcome));
-                                }
-                            }
-                        }
-                        None => {
-                            outcome.manual_conflicts += conflicted.len() as u32;
-                            let msg = format!(
-                                "{} conflict(s) need manual resolution: {}",
-                                conflicted.len(),
-                                conflicted.join(", ")
-                            );
-                            let _ = logger.warn(&msg);
-                            outcome.errors.push(msg);
-                            return Ok(finalize_outcome(cb_dir, outcome));
-                        }
-                    }
-                }
-            }
-            Ok(PullOutcome::RebaseConflict) => {
-                let _ = repo.rebase_abort();
-                let msg = format!(
-                    "Local commits conflict with `{remote}/{branch}` during rebase — \
-                     resolve manually and re-run sync."
-                );
-                let _ = logger.error(&msg);
-                outcome.errors.push(msg);
-                return Ok(finalize_outcome(cb_dir, outcome));
-            }
-            Err(e) => {
-                let msg = format!("Pull failed: {e}");
-                let _ = logger.error(&msg);
-                outcome.errors.push(msg);
-                return Ok(finalize_outcome(cb_dir, outcome));
-            }
-        }
-
-        let head_after_pull = repo.rev_parse("HEAD").ok();
-        outcome.pulled =
-            commits_between(repo_root, head_before_pull.as_deref(), head_after_pull.as_deref())?;
-
-        // 2. Commit dirty markdown
+        // 1. Commit dirty markdown FIRST. Doing this before the merge means
+        //    a) we never lose work to a failed merge, b) the merge sees a
+        //    proper local commit if the dirty file overlaps with remote.
         if repo.has_dirty_markdown()? {
             repo.stage_all()?;
             if repo.has_real_staged_changes()? {
@@ -162,23 +93,87 @@ pub async fn sync_with_resolver(
             }
         }
 
-        // 3. Push
-        let head_before_push = repo.rev_parse("HEAD").ok();
-        match repo.push(remote, branch) {
-            Ok(()) => {
-                outcome.pushed = commits_between(
-                    repo_root,
-                    head_after_pull.as_deref(),
-                    head_before_push.as_deref(),
-                )?;
-                break;
+        // 2. Fetch first (separate from merge) so we can compute pulled/pushed
+        //    counts from the divergence BEFORE merge creates a merge commit.
+        if let Err(e) = repo.fetch(remote, branch) {
+            let msg = format!("Fetch failed: {e}");
+            let _ = logger.error(&msg);
+            outcome.errors.push(msg);
+            return Ok(finalize_outcome(cb_dir, outcome));
+        }
+
+        let local_tip = repo.rev_parse("HEAD").ok();
+        let remote_ref = format!("{remote}/{branch}");
+        let remote_tip = repo.rev_parse(&remote_ref).ok();
+
+        if let (Some(local), Some(remote_oid)) = (local_tip.as_deref(), remote_tip.as_deref()) {
+            let (pushed, pulled) = repo.ahead_behind(local, remote_oid).unwrap_or((0, 0));
+            outcome.pushed = pushed;
+            outcome.pulled = pulled;
+        }
+
+        // 3. Merge from remote (no separate fetch — already fetched).
+        let merge_outcome = match repo.merge_fetched(remote, branch) {
+            Ok(o) => o,
+            Err(e) => {
+                let msg = format!("Merge failed: {e}");
+                let _ = logger.error(&msg);
+                outcome.errors.push(msg);
+                return Ok(finalize_outcome(cb_dir, outcome));
             }
+        };
+
+        match merge_outcome {
+            MergeOutcome::Clean => {}
+            MergeOutcome::Conflicts(conflicted) => {
+                match resolver {
+                    Some(r) => {
+                        match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger).await {
+                            Ok(()) => {
+                                outcome.conflicts_resolved += conflicted.len() as u32;
+                                repo.finalize_merge_commit(None)?;
+                            }
+                            Err(e) => {
+                                outcome.manual_conflicts += conflicted.len() as u32;
+                                let msg = format!(
+                                    "AI resolver failed ({}); {} conflict(s) need manual resolution: {}",
+                                    e,
+                                    conflicted.len(),
+                                    conflicted.join(", ")
+                                );
+                                let _ = logger.warn(&msg);
+                                outcome.errors.push(msg);
+                                return Ok(finalize_outcome(cb_dir, outcome));
+                            }
+                        }
+                    }
+                    None => {
+                        outcome.manual_conflicts += conflicted.len() as u32;
+                        let msg = format!(
+                            "{} conflict(s) need manual resolution: {}",
+                            conflicted.len(),
+                            conflicted.join(", ")
+                        );
+                        let _ = logger.warn(&msg);
+                        outcome.errors.push(msg);
+                        return Ok(finalize_outcome(cb_dir, outcome));
+                    }
+                }
+            }
+        }
+
+        // 4. Push.
+        match repo.push(remote, branch) {
+            Ok(()) => break,
             Err(e) if attempt < MAX_PUSH_RETRIES => {
                 let _ = logger.warn(&format!(
-                    "Push failed on attempt {}/{}: {e}. Retrying after re-pull.",
+                    "Push failed on attempt {}/{}: {e}. Retrying after re-fetch.",
                     attempt + 1,
                     MAX_PUSH_RETRIES + 1
                 ));
+                // Reset counters; the next iteration recomputes after re-fetch.
+                outcome.pushed = 0;
+                outcome.pulled = 0;
             }
             Err(e) => {
                 let msg = format!("Push failed: {e}");
@@ -192,7 +187,10 @@ pub async fn sync_with_resolver(
     Ok(finalize_outcome(cb_dir, outcome))
 }
 
+/// Resolve each conflicted path via the resolver, stage the resolution.
+/// Caller invokes `finalize_merge_commit` afterwards.
 async fn resolve_conflicts_inner(
+    repo: &GitRepo,
     repo_root: &Path,
     paths: &[String],
     resolver: &dyn ConflictResolver,
@@ -212,45 +210,12 @@ async fn resolve_conflicts_inner(
         std::fs::write(&abs_path, resolved)
             .with_context(|| format!("Failed to write {}", abs_path.display()))?;
 
-        let add = Command::new("git")
-            .args(["add", path])
-            .current_dir(repo_root)
-            .output()
-            .context("Failed to run git add")?;
-        if !add.status.success() {
-            anyhow::bail!(
-                "git add {path} failed: {}",
-                String::from_utf8_lossy(&add.stderr).trim()
-            );
-        }
+        repo.stage_paths(std::slice::from_ref(path))
+            .with_context(|| format!("Failed to stage resolved {path}"))?;
         let _ = logger.info(&format!("Resolved {path}"));
     }
 
     Ok(())
-}
-
-fn commits_between(
-    repo_root: &Path,
-    older: Option<&str>,
-    newer: Option<&str>,
-) -> Result<u32> {
-    match (older, newer) {
-        (Some(o), Some(n)) if o != n => {
-            let output = Command::new("git")
-                .args(["rev-list", "--count", &format!("{o}..{n}")])
-                .current_dir(repo_root)
-                .output()
-                .context("Failed to run git rev-list")?;
-            if !output.status.success() {
-                return Ok(0);
-            }
-            Ok(String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .parse()
-                .unwrap_or(0))
-        }
-        _ => Ok(0),
-    }
 }
 
 fn finalize_outcome(cb_dir: &Path, outcome: SyncOutcome) -> SyncOutcome {
