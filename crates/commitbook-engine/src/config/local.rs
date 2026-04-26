@@ -76,6 +76,24 @@ impl Default for ConflictSettings {
     }
 }
 
+/// Settings identifying this clone as a CommitBook (a GitHub repo with
+/// `.CommitBook/`). Optional in the schema for backwards compat with existing
+/// notebooks that pre-date the FFI; the FFI client populates this when
+/// creating new CommitBooks via `create_commitbook`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommitBookSettings {
+    /// Display name (e.g. "Personal Notes").
+    pub name: String,
+    /// GitHub user/org owning the repo.
+    pub owner: String,
+    /// Repository name.
+    pub repo: String,
+    /// Provider: "github" | "gitlab" | "codeberg" | "generic_git".
+    pub provider: String,
+    /// Auth mode: "github_app" | "pat" | "ssh" | "existing_local_repo".
+    pub mode: String,
+}
+
 fn default_config_version() -> String {
     "1".to_string()
 }
@@ -155,6 +173,8 @@ pub struct LocalConfig {
     pub logging: LoggingSettings,
     #[serde(default)]
     pub conflict: ConflictSettings,
+    #[serde(default)]
+    pub commitbook: Option<CommitBookSettings>,
     pub scheduler_id: Option<String>,
 }
 
@@ -170,6 +190,7 @@ impl LocalConfig {
             files: FileSettings::default(),
             logging: LoggingSettings::default(),
             conflict: ConflictSettings::default(),
+            commitbook: None,
             scheduler_id: None,
         }
     }

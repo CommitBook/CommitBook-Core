@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod commitbooks;
 pub mod config;
 pub mod cron;
 pub mod git;
