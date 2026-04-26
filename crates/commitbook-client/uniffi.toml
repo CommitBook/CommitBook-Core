@@ -1,0 +1,5 @@
+[bindings.swift]
+module_name = "CommitBookEngineFFI"
+
+[bindings.kotlin]
+package_name = "com.commitbook.engine.ffi"

@@ -14,9 +14,15 @@ crate-type = ["cdylib", "staticlib", "lib"]
 commitbook-engine = { path = "../commitbook-engine", features = ["vendored-tls"] }
 anyhow = "1.0"
 async-trait = "0.1"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 uniffi = { version = "0.31", features = ["tokio", "cli"] }
+
+[build-dependencies]
+uniffi = { version = "0.31", features = ["build"] }
 
 [[bin]]
 name = "uniffi-bindgen"
