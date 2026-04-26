@@ -12,6 +12,8 @@ fn create_temp_repo() -> (tempfile::TempDir, Repository) {
     let mut config = repo.config().unwrap();
     config.set_str("user.name", "Test User").unwrap();
     config.set_str("user.email", "test@example.com").unwrap();
+    // Override any inherited commit.gpgsign so tests don't require a signing key.
+    config.set_bool("commit.gpgsign", false).unwrap();
 
     (tmp, repo)
 }

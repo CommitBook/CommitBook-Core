@@ -227,7 +227,7 @@ impl GitRepo {
         Ok(diff.deltas().count() > 0)
     }
 
-    /// Create a commit with the given message.
+    /// Create a commit with the given message. Honors `commit.gpgsign`.
     pub fn commit(&self, message: &str) -> Result<String> {
         let mut index = self.repo.index().context("Failed to get index")?;
         let tree_oid = index.write_tree().context("Failed to write tree")?;
@@ -248,13 +248,77 @@ impl GitRepo {
 
         let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
 
-        let oid = self
-            .repo
-            .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
-            .context("Failed to create commit")?;
+        let oid = self.commit_signed_or_plain(&sig, message, &tree, &parents)?;
 
         // Return short hash
         Ok(oid.to_string()[..7].to_string())
+    }
+
+    /// Internal: build a commit object, optionally sign it, and write it
+    /// to HEAD. Centralizes the signing decision so `commit` and
+    /// `create_merge_commit` share the same path. Fast-paths the unsigned
+    /// case to a regular `repo.commit` so the index/HEAD update mechanics
+    /// are unchanged.
+    fn commit_signed_or_plain(
+        &self,
+        sig: &Signature,
+        message: &str,
+        tree: &git2::Tree,
+        parents: &[&git2::Commit],
+    ) -> Result<git2::Oid> {
+        // Unsigned fast path — preserves prior behavior exactly.
+        let signing_enabled = self
+            .repo
+            .config()
+            .ok()
+            .and_then(|c| c.get_bool("commit.gpgsign").ok())
+            .unwrap_or(false);
+        if !signing_enabled {
+            return self
+                .repo
+                .commit(Some("HEAD"), sig, sig, message, tree, parents)
+                .context("Failed to write commit");
+        }
+
+        // Signed path: build buffer, sign, write signed commit, update HEAD.
+        let unsigned_bytes = self
+            .repo
+            .commit_create_buffer(sig, sig, message, tree, parents)
+            .context("Failed to build commit buffer")?;
+
+        let signature = crate::git::signing::sign_commit_object(&self.repo, &unsigned_bytes)
+            .context("Failed to sign commit")?;
+
+        let unsigned_str =
+            std::str::from_utf8(&unsigned_bytes).context("Commit buffer is not UTF-8")?;
+
+        let oid = match signature {
+            Some(sig_armored) => self
+                .repo
+                .commit_signed(unsigned_str, &sig_armored, Some("gpgsig"))
+                .context("Failed to write signed commit")?,
+            None => {
+                // Signing was enabled but produced no signature (mobile
+                // platform, or signing module declined). Fall through to
+                // a plain commit — better than failing the sync.
+                return self
+                    .repo
+                    .commit(Some("HEAD"), sig, sig, message, tree, parents)
+                    .context("Failed to write commit");
+            }
+        };
+
+        // commit_signed doesn't update HEAD; do it manually.
+        if let Ok(head_ref) = self.repo.head() {
+            if let Some(head_name) = head_ref.name().map(|s| s.to_string()) {
+                drop(head_ref);
+                self.repo
+                    .reference(&head_name, oid, true, "commitbook: signed commit")
+                    .context("Failed to update HEAD to signed commit")?;
+            }
+        }
+
+        Ok(oid)
     }
 
     /// Push the given branch to the remote using the system credential helper.
@@ -670,7 +734,7 @@ impl GitRepo {
 
     /// Internal: write the index tree and create a commit. If `MERGE_HEAD`
     /// exists, the commit has two parents (HEAD + MERGE_HEAD), and
-    /// `MERGE_HEAD` is cleaned up afterwards.
+    /// `MERGE_HEAD` is cleaned up afterwards. Honors `commit.gpgsign`.
     fn create_merge_commit(&self, message: &str) -> Result<()> {
         let mut index = self.repo.index().context("Failed to get index")?;
         let tree_oid = index.write_tree().context("Failed to write tree")?;
@@ -695,9 +759,7 @@ impl GitRepo {
             None => vec![&head_commit],
         };
 
-        self.repo
-            .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
-            .context("Failed to create merge commit")?;
+        self.commit_signed_or_plain(&sig, message, &tree, &parents)?;
 
         // Clear MERGE_HEAD if it existed.
         let _ = self.repo.cleanup_state();
