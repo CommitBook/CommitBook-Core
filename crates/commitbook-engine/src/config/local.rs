@@ -76,6 +76,29 @@ impl Default for ConflictSettings {
     }
 }
 
+fn default_ai_messages() -> bool {
+    true
+}
+
+/// Commit-message settings.
+///
+/// `ai_messages = true` (the default) tries the AI provider chain (Copilot,
+/// then Claude, then Codex) and falls back to a deterministic timestamp
+/// message. `false` skips all AI CLIs and always uses the timestamp message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitSettings {
+    #[serde(default = "default_ai_messages")]
+    pub ai_messages: bool,
+}
+
+impl Default for CommitSettings {
+    fn default() -> Self {
+        Self {
+            ai_messages: default_ai_messages(),
+        }
+    }
+}
+
 /// Settings identifying this clone as a CommitBook (a GitHub repo with
 /// `.CommitBook/`). Optional in the schema for backwards compat with existing
 /// notebooks that pre-date the FFI; the FFI client populates this when
@@ -174,6 +197,8 @@ pub struct LocalConfig {
     #[serde(default)]
     pub conflict: ConflictSettings,
     #[serde(default)]
+    pub commit: CommitSettings,
+    #[serde(default)]
     pub commitbook: Option<CommitBookSettings>,
     pub scheduler_id: Option<String>,
 }
@@ -190,6 +215,7 @@ impl LocalConfig {
             files: FileSettings::default(),
             logging: LoggingSettings::default(),
             conflict: ConflictSettings::default(),
+            commit: CommitSettings::default(),
             commitbook: None,
             scheduler_id: None,
         }

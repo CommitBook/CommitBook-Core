@@ -237,3 +237,51 @@ created_at = "2026-04-07T00:00:00Z"
     let err = LocalConfig::load(repo).unwrap_err().to_string();
     assert!(err.contains("Unsupported local config version `2.0.0`"));
 }
+
+#[test]
+fn test_commit_ai_messages_defaults_true() {
+    assert!(CommitSettings::default().ai_messages);
+    assert!(LocalConfig::new("hourly").commit.ai_messages);
+}
+
+#[test]
+fn test_load_without_commit_section_defaults_true() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let dir = repo.join(".CommitBook");
+    fs::create_dir_all(&dir).unwrap();
+
+    // Config predating the [commit] section: ai_messages must default to true.
+    let toml_content = r#"
+config_version = "1"
+enabled = true
+schedule = "0 * * * *"
+created_at = "2026-04-07T00:00:00Z"
+"#;
+    fs::write(dir.join("config.toml"), toml_content).unwrap();
+
+    let loaded = LocalConfig::load(repo).unwrap();
+    assert!(loaded.commit.ai_messages);
+}
+
+#[test]
+fn test_load_commit_ai_messages_false_parses() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let dir = repo.join(".CommitBook");
+    fs::create_dir_all(&dir).unwrap();
+
+    let toml_content = r#"
+config_version = "1"
+enabled = true
+schedule = "0 * * * *"
+created_at = "2026-04-07T00:00:00Z"
+
+[commit]
+ai_messages = false
+"#;
+    fs::write(dir.join("config.toml"), toml_content).unwrap();
+
+    let loaded = LocalConfig::load(repo).unwrap();
+    assert!(!loaded.commit.ai_messages);
+}

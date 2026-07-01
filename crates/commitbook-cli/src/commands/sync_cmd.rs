@@ -23,7 +23,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     // if there are no git-visible changes.
     let commit_message = match repo.changes_summary() {
         Ok(summary) if !summary.is_empty() => {
-            Some(generate_commit_message(repo_root, &summary).await)
+            Some(generate_commit_message(repo_root, &summary, config.commit.ai_messages).await)
         }
         _ => None,
     };
@@ -125,19 +125,36 @@ pub async fn run_scheduled(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Provider keys to try, in order, for a commit message.
+///
+/// When `ai_messages` is false the AI CLIs are skipped entirely and only the
+/// deterministic timestamp `fallback` provider is used.
+fn commit_provider_keys(ai_messages: bool) -> Vec<String> {
+    if ai_messages {
+        vec![
+            "gh-copilot".to_string(),
+            "claude-cli".to_string(),
+            "codex-cli".to_string(),
+            "fallback".to_string(),
+        ]
+    } else {
+        vec!["fallback".to_string()]
+    }
+}
+
 /// Generate a commit message using AI or fallback.
 async fn generate_commit_message(
     repo_root: &Path,
     summary: &commitbook_engine::git::ChangesSummary,
+    ai_messages: bool,
 ) -> String {
     let chain = commitbook_engine::ai::ProviderChain::new();
-    let keys = vec![
-        "gh-copilot".to_string(),
-        "claude-cli".to_string(),
-        "codex-cli".to_string(),
-        "fallback".to_string(),
-    ];
+    let keys = commit_provider_keys(ai_messages);
     let (msg, _provider) = chain.generate(summary, &keys, repo_root).await;
     msg
 }
+
+#[cfg(test)]
+#[path = "sync_cmd_tests.rs"]
+mod tests;
 

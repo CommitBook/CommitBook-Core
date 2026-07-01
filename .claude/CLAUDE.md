@@ -41,7 +41,7 @@ All UI crates depend on `commitbook-engine`. No database — all state is file-b
 |---|---|
 | `sync/` | `sync_repository` orchestrator: pull-rebase-autostash → commit → push |
 | `state/` | File-based state: `SyncState` (`last_sync_at`, `last_error`), `AuthConfig` |
-| `config/` | `LocalConfig` reads/writes `.CommitBook/config.toml` (incl. `[conflict]` and `[sync]`) |
+| `config/` | `LocalConfig` reads/writes `.CommitBook/config.toml` (incl. `[conflict]`, `[commit]`, and `[sync]`) |
 | `ai/` | Commit-message providers + conflict resolvers: Claude, Codex, Copilot, Gemini, Cursor, fallback |
 | `git/` | Git operations via git2 + shells to `git` CLI for pull/rebase/merge |
 | `cron/` | Scheduler: launchd (macOS), crontab (Linux) |
@@ -74,6 +74,20 @@ resolver = "manual"   # manual | claude | codex | copilot | gemini | cursor
 ```
 
 `manual` (the default) leaves the markers in place; the user resolves with `git status` and re-runs `commitbook sync`. Any other value spawns the corresponding CLI to rewrite each conflicted file; the orchestrator stages the resolved files and finishes the rebase/stash-pop.
+
+## Commit messages
+
+`.CommitBook/config.toml` `[commit]` section toggles AI-generated commit messages:
+
+```toml
+[commit]
+ai_messages = true   # true (default): try Copilot, Claude, Codex, then timestamp fallback
+                     # false: skip all AI CLIs, always use the timestamp message
+```
+
+When `false`, `commitbook sync` uses only the deterministic `FallbackProvider`
+(a `Writing <timestamp> (...)` message) and never spawns an AI CLI. Key
+selection lives in `commit_provider_keys` (`commitbook-cli/src/commands/sync_cmd.rs`).
 
 ## Code Conventions
 
