@@ -89,6 +89,7 @@ pub struct ConflictSummary {
 
 #[derive(Debug, Clone)]
 pub struct ResolveConflictInput {
+    pub commitbook_id: String,
     pub conflict_id: String,
     pub resolution_type: String,
     pub manual_content: Option<String>,

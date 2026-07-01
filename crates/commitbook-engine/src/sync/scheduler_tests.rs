@@ -4,6 +4,7 @@ use crate::git::test_support::{
     clone_second_workdir, commit_and_push_from, setup_repo_with_bare_remote, RepoFixture,
 };
 use crate::logger::FileLogger;
+use crate::platform::SystemCredentials;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::path::Path;
@@ -82,6 +83,7 @@ async fn scenario_1_up_to_date_no_changes() {
         "origin",
         &fx.branch,
         None,
+        &SystemCredentials,
         &logger,
         None,
     )
@@ -101,6 +103,7 @@ async fn scenario_2_local_only_edit_commits_and_pushes() {
         "origin",
         &fx.branch,
         None,
+        &SystemCredentials,
         &logger,
         Some("Test commit".to_string()),
     )
@@ -124,6 +127,7 @@ async fn scenario_3_remote_only_changes_pulls() {
         "origin",
         &fx.branch,
         None,
+        &SystemCredentials,
         &logger,
         None,
     )
@@ -153,6 +157,7 @@ async fn scenario_4_local_and_remote_different_files() {
         "origin",
         &fx.branch,
         None,
+        &SystemCredentials,
         &logger,
         Some("local edit".to_string()),
     )
@@ -200,6 +205,7 @@ async fn scenario_5_same_file_non_overlapping_lines() {
         "origin",
         &fx.branch,
         None,
+        &SystemCredentials,
         &logger,
         Some("merged edit".to_string()),
     )
@@ -235,6 +241,7 @@ async fn scenario_6_same_lines_manual_mode_returns_manual_conflicts() {
         "origin",
         &fx.branch,
         None, // manual mode
+        &SystemCredentials,
         &logger,
         None,
     )
@@ -271,6 +278,7 @@ async fn scenario_7_same_lines_ai_mock_resolves() {
         "origin",
         &fx.branch,
         Some(&resolver),
+        &SystemCredentials,
         &logger,
         Some("merged via AI".to_string()),
     )
@@ -309,6 +317,7 @@ async fn scenario_8_failing_resolver_falls_back_to_manual() {
         "origin",
         &fx.branch,
         Some(&resolver),
+        &SystemCredentials,
         &logger,
         None,
     )
@@ -339,6 +348,7 @@ async fn scenario_9_unpushed_local_commits_rebase_onto_remote() {
         "origin",
         &fx.branch,
         None,
+        &SystemCredentials,
         &logger,
         None,
     )
@@ -363,6 +373,7 @@ async fn scenario_10_pull_failure_surfaces_error() {
         "nonexistent-remote",
         &fx.branch,
         None,
+        &SystemCredentials,
         &logger,
         None,
     )

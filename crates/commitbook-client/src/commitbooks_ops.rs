@@ -34,7 +34,7 @@ pub fn create_local_commitbook(
             .map_err(|e| CommitBookError::transport(format!("Fetch failed: {e}")))?;
     } else {
         let repo_url = format!("https://github.com/{}/{}.git", input.owner, input.repo);
-        clone_repo_with_creds(&repo_url, &clone_path, &creds)?;
+        clone_repo_with_creds(&repo_url, &clone_path, &input.branch, &creds)?;
     }
 
     // Ensure .CommitBook/ exists committed on the remote.
@@ -66,6 +66,7 @@ pub fn create_local_commitbook(
 fn clone_repo_with_creds(
     url: &str,
     dest: &Path,
+    branch: &str,
     creds: &dyn CredentialProvider,
 ) -> Result<()> {
     let mut callbacks = git2::RemoteCallbacks::new();
@@ -80,6 +81,9 @@ fn clone_repo_with_creds(
 
     let mut builder = git2::build::RepoBuilder::new();
     builder.fetch_options(fetch_opts);
+    // Check out the requested branch so a local `refs/heads/<branch>` exists;
+    // otherwise the later push of `<branch>:<branch>` has no matching source ref.
+    builder.branch(branch);
 
     builder
         .clone(url, dest)

@@ -129,31 +129,43 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
         println!("{}", "stopped".dimmed());
     }
 
-    // 8. AI providers.
+    // 8. AI providers. Skipped entirely when `[commit] ai_messages = false`,
+    //    since sync uses only the deterministic timestamp fallback then.
     print!("  AI providers... ");
-    let chain = commitbook_engine::ai::ProviderChain::new();
-    let keys = vec![
-        "gh-copilot".to_string(),
-        "claude-cli".to_string(),
-        "codex-cli".to_string(),
-    ];
-    let availability = chain.check_availability(&keys);
-    let available: Vec<_> = availability
-        .iter()
-        .filter(|(_, _, avail)| *avail)
-        .map(|(_, name, _)| name.as_str())
-        .collect();
-    if available.is_empty() {
-        println!("{}", "none found".yellow());
+    let ai_messages = LocalConfig::load(repo_root)
+        .map(|c| c.commit.ai_messages)
+        .unwrap_or(true);
+    if !ai_messages {
+        println!("{}", "disabled".dimmed());
         println!(
             "    {}",
-            "Commit messages will use fallback text.".dimmed()
+            "[commit] ai_messages = false; commit messages use timestamp text.".dimmed()
         );
     } else {
-        println!(
-            "{}",
-            available.join(", ").green()
-        );
+        let chain = commitbook_engine::ai::ProviderChain::new();
+        let keys = vec![
+            "gh-copilot".to_string(),
+            "claude-cli".to_string(),
+            "codex-cli".to_string(),
+        ];
+        let availability = chain.check_availability(&keys);
+        let available: Vec<_> = availability
+            .iter()
+            .filter(|(_, _, avail)| *avail)
+            .map(|(_, name, _)| name.as_str())
+            .collect();
+        if available.is_empty() {
+            println!("{}", "none found".yellow());
+            println!(
+                "    {}",
+                "Commit messages will use fallback text.".dimmed()
+            );
+        } else {
+            println!(
+                "{}",
+                available.join(", ").green()
+            );
+        }
     }
 
     // 9. Sync checkpoint.

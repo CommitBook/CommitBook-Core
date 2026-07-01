@@ -7,7 +7,7 @@ use std::path::Path;
 use commitbook_engine::ai::{ConflictResolver, ResolverRegistry};
 use commitbook_engine::commitbooks::registry::find_by_id;
 use commitbook_engine::config::LocalConfig;
-use commitbook_engine::platform::Logger;
+use commitbook_engine::platform::{Logger, TokenCredentials};
 use commitbook_engine::sync::scheduler::sync_with_resolver;
 
 use crate::errors::{CommitBookError, Result};
@@ -52,15 +52,10 @@ pub fn sync_one_commitbook(
         SyncMode::Manual => None,
     };
 
-    // Configure git2 to use the supplied PAT for auth. Engine reads
-    // credentials via SystemCredentials by default (which delegates to
-    // git's credential helper). For mobile, we need the PAT path. Set
-    // GIT_USER + GIT_PASSWORD env vars before calling sync; libgit2's
-    // credential helper picks them up via the askpass mechanism.
-    //
-    // FUTURE: thread CredentialProvider through scheduler::sync_with_resolver
-    // so we don't rely on env vars. For v1 this is the smallest change.
-    let _ = token; // TODO: wire through CredentialProvider
+    // Authenticate git operations with the supplied PAT. Desktop delegates to
+    // git's credential helper via SystemCredentials, but a sandboxed mobile
+    // app has no helper to reach, so we pass the token explicitly.
+    let creds = TokenCredentials::new(token.to_string());
 
     let logger = NullLogger;
 
@@ -75,6 +70,7 @@ pub fn sync_one_commitbook(
             &config.git.remote,
             &config.git.branch,
             resolver,
+            &creds,
             &logger,
             None,
         ))

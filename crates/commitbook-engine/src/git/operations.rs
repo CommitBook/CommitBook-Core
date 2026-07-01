@@ -308,13 +308,28 @@ impl GitRepo {
             }
         };
 
-        // commit_signed doesn't update HEAD; do it manually.
-        if let Ok(head_ref) = self.repo.head() {
-            if let Some(head_name) = head_ref.name().map(|s| s.to_string()) {
-                drop(head_ref);
+        // commit_signed doesn't update HEAD; do it manually. Read the HEAD
+        // reference itself (not the peeled commit) so this also works on an
+        // unborn branch, where `repo.head()` fails but HEAD still symbolically
+        // points at `refs/heads/<branch>`.
+        let head = self
+            .repo
+            .find_reference("HEAD")
+            .context("Failed to read HEAD reference")?;
+        match head.symbolic_target().map(|s| s.to_string()) {
+            Some(branch_ref) => {
+                drop(head);
+                // Creates the branch ref when unborn, force-updates otherwise.
                 self.repo
-                    .reference(&head_name, oid, true, "commitbook: signed commit")
-                    .context("Failed to update HEAD to signed commit")?;
+                    .reference(&branch_ref, oid, true, "commitbook: signed commit")
+                    .with_context(|| format!("Failed to point {branch_ref} at signed commit"))?;
+            }
+            None => {
+                // Detached HEAD: move HEAD directly onto the new commit.
+                drop(head);
+                self.repo
+                    .set_head_detached(oid)
+                    .context("Failed to update detached HEAD to signed commit")?;
             }
         }
 
@@ -591,6 +606,50 @@ impl GitRepo {
             .revparse_single(refname)
             .with_context(|| format!("Failed to resolve ref '{}'", refname))?;
         Ok(obj.id().to_string())
+    }
+
+    /// SHA of the most recent commit reachable from HEAD that changed `path`.
+    ///
+    /// Equivalent to `git log -1 --format=%H -- <path>`. Returns `None` when
+    /// the path has no committed history (e.g. it exists only in the working
+    /// tree) or when HEAD is unborn.
+    pub fn last_commit_touching(&self, path: &str) -> Result<Option<String>> {
+        if self.repo.head().is_err() {
+            return Ok(None); // Unborn branch: nothing committed yet.
+        }
+        let target = Path::new(path);
+        let mut revwalk = self.repo.revwalk().context("Failed to create revwalk")?;
+        revwalk.push_head().context("Failed to push HEAD to revwalk")?;
+        revwalk
+            .set_sorting(git2::Sort::TIME)
+            .context("Failed to set revwalk sorting")?;
+
+        for oid in revwalk {
+            let oid = oid.context("Failed to read revwalk entry")?;
+            let commit = self.repo.find_commit(oid).context("Failed to find commit")?;
+            let blob = commit
+                .tree()
+                .ok()
+                .and_then(|t| t.get_path(target).ok().map(|e| e.id()));
+
+            // A commit "touched" the path if the blob differs from every
+            // parent (including the root-commit case, where it's simply new).
+            let touched = if commit.parent_count() == 0 {
+                blob.is_some()
+            } else {
+                commit.parents().any(|parent| {
+                    let parent_blob = parent
+                        .tree()
+                        .ok()
+                        .and_then(|t| t.get_path(target).ok().map(|e| e.id()));
+                    parent_blob != blob
+                })
+            };
+            if touched {
+                return Ok(Some(oid.to_string()));
+            }
+        }
+        Ok(None)
     }
 
     /// Are there any uncommitted markdown changes in the working tree?

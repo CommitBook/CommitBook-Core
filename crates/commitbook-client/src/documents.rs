@@ -4,7 +4,7 @@
 //! Sync (push to remote) is `sync_commitbook`'s job — `save_document` only
 //! commits locally.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use commitbook_engine::commitbooks::registry::find_by_id;
 use commitbook_engine::git::GitRepo;
@@ -80,16 +80,12 @@ pub fn read_document(
     let content = std::fs::read_to_string(&abs)
         .map_err(|e| CommitBookError::database(format!("Read {path}: {e}")))?;
 
-    // Best-effort revision lookup via libgit2: HEAD's tree contains the file's
-    // last-committed blob OID. For uncommitted-only files we return None.
+    // Revision = SHA of the last commit that changed this specific file, so
+    // callers can detect when the document moved underneath them. `None` for
+    // files that exist only in the working tree (never committed).
     let repo = GitRepo::open(&cb.local_path)
         .map_err(|e| CommitBookError::database(format!("Open repo: {e}")))?;
-    let revision = repo.show_file_at_ref("HEAD", path).ok().map(|_| {
-        // We need the SHA of the LAST commit touching this path; libgit2
-        // doesn't expose that directly without a revwalk. For v1 we just
-        // surface HEAD as a coarse "you read at this snapshot" marker.
-        repo.rev_parse("HEAD").ok().unwrap_or_default()
-    });
+    let revision = repo.last_commit_touching(path).ok().flatten();
 
     Ok(DocumentContent {
         path: path.to_string(),
@@ -153,7 +149,3 @@ fn walk_markdown(root: &Path, dir: &Path, out: &mut Vec<String>) {
         }
     }
 }
-
-// Help compiler with PathBuf references in pub fn signatures.
-#[allow(dead_code)]
-fn _unused_path_buf_ref(_p: PathBuf) {}

@@ -12,7 +12,7 @@ use crate::ai::{ConflictResolver, ResolverRegistry};
 use crate::config::LocalConfig;
 use crate::git::operations::MergeOutcome;
 use crate::git::GitRepo;
-use crate::platform::Logger;
+use crate::platform::{CredentialProvider, Logger, SystemCredentials};
 use crate::state::sync_state::SyncState;
 
 const MAX_PUSH_RETRIES: u32 = 1;
@@ -58,6 +58,7 @@ pub async fn sync_repository(
         &config.git.remote,
         &config.git.branch,
         resolver,
+        &SystemCredentials,
         logger,
         commit_message,
     )
@@ -72,6 +73,7 @@ pub async fn sync_with_resolver(
     remote: &str,
     branch: &str,
     resolver: Option<&dyn ConflictResolver>,
+    creds: &dyn CredentialProvider,
     logger: &dyn Logger,
     commit_message: Option<String>,
 ) -> Result<SyncOutcome> {
@@ -95,7 +97,7 @@ pub async fn sync_with_resolver(
 
         // 2. Fetch first (separate from merge) so we can compute pulled/pushed
         //    counts from the divergence BEFORE merge creates a merge commit.
-        if let Err(e) = repo.fetch(remote, branch) {
+        if let Err(e) = repo.fetch_with(remote, branch, creds) {
             let msg = format!("Fetch failed: {e}");
             let _ = logger.error(&msg);
             outcome.errors.push(msg);
@@ -163,7 +165,7 @@ pub async fn sync_with_resolver(
         }
 
         // 4. Push.
-        match repo.push(remote, branch) {
+        match repo.push_with(remote, branch, creds) {
             Ok(()) => break,
             Err(e) if attempt < MAX_PUSH_RETRIES => {
                 let _ = logger.warn(&format!(
