@@ -73,8 +73,14 @@ impl CommitBookEngineClient {
 
         let mut out = Vec::with_capacity(tasks.len());
         for t in tasks {
-            if let Ok(r) = t.await {
-                out.push(r);
+            // Surface a panicked probe instead of silently truncating the list.
+            match t.await {
+                Ok(r) => out.push(r),
+                Err(e) => {
+                    return Err(CommitBookError::transport(format!(
+                        "Discovery task failed: {e}"
+                    )))
+                }
             }
         }
         // Sort: existing CommitBooks first (has_dot_commitbook=true), then the rest.
@@ -153,6 +159,13 @@ impl CommitBookEngineClient {
         .ok_or_else(|| {
             CommitBookError::not_found(format!("CommitBook {commitbook_id} not found"))
         })?;
+        // Guard against deleting anything outside the managed workspaces root.
+        if !cb.local_path.starts_with(&self.workspaces_root) {
+            return Err(CommitBookError::invalid_input(format!(
+                "Refusing to delete {}: outside workspaces root",
+                cb.local_path.display()
+            )));
+        }
         std::fs::remove_dir_all(&cb.local_path).map_err(|e| {
             CommitBookError::database(format!(
                 "Failed to delete clone at {}: {e}",

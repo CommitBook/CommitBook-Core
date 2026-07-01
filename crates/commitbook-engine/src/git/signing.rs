@@ -48,7 +48,7 @@ pub fn sign_commit_object(repo: &Repository, unsigned_bytes: &[u8]) -> Result<Op
             "ssh" => sign_ssh(&config, unsigned_bytes).map(Some),
             "openpgp" | "gpg" => sign_gpg(&config, unsigned_bytes).map(Some),
             other => Err(anyhow::anyhow!(
-                "Unknown gpg.format '{other}' — expected 'ssh' or 'openpgp'"
+                "Unsupported gpg.format '{other}': only 'ssh' and 'openpgp' are currently supported"
             )),
         }
     }

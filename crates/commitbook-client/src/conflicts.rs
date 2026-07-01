@@ -15,6 +15,7 @@ use crate::errors::{CommitBookError, Result};
 use crate::types::{ConflictSummary, ResolveConflictInput};
 
 const SECTION_LOCAL_MARKER: &str = "<<<<<<<";
+const SECTION_BASE_MARKER: &str = "|||||||";
 const SECTION_DIVIDER: &str = "=======";
 const SECTION_REMOTE_MARKER: &str = ">>>>>>>";
 
@@ -54,67 +55,62 @@ pub fn list_conflicts(
 }
 
 pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) -> Result<()> {
-    // Conflict ID is the relative path within the clone. We don't know which
-    // CommitBook it belongs to without scanning. The expected usage is:
-    // app calls list_conflicts(cb_id) -> stores cb_id alongside each id ->
-    // calls resolve_conflict with { conflict_id: path }. To recover cb_id,
-    // we scan all CommitBooks and find the one whose conflict set contains
-    // this path. Multiple matches would mean two CommitBooks are conflicted
-    // on the same relative path — caller should resolve them per-CommitBook.
-    let cbs = commitbook_engine::commitbooks::scan_workspaces_root(workspaces_root)
-        .map_err(|e| CommitBookError::database(format!("Scan: {e}")))?;
+    // The caller identifies the exact CommitBook, so there's no ambiguity when
+    // two clones happen to be conflicted on the same relative path.
+    let cb = find_by_id(workspaces_root, &input.commitbook_id)
+        .map_err(|e| CommitBookError::database(format!("Registry scan: {e}")))?
+        .ok_or_else(|| {
+            CommitBookError::not_found(format!("CommitBook {} not found", input.commitbook_id))
+        })?;
 
-    for cb in cbs {
-        let repo = GitRepo::open(&cb.local_path)
-            .map_err(|e| CommitBookError::database(format!("Open repo: {e}")))?;
-        let conflicts = repo
-            .list_conflicted_paths()
-            .map_err(|e| CommitBookError::database(format!("List conflicts: {e}")))?;
-        if !conflicts.contains(&input.conflict_id) {
-            continue;
-        }
-
-        let abs = cb.local_path.join(&input.conflict_id);
-        let raw = std::fs::read_to_string(&abs)
-            .map_err(|e| CommitBookError::database(format!("Read {}: {e}", input.conflict_id)))?;
-        let (local_content, remote_content) = split_conflict_markers(&raw);
-
-        let resolved = match input.resolution_type.as_str() {
-            "take_local" => local_content,
-            "take_remote" => remote_content,
-            "keep_both" => format!("{}\n{}", local_content, remote_content),
-            "manual_edit" => input
-                .manual_content
-                .clone()
-                .ok_or_else(|| CommitBookError::invalid_input(
-                    "manual_edit requires manual_content",
-                ))?,
-            other => {
-                return Err(CommitBookError::invalid_input(format!(
-                    "Unknown resolution_type: {other}"
-                )))
-            }
-        };
-
-        std::fs::write(&abs, resolved)
-            .map_err(|e| CommitBookError::database(format!("Write resolved: {e}")))?;
-        repo.stage_paths(&[input.conflict_id.clone()])
-            .map_err(|e| CommitBookError::database(format!("Stage: {e}")))?;
-
-        // If all conflicts cleared, finalize the merge commit.
-        let remaining = repo
-            .list_conflicted_paths()
-            .map_err(|e| CommitBookError::database(format!("List conflicts: {e}")))?;
-        if remaining.is_empty() {
-            repo.finalize_merge_commit(None)
-                .map_err(|e| CommitBookError::database(format!("Finalize merge: {e}")))?;
-        }
-        return Ok(());
+    let repo = GitRepo::open(&cb.local_path)
+        .map_err(|e| CommitBookError::database(format!("Open repo: {e}")))?;
+    let conflicts = repo
+        .list_conflicted_paths()
+        .map_err(|e| CommitBookError::database(format!("List conflicts: {e}")))?;
+    if !conflicts.contains(&input.conflict_id) {
+        return Err(CommitBookError::not_found(format!(
+            "Conflict {} not found in CommitBook {}",
+            input.conflict_id, input.commitbook_id
+        )));
     }
-    Err(CommitBookError::not_found(format!(
-        "Conflict {} not found in any CommitBook",
-        input.conflict_id
-    )))
+
+    let abs = cb.local_path.join(&input.conflict_id);
+    let raw = std::fs::read_to_string(&abs)
+        .map_err(|e| CommitBookError::database(format!("Read {}: {e}", input.conflict_id)))?;
+    let (local_content, remote_content) = split_conflict_markers(&raw);
+
+    let resolved = match input.resolution_type.as_str() {
+        "take_local" => local_content,
+        "take_remote" => remote_content,
+        "keep_both" => format!("{}\n{}", local_content, remote_content),
+        "manual_edit" => input
+            .manual_content
+            .clone()
+            .ok_or_else(|| CommitBookError::invalid_input(
+                "manual_edit requires manual_content",
+            ))?,
+        other => {
+            return Err(CommitBookError::invalid_input(format!(
+                "Unknown resolution_type: {other}"
+            )))
+        }
+    };
+
+    std::fs::write(&abs, resolved)
+        .map_err(|e| CommitBookError::database(format!("Write resolved: {e}")))?;
+    repo.stage_paths(&[input.conflict_id.clone()])
+        .map_err(|e| CommitBookError::database(format!("Stage: {e}")))?;
+
+    // If all conflicts cleared, finalize the merge commit.
+    let remaining = repo
+        .list_conflicted_paths()
+        .map_err(|e| CommitBookError::database(format!("List conflicts: {e}")))?;
+    if remaining.is_empty() {
+        repo.finalize_merge_commit(None)
+            .map_err(|e| CommitBookError::database(format!("Finalize merge: {e}")))?;
+    }
+    Ok(())
 }
 
 /// Extract the local and remote sides of git's conflict markers from a file.
@@ -122,7 +118,8 @@ pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) ->
 fn split_conflict_markers(raw: &str) -> (String, String) {
     let mut local = String::new();
     let mut remote = String::new();
-    let mut state = 0u8; // 0=common, 1=local, 2=remote
+    // 0=common, 1=local, 2=remote, 3=base (diff3 ancestor, dropped).
+    let mut state = 0u8;
     let mut has_markers = false;
     for line in raw.lines() {
         if line.starts_with(SECTION_LOCAL_MARKER) {
@@ -130,7 +127,13 @@ fn split_conflict_markers(raw: &str) -> (String, String) {
             state = 1;
             continue;
         }
-        if line.starts_with(SECTION_DIVIDER) && state == 1 {
+        // `merge.conflictStyle = diff3`/`zdiff3` inserts a `||||||| base`
+        // section between the local side and the divider; skip it entirely.
+        if line.starts_with(SECTION_BASE_MARKER) && state == 1 {
+            state = 3;
+            continue;
+        }
+        if line.starts_with(SECTION_DIVIDER) && (state == 1 || state == 3) {
             state = 2;
             continue;
         }
@@ -153,6 +156,7 @@ fn split_conflict_markers(raw: &str) -> (String, String) {
                 remote.push_str(line);
                 remote.push('\n');
             }
+            // 3 = base/ancestor: belongs to neither side.
             _ => {}
         }
     }
@@ -176,6 +180,16 @@ mod tests {
     #[test]
     fn split_simple_conflict() {
         let raw = "intro\n<<<<<<< HEAD\nlocal line\n=======\nremote line\n>>>>>>> origin/main\noutro\n";
+        let (l, r) = split_conflict_markers(raw);
+        assert_eq!(l, "intro\nlocal line\noutro\n");
+        assert_eq!(r, "intro\nremote line\noutro\n");
+    }
+
+    #[test]
+    fn split_diff3_conflict_drops_ancestor() {
+        // diff3/zdiff3 style: a `||||||| base` section sits between the local
+        // side and the divider. It must not leak into either resolved side.
+        let raw = "intro\n<<<<<<< HEAD\nlocal line\n||||||| base\nancestor line\n=======\nremote line\n>>>>>>> origin/main\noutro\n";
         let (l, r) = split_conflict_markers(raw);
         assert_eq!(l, "intro\nlocal line\noutro\n");
         assert_eq!(r, "intro\nremote line\noutro\n");

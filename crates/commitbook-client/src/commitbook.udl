@@ -80,6 +80,7 @@ dictionary ConflictSummary {
 };
 
 dictionary ResolveConflictInput {
+    string commitbook_id;
     string conflict_id;
     string resolution_type;
     string? manual_content;
