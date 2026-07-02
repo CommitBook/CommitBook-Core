@@ -15,6 +15,18 @@ pub fn run_init() -> Result<()> {
     let repo_root = state::find_git_root()
         .context("CommitBook must be initialized inside a git repository.")?;
 
+    // Already initialized: report and exit before enforcing the remote rule,
+    // so a repo that gained extra remotes after init doesn't fail here. The
+    // remote persisted in config.toml stays authoritative for sync.
+    if LocalConfig::exists(&repo_root) {
+        println!(
+            "{} CommitBook is already initialized at {}",
+            "OK".green().bold(),
+            repo_root.join(".CommitBook").display()
+        );
+        return Ok(());
+    }
+
     let names = list_remote_names(&repo_root)?;
     let remote_name = match names.as_slice() {
         [] => bail!(
@@ -29,15 +41,6 @@ pub fn run_init() -> Result<()> {
             many.join(", ")
         ),
     };
-
-    if LocalConfig::exists(&repo_root) {
-        println!(
-            "{} CommitBook is already initialized at {}",
-            "OK".green().bold(),
-            repo_root.join(".CommitBook").display()
-        );
-        return Ok(());
-    }
 
     state::initialize(&repo_root, &remote_name)?;
 

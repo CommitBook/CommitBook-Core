@@ -11,7 +11,7 @@
     "language": "Rust 2021",
     "cli": "Clap v4",
     "async": "Tokio",
-    "workspace": "Cargo workspace (4 crates)"
+    "workspace": "Cargo workspace (5 crates)"
   },
   "commands": {
     "build": "cargo build -p commitbook-cli",

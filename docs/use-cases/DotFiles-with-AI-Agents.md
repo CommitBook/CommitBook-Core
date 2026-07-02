@@ -15,7 +15,7 @@ AI coding agents store configuration in dotfile folders scattered across your ho
 | `~/.agents/` | Agents.dev |
 | `~/.factory/` | Factory |
 
-You (or the agents themselves) edit these configs over time. Without version control, changes are invisible — there's no history, no backup, and no way to sync across machines.
+You (or the agents themselves) edit these configs over time. Without version control, changes are invisible: there's no history, no backup, and no way to sync across machines.
 
 ## The Solution
 
@@ -23,7 +23,7 @@ You (or the agents themselves) edit these configs over time. Without version con
 2. Move config folders into it and symlink them back
 3. Let CommitBook auto-commit and push on a schedule
 
-Every config change — whether you make it or an agent does — is versioned and synced automatically.
+Every config change (whether you make it or an agent does) is versioned and synced automatically.
 
 ## Setup
 
@@ -99,7 +99,8 @@ git push -u origin main
 
 ```bash
 cd ~/dotfiles
-commitbook sync                # First sync (auto-initializes .CommitBook/)
+commitbook init                # Initialize .CommitBook/ (once per repo)
+commitbook sync                # First sync
 commitbook schedule every-4h   # Sync every 4 hours
 commitbook start               # Start the scheduler
 ```
@@ -145,6 +146,6 @@ commitbook start
 
 ## Tips
 
-- **Check what's tracked** before pushing: `cd ~/dotfiles && git status` — make sure no credentials slipped through
+- **Check what's tracked** before pushing: `cd ~/dotfiles && git status`, and make sure no credentials slipped through
 - **Use `commitbook log`** to see sync activity: `cd ~/dotfiles && commitbook log`
-- **Adjust the schedule** based on how often configs change — `every-4h` is a good default for dotfiles
+- **Adjust the schedule** based on how often configs change: `every-4h` is a good default for dotfiles

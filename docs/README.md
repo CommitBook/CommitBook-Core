@@ -19,7 +19,10 @@ cargo install --path crates/commitbook-cli
 # Navigate to your notes repo
 cd ~/my-notes
 
-# Run your first sync (auto-initializes .CommitBook/)
+# Initialize CommitBook (once per repo)
+commitbook init
+
+# Run your first sync
 commitbook sync
 
 # Start scheduled syncs
@@ -27,25 +30,23 @@ commitbook schedule hourly
 commitbook start
 ```
 
-That's it. CommitBook auto-initializes on first use — no setup command needed.
-
 ## Use Cases
 
 | Guide | Description |
 |---|---|
-| [AI Agent Dotfiles](use-cases/ai-agent-dotfiles.md) | Auto-sync config for Claude, Cursor, Codex, Copilot and other AI agents |
+| [AI Agent Dotfiles](use-cases/DotFiles-with-AI-Agents.md) | Auto-sync config for Claude, Cursor, Codex, Copilot and other AI agents |
 
 ## Commands
 
 | Command | Description |
 |---|---|
+| `commitbook init` | Initialize `.CommitBook/` (required before any other command) |
 | `commitbook sync` | Commit locally + pull/merge/push with remote |
 | `commitbook start` | Start the sync scheduler (launchd/cron) |
 | `commitbook stop` | Stop the sync scheduler |
 | `commitbook status` | Show current sync state, schedule, and config |
 | `commitbook schedule <expr>` | Change the sync schedule |
 | `commitbook doctor` | Check system health and dependencies |
-| `commitbook conflicts` | Show files with merge conflicts |
 | `commitbook log` | View recent activity log |
 | `commitbook login --token <T>` | Store an optional token for token-backed transports |
 | `commitbook login --provider github` | Label the stored token with a provider |
@@ -132,7 +133,7 @@ CommitBook stores all state inside `.CommitBook/` in the repository root. No glo
     .lock           # Prevents concurrent runs
 ```
 
-Auto-initialization creates this directory and updates `.gitignore` on first use.
+`commitbook init` creates this directory and adds `.CommitBook/local/` to `.gitignore`.
 
 ### `config.toml` (committed)
 
@@ -202,7 +203,7 @@ All state is file-based (no database). The `.CommitBook/` directory is self-cont
 
 | Module | Purpose |
 |---|---|
-| `config/` | `LocalConfig` — reads/writes `.CommitBook/config.toml` |
+| `config/` | `LocalConfig`: reads/writes `.CommitBook/config.toml` |
 | `state/` | `SyncState`, `AuthConfig`, base version management |
 | `sync/` | Sync planner, pipeline (pull/merge/push), scheduler |
 | `merge/` | Section-aware three-way merge engine |
@@ -264,7 +265,7 @@ commitbook log
 CommitBook writes conflict markers inline (like git). Check for conflicts and resolve them:
 
 ```bash
-commitbook conflicts
+git status
 # Edit the conflicting files
 commitbook sync
 ```
@@ -282,7 +283,7 @@ commitbook log
 ```bash
 commitbook stop
 rm -rf .CommitBook/
-# Next command will re-initialize
+commitbook init
 commitbook sync
 ```
 
