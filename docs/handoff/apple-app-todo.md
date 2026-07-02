@@ -33,7 +33,7 @@ The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `Workspace
   - `SyncResultSummary`: add `committed: Bool`, `conflictsResolved: Int`, `manualConflicts: Int` (engine returns these now).
 
 - [ ] `Packages/CommitBookAppleCore/Sources/CommitBookAppleCore/CommitBookEngineProtocol.swift`:
-  - Rename methods: `createWorkspace` → `createCommitBook(_ input: CommitBookInput, token: String) async throws -> CommitBookSummary`. (Note: `create_commitbook` is now async on the engine side because cloning is a network op.)
+  - Rename methods: `createWorkspace` → `initCommitBook(_ input: CommitBookInput, token: String) async throws -> CommitBookSummary`. (Note: `init_commitbook` is now async on the engine side because cloning is a network op.)
   - `listWorkspaces` → `listCommitBooks() throws -> [CommitBookSummary]`.
   - `getWorkspace` → `getCommitBook(_ id: String) throws -> CommitBookSummary`.
   - `deleteWorkspace` → `deleteCommitBook(_ id: String) throws`.
@@ -84,7 +84,7 @@ The engine now exposes a `SyncMode { aiResolve, manual }` flag per sync. Decide 
 ## 9. PAT entry flow
 
 - [ ] `PATEntryView.swift`: after the user submits, call `validatePAT(token)` and store the token in Keychain via `KeychainHelper`. On success, transition to `RepoPickerView`.
-- [ ] `RepoPickerView.swift`: call `discoverCommitBooks(token)`. Group results: existing CommitBooks (`hasDotCommitBook == true`) at the top with an "Add" or "Already added" affordance per `alreadyLocal`; non-CommitBook repos below with a "Create CommitBook" action that calls `createCommitBook(input, token)`.
+- [ ] `RepoPickerView.swift`: call `discoverCommitBooks(token)`. Group results: existing CommitBooks (`hasDotCommitBook == true`) at the top with an "Add" or "Already added" affordance per `alreadyLocal`; non-CommitBook repos below with a "Create CommitBook" action that calls `initCommitBook(input, token)`.
 
 ## 10. CI updates
 

@@ -35,7 +35,7 @@ Track that work upstream. The remaining items here only become actionable once t
 
 - [ ] `app/src/main/java/com/commitbook/app/data/engine/CommitBookEngine.kt`:
   - Rename all methods `*Workspace` → `*CommitBook`.
-  - `createCommitBook(input: CommitBookInput, token: String): CommitBookSummary` — now `suspend` AND takes `token`.
+  - `initCommitBook(input: CommitBookInput, token: String): CommitBookSummary` - now `suspend` AND takes `token`.
   - Add `validatePAT(token: String): List<RepoInfo>` and `discoverCommitBooks(token: String): List<DiscoveredCommitBook>`.
   - `syncCommitBook(commitBookId: String, mode: SyncMode, token: String): SyncResultSummary`.
 

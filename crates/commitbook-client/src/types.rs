@@ -10,7 +10,7 @@ pub enum SyncMode {
     Manual,
 }
 
-/// Input for `create_commitbook`. App provides the GitHub repo it
+/// Input for `init_commitbook`. App provides the GitHub repo it
 /// already picked from `discover_commitbooks`.
 #[derive(Debug, Clone)]
 pub struct CommitBookInput {

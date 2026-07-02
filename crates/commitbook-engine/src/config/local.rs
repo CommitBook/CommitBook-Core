@@ -102,7 +102,7 @@ impl Default for CommitSettings {
 /// Settings identifying this clone as a CommitBook (a GitHub repo with
 /// `.CommitBook/`). Optional in the schema for backwards compat with existing
 /// notebooks that pre-date the FFI; the FFI client populates this when
-/// creating new CommitBooks via `create_commitbook`.
+/// initializing CommitBooks via `init_commitbook`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CommitBookSettings {
     /// Display name (e.g. "Personal Notes").

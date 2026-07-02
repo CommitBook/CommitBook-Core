@@ -93,7 +93,7 @@ impl CommitBookEngineClient {
         Ok(out)
     }
 
-    pub async fn create_commitbook(
+    pub async fn init_commitbook(
         &self,
         input: CommitBookInput,
         token: String,
@@ -102,7 +102,7 @@ impl CommitBookEngineClient {
         // Clone + init operations are blocking libgit2 calls — push them
         // off the async runtime.
         let summary = tokio::task::spawn_blocking(move || -> Result<CommitBookSummary> {
-            crate::commitbooks_ops::create_local_commitbook(&workspaces_root, &input, &token)
+            crate::commitbooks_ops::init_local_commitbook(&workspaces_root, &input, &token)
         })
         .await
         .map_err(|e| CommitBookError::database(format!("Task join: {e}")))??;

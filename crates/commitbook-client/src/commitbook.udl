@@ -104,7 +104,7 @@ interface CommitBookEngineClient {
     sequence<DiscoveredCommitBook> discover_commitbooks(string token);
 
     [Throws=CommitBookError, Async]
-    CommitBookSummary create_commitbook(CommitBookInput input, string token);
+    CommitBookSummary init_commitbook(CommitBookInput input, string token);
 
     [Throws=CommitBookError]
     sequence<CommitBookSummary> list_commitbooks();

@@ -1,4 +1,4 @@
-//! Blocking libgit2 operations for CommitBook creation/cloning. Run from
+//! Blocking libgit2 operations for CommitBook initialization/cloning. Run from
 //! `tokio::task::spawn_blocking` — these can do filesystem I/O and network
 //! operations that take seconds.
 
@@ -12,7 +12,7 @@ use commitbook_engine::platform::{CredentialProvider, TokenCredentials};
 use crate::errors::{CommitBookError, Result};
 use crate::types::{CommitBookInput, CommitBookSummary};
 
-pub fn create_local_commitbook(
+pub fn init_local_commitbook(
     workspaces_root: &Path,
     input: &CommitBookInput,
     token: &str,
