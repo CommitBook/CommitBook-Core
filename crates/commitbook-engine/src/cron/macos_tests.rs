@@ -110,7 +110,7 @@ fn test_filter_protected_preserves_unrelated_entries() {
 
 #[test]
 fn test_filter_protected_matches_only_as_directory_prefix() {
-    // "DownloadsBackup" should NOT be stripped — only real Downloads/*.
+    // "DownloadsBackup" should NOT be stripped, only real Downloads/*.
     let home = Path::new("/Users/bob");
     let entries = vec![
         "/Users/bob/DownloadsBackup/bin".to_string(),

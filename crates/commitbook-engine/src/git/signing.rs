@@ -54,12 +54,53 @@ pub fn sign_commit_object(repo: &Repository, unsigned_bytes: &[u8]) -> Result<Op
     }
 }
 
+/// Resolve `user.signingkey` to a filesystem path `ssh-keygen -f` can read.
+///
+/// Git accepts a literal public key as the signing key (a `key::` prefix, or a
+/// bare `ssh-ed25519 ...` value, as 1Password and similar agents produce) and
+/// writes it to a temp file before signing. A plain value is treated as a path
+/// (with `~/` expanded). The returned `NamedTempFile`, when present, must be
+/// kept alive until signing completes.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn resolve_ssh_key_file(raw_key: &str) -> Result<(String, Option<tempfile::NamedTempFile>)> {
+    let literal = raw_key
+        .strip_prefix("key::")
+        .map(str::to_string)
+        .or_else(|| {
+            let t = raw_key.trim();
+            (t.starts_with("ssh-")
+                || t.starts_with("ecdsa-")
+                || t.starts_with("sk-ssh-")
+                || t.starts_with("sk-ecdsa-"))
+            .then(|| t.to_string())
+        });
+
+    match literal {
+        Some(key) => {
+            let mut f = tempfile::NamedTempFile::new()
+                .context("Failed to create temp file for literal signing key")?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(f.path(), std::fs::Permissions::from_mode(0o600))
+                    .context("Failed to restrict temp signing key permissions")?;
+            }
+            writeln!(f, "{}", key.trim()).context("Failed to write temp signing key")?;
+            f.flush().context("Failed to flush temp signing key")?;
+            let path = f.path().to_string_lossy().into_owned();
+            Ok((path, Some(f)))
+        }
+        None => Ok((expand_tilde(raw_key), None)),
+    }
+}
+
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn sign_ssh(config: &git2::Config, unsigned_bytes: &[u8]) -> Result<String> {
-    let key_path = config
+    let raw_key = config
         .get_string("user.signingkey")
         .context("commit.gpgsign=true but user.signingkey not set")?;
-    let key_path = expand_tilde(&key_path);
+    // Keep the temp file (if the key was a literal) alive until signing ends.
+    let (key_path, _tmp_key) = resolve_ssh_key_file(&raw_key)?;
 
     let program = config
         .get_string("gpg.ssh.program")
@@ -146,3 +187,7 @@ fn expand_tilde(path: &str) -> String {
     }
     path.to_string()
 }
+
+#[cfg(test)]
+#[path = "signing_tests.rs"]
+mod tests;

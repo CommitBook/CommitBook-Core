@@ -5,7 +5,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
-use super::{clean_message, looks_like_diff_narration, truncate, CommitMessageProvider};
+use super::{clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider};
 use crate::git::ChangesSummary;
 
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -114,38 +114,14 @@ impl ConflictResolver for ClaudeProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        Ok(strip_outer_code_fence(&raw))
+        let resolved = strip_outer_code_fence(&raw);
+        if resolved.trim().is_empty() {
+            bail!("Empty resolution from claude CLI");
+        }
+        Ok(resolved)
     }
 }
 
 #[cfg(test)]
 #[path = "claude_tests.rs"]
 mod tests;
-
-/// Wait for a child process with a timeout.
-fn wait_with_timeout(
-    child: std::process::Child,
-    timeout: Duration,
-) -> Result<std::process::Output> {
-    let mut child = child;
-    let start = std::time::Instant::now();
-
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .context("Failed to get process output");
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    bail!("Process timed out after {:?}", timeout);
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => bail!("Error waiting for process: {}", e),
-        }
-    }
-}

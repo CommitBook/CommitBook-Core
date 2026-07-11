@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 
-/// CommitBook — Markdown workspace with git sync.
+/// CommitBook, Markdown workspace with git sync.
 #[derive(Parser)]
 #[command(name = "commitbook", version, about, long_about = None)]
 struct Cli {

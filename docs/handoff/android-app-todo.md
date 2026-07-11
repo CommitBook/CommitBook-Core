@@ -1,4 +1,4 @@
-# CommitBook-Android — TODO for FFI integration
+# CommitBook-Android, TODO for FFI integration
 
 Work needed in [`CommitBook/CommitBook-Android`](https://github.com/CommitBook/CommitBook-Android) once `commitbook-engine` ships an Android artifact. Track each item in a separate PR.
 
@@ -23,7 +23,7 @@ Track that work upstream. The remaining items here only become actionable once t
   - `CORE_VERSION=0.1.0`
   - `AAR_CHECKSUM=sha256:<value>`
   - `AAR_URL=https://github.com/CommitBook/CommitBook-Core/releases/download/0.1.0/commitbook-engine-0.1.0.aar`
-- [ ] Add `scripts/fetch-aar.sh` as the analogue of the Apple repo's `fetch-xcframework.sh` — verifies SHA256, places the AAR under `app/libs/`, fails CI when `.core-version` still has placeholder values.
+- [ ] Add `scripts/fetch-aar.sh` as the analogue of the Apple repo's `fetch-xcframework.sh`, verifies SHA256, places the AAR under `app/libs/`, fails CI when `.core-version` still has placeholder values.
 
 ## 2. Rename Kotlin types: `Workspace*` → `CommitBook*`
 
@@ -62,7 +62,7 @@ Track that work upstream. The remaining items here only become actionable once t
 
 - [ ] `ui/screens/workspace/WorkspaceListScreen.kt` → `CommitBookListScreen.kt`.
 - [ ] `ui/screens/workspace/WorkspaceAddScreen.kt` → `CommitBookAddScreen.kt`.
-- [ ] `ui/screens/auth/RepoPickerScreen.kt` — wire to `discoverCommitBooks`.
+- [ ] `ui/screens/auth/RepoPickerScreen.kt`, wire to `discoverCommitBooks`.
 - [ ] `ui/viewmodel/WorkspaceListViewModel.kt` → `CommitBookListViewModel.kt`.
 - [ ] Update navigation routes in `ui/navigation/AppNavigation.kt`.
 - [ ] Mechanical find/replace `Workspace` → `CommitBook` across the codebase. ~25 files touched.
@@ -93,5 +93,5 @@ Track that work upstream. The remaining items here only become actionable once t
 ## Reminders for the engine repo
 
 - [ ] Add `scripts/build-android-aar.sh` analogous to `scripts/build-xcframework.sh` (lives in `crates/commitbook-client/scripts/`).
-- [ ] Tag conventions match iOS: `0.1.1`, `0.2.0` — no `v` prefix.
+- [ ] Tag conventions match iOS: `0.1.1`, `0.2.0`, no `v` prefix.
 - [ ] Both artifacts (xcframework + AAR) attached to the same release tag, so `.core-version` in both app repos can pin to the same number.

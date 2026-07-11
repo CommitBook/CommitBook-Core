@@ -13,7 +13,7 @@ fn test_check_remote_connectivity_no_remote() {
     let result = check_remote_connectivity(tmp.path());
     match result {
         Ok(connected) => assert!(!connected),
-        Err(_) => {} // also acceptable — no remote to connect to
+        Err(_) => {} // also acceptable, no remote to connect to
     }
 }
 

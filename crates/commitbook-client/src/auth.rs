@@ -21,14 +21,20 @@ struct GithubOwner {
     login: String,
 }
 
+/// Build a reqwest client for GitHub API calls. Callers making several
+/// requests should build one and reuse it so the connection pool is shared.
+pub(crate) fn github_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| CommitBookError::transport(format!("HTTP client init: {e}")))
+}
+
 /// Fetch the authenticated user's repos. Used for both PAT validation
 /// (returns the list as proof the token works) and as the input to
 /// `discover_commitbooks` filtering.
 pub(crate) async fn fetch_user_repos(token: &str) -> Result<Vec<RepoInfo>> {
-    let client = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(|e| CommitBookError::transport(format!("HTTP client init: {e}")))?;
+    let client = github_client()?;
 
     let mut all = Vec::new();
     let mut page = 1u32;
@@ -49,7 +55,7 @@ pub(crate) async fn fetch_user_repos(token: &str) -> Result<Vec<RepoInfo>> {
         }
         if resp.status() == reqwest::StatusCode::FORBIDDEN {
             return Err(CommitBookError::auth(
-                "GitHub token forbidden (403) — check scopes (need `repo`)",
+                "GitHub token forbidden (403): check scopes (need `repo`)",
             ));
         }
         if !resp.status().is_success() {
@@ -89,14 +95,15 @@ pub(crate) async fn fetch_user_repos(token: &str) -> Result<Vec<RepoInfo>> {
     Ok(all)
 }
 
-/// Probe a single repo for the presence of a `.CommitBook/` directory at
-/// the root tree. Returns `true` if found, `false` if not.
-pub(crate) async fn has_dot_commitbook(token: &str, owner: &str, repo: &str) -> Result<bool> {
-    let client = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(|e| CommitBookError::transport(format!("HTTP client init: {e}")))?;
-
+/// Probe a single repo for the presence of a `.CommitBook/` directory at the
+/// root tree using a caller-provided client, so a batch of probes shares one
+/// connection pool. Returns `true` if found, `false` if not.
+pub(crate) async fn has_dot_commitbook_with_client(
+    client: &reqwest::Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+) -> Result<bool> {
     let url = format!("{GITHUB_API}/repos/{owner}/{repo}/contents/.CommitBook");
     let resp = client
         .get(&url)

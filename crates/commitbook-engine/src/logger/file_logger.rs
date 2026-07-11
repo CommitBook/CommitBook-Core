@@ -87,7 +87,7 @@ impl FileLogger {
     }
 
     /// Remove log files older than max_log_days, using date-based filename parsing
-    /// instead of mtime (more reliable — immune to `touch` and file sync tools).
+    /// instead of mtime (more reliable, immune to `touch` and file sync tools).
     pub fn cleanup_old_logs(&self) -> Result<()> {
         if self.max_log_days == 0 {
             return Ok(());

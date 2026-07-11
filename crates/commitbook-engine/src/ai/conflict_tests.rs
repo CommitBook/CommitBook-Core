@@ -59,6 +59,14 @@ fn strip_outer_code_fence_preserves_nested_fences() {
 }
 
 #[test]
+fn strip_outer_code_fence_keeps_note_opening_with_fence_then_prose() {
+    // A note that opens with a fenced code block and then continues with prose
+    // must not be truncated at the inner closing fence.
+    let raw = "```python\ncode\n```\nprose";
+    assert_eq!(strip_outer_code_fence(raw), "```python\ncode\n```\nprose");
+}
+
+#[test]
 fn build_resolve_prompt_includes_path_and_content() {
     let path = std::path::PathBuf::from("notes/intro.md");
     let content = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> origin/main\n";

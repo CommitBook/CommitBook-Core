@@ -39,7 +39,7 @@ pub struct CommitBookSummary {
     pub conflict_count: u32,
 }
 
-/// Result of `discover_commitbooks` — one entry per remote repo.
+/// Result of `discover_commitbooks`, one entry per remote repo.
 #[derive(Debug, Clone)]
 pub struct DiscoveredCommitBook {
     pub owner: String,

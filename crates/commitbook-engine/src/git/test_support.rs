@@ -48,6 +48,8 @@ pub fn setup_repo_with_base(files: &[(&str, &str)]) -> BaseRepoFixture {
             let mut config = repo.config().unwrap();
             config.set_str("user.name", "Test User").unwrap();
             config.set_str("user.email", "test@example.com").unwrap();
+            // Never require a signing key in tests, regardless of global config.
+            config.set_bool("commit.gpgsign", false).unwrap();
         }
 
         let mut index = repo.index().unwrap();
@@ -102,6 +104,8 @@ pub fn setup_repo_with_bare_remote() -> RepoFixture {
             let mut config = repo.config().unwrap();
             config.set_str("user.name", "Test User").unwrap();
             config.set_str("user.email", "test@example.com").unwrap();
+            // Never require a signing key in tests, regardless of global config.
+            config.set_bool("commit.gpgsign", false).unwrap();
         }
 
         std::fs::write(repo_dir.path().join("init.md"), "# init\n").unwrap();
@@ -175,6 +179,10 @@ pub fn clone_second_workdir(remote_dir: &Path, branch: &str) -> TempDir {
         .output();
     let _ = Command::new("git")
         .args(["config", "user.email", "second@example.com"])
+        .current_dir(tmp.path())
+        .output();
+    let _ = Command::new("git")
+        .args(["config", "commit.gpgsign", "false"])
         .current_dir(tmp.path())
         .output();
     tmp

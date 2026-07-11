@@ -19,6 +19,12 @@ pub fn run_init() -> Result<()> {
     // so a repo that gained extra remotes after init doesn't fail here. The
     // remote persisted in config.toml stays authoritative for sync.
     if LocalConfig::exists(&repo_root) {
+        // Re-run the idempotent scaffolding so a fresh clone (config.toml is
+        // committed, but local/ is gitignored and therefore absent) gets its
+        // local/ directory, logs, permissions, and .gitignore entry recreated.
+        // Without this, scheduled sync on a clone fails for want of local/.
+        let config = LocalConfig::load(&repo_root)?;
+        state::initialize(&repo_root, &config.git.remote)?;
         println!(
             "{} CommitBook is already initialized at {}",
             "OK".green().bold(),

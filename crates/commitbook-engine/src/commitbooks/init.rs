@@ -8,7 +8,7 @@ use crate::config::{CommitBookSettings, LocalConfig};
 ///
 /// Writes `.CommitBook/config.toml` with the `[commitbook]` section
 /// populated, ensures `.CommitBook/local/` exists, and adds it to the
-/// repo's `.gitignore`. Does NOT commit — caller decides commit timing
+/// repo's `.gitignore`. Does NOT commit, caller decides commit timing
 /// (typically: stage + commit + push immediately after, so the
 /// `.CommitBook/` marker shows up on the remote).
 ///

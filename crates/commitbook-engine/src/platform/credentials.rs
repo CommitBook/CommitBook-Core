@@ -16,7 +16,7 @@ pub trait CredentialProvider: Send + Sync {
 }
 
 /// Credential provider that delegates to git's standard credential-helper
-/// stack. Preserves existing desktop UX — tokens stored in OSXKeychain /
+/// stack. Preserves existing desktop UX, tokens stored in OSXKeychain /
 /// Windows Credential Manager / `.git-credentials` all work unchanged.
 pub struct SystemCredentials;
 

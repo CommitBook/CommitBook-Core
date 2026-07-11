@@ -1,6 +1,6 @@
-//! Root client object exposed across the FFI boundary. All 12 engine
-//! methods are stubbed at present — implementations land per-method
-//! in subsequent commits.
+//! Root client object exposed across the FFI boundary. Implements the 12
+//! engine methods (auth, discovery, CommitBook lifecycle, documents, sync,
+//! and conflicts) on top of `commitbook-engine`.
 
 use std::path::PathBuf;
 
@@ -32,65 +32,91 @@ impl CommitBookEngineClient {
     }
 
     pub async fn validate_pat(&self, token: String) -> Result<Vec<RepoInfo>> {
-        crate::auth::fetch_user_repos(&token).await
+        // Run on the shared runtime: the UDL poller has no ambient tokio
+        // runtime, so reqwest would otherwise panic. Awaiting the JoinHandle
+        // needs no runtime of its own.
+        crate::runtime::runtime()
+            .spawn(async move { crate::auth::fetch_user_repos(&token).await })
+            .await
+            .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
     }
 
     pub async fn discover_commitbooks(
         &self,
         token: String,
     ) -> Result<Vec<DiscoveredCommitBook>> {
-        let repos = crate::auth::fetch_user_repos(&token).await?;
         let workspaces_root = self.workspaces_root.clone();
+        // Run the whole discovery (reqwest + tokio::spawn + Semaphore) on the
+        // shared runtime; the UDL poller provides none of its own.
+        crate::runtime::runtime()
+            .spawn(async move {
+                let repos = crate::auth::fetch_user_repos(&token).await?;
 
-        // Probe each repo's root for .CommitBook/, with bounded concurrency
-        // to avoid hammering GitHub or hitting rate limits.
-        const CONCURRENCY: usize = 8;
-        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(CONCURRENCY));
-        let token = std::sync::Arc::new(token);
+                // Probe each repo's root for .CommitBook/, with bounded
+                // concurrency to avoid hammering GitHub or hitting rate limits.
+                // One shared client keeps a single connection pool across probes.
+                const CONCURRENCY: usize = 8;
+                let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(CONCURRENCY));
+                let token = std::sync::Arc::new(token);
+                let client = std::sync::Arc::new(crate::auth::github_client()?);
 
-        let mut tasks = Vec::with_capacity(repos.len());
-        for repo in repos {
-            let semaphore = semaphore.clone();
-            let token = token.clone();
-            let workspaces_root = workspaces_root.clone();
-            tasks.push(tokio::spawn(async move {
-                let _permit = semaphore.acquire_owned().await.ok();
-                let has_cb = crate::auth::has_dot_commitbook(&token, &repo.owner, &repo.name)
-                    .await
-                    .unwrap_or(false);
-                let slug = commitbook_engine::commitbooks::slug_for(&repo.owner, &repo.name);
-                let already_local = workspaces_root.join(&slug).join(".CommitBook").join("config.toml").exists();
-                DiscoveredCommitBook {
-                    owner: repo.owner,
-                    repo: repo.name,
-                    default_branch: repo.default_branch,
-                    is_private: repo.is_private,
-                    has_dot_commitbook: has_cb,
-                    already_local,
+                let mut tasks = Vec::with_capacity(repos.len());
+                for repo in repos {
+                    let semaphore = semaphore.clone();
+                    let token = token.clone();
+                    let client = client.clone();
+                    let workspaces_root = workspaces_root.clone();
+                    tasks.push(tokio::spawn(async move {
+                        let _permit = semaphore.acquire_owned().await.ok();
+                        let has_cb = crate::auth::has_dot_commitbook_with_client(
+                            &client,
+                            &token,
+                            &repo.owner,
+                            &repo.name,
+                        )
+                        .await
+                        .unwrap_or(false);
+                        let slug =
+                            commitbook_engine::commitbooks::slug_for(&repo.owner, &repo.name);
+                        let already_local = workspaces_root
+                            .join(&slug)
+                            .join(".CommitBook")
+                            .join("config.toml")
+                            .exists();
+                        DiscoveredCommitBook {
+                            owner: repo.owner,
+                            repo: repo.name,
+                            default_branch: repo.default_branch,
+                            is_private: repo.is_private,
+                            has_dot_commitbook: has_cb,
+                            already_local,
+                        }
+                    }));
                 }
-            }));
-        }
 
-        let mut out = Vec::with_capacity(tasks.len());
-        for t in tasks {
-            // Surface a panicked probe instead of silently truncating the list.
-            match t.await {
-                Ok(r) => out.push(r),
-                Err(e) => {
-                    return Err(CommitBookError::transport(format!(
-                        "Discovery task failed: {e}"
-                    )))
+                let mut out = Vec::with_capacity(tasks.len());
+                for t in tasks {
+                    // Surface a panicked probe instead of silently truncating.
+                    match t.await {
+                        Ok(r) => out.push(r),
+                        Err(e) => {
+                            return Err(CommitBookError::transport(format!(
+                                "Discovery task failed: {e}"
+                            )))
+                        }
+                    }
                 }
-            }
-        }
-        // Sort: existing CommitBooks first (has_dot_commitbook=true), then the rest.
-        out.sort_by(|a, b| {
-            b.has_dot_commitbook
-                .cmp(&a.has_dot_commitbook)
-                .then_with(|| a.owner.cmp(&b.owner))
-                .then_with(|| a.repo.cmp(&b.repo))
-        });
-        Ok(out)
+                // Existing CommitBooks first (has_dot_commitbook=true), then the rest.
+                out.sort_by(|a, b| {
+                    b.has_dot_commitbook
+                        .cmp(&a.has_dot_commitbook)
+                        .then_with(|| a.owner.cmp(&b.owner))
+                        .then_with(|| a.repo.cmp(&b.repo))
+                });
+                Ok(out)
+            })
+            .await
+            .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
     }
 
     pub async fn init_commitbook(
@@ -99,14 +125,18 @@ impl CommitBookEngineClient {
         token: String,
     ) -> Result<CommitBookSummary> {
         let workspaces_root = self.workspaces_root.clone();
-        // Clone + init operations are blocking libgit2 calls — push them
-        // off the async runtime.
-        let summary = tokio::task::spawn_blocking(move || -> Result<CommitBookSummary> {
-            crate::commitbooks_ops::init_local_commitbook(&workspaces_root, &input, &token)
-        })
-        .await
-        .map_err(|e| CommitBookError::database(format!("Task join: {e}")))??;
-        Ok(summary)
+        // Clone + init are blocking libgit2 calls; run them via spawn_blocking
+        // on the shared runtime (the UDL poller has no ambient runtime).
+        crate::runtime::runtime()
+            .spawn(async move {
+                tokio::task::spawn_blocking(move || -> Result<CommitBookSummary> {
+                    crate::commitbooks_ops::init_local_commitbook(&workspaces_root, &input, &token)
+                })
+                .await
+                .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
+            })
+            .await
+            .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
     }
 
     pub fn list_commitbooks(&self) -> Result<Vec<CommitBookSummary>> {
@@ -203,12 +233,23 @@ impl CommitBookEngineClient {
         token: String,
     ) -> Result<SyncResultSummary> {
         let workspaces_root = self.workspaces_root.clone();
-        let summary = tokio::task::spawn_blocking(move || -> Result<SyncResultSummary> {
-            crate::sync_ops::sync_one_commitbook(&workspaces_root, &commitbook_id, mode, &token)
-        })
-        .await
-        .map_err(|e| CommitBookError::database(format!("Task join: {e}")))??;
-        Ok(summary)
+        // sync_one_commitbook is blocking libgit2 work; run it via
+        // spawn_blocking on the shared runtime.
+        crate::runtime::runtime()
+            .spawn(async move {
+                tokio::task::spawn_blocking(move || -> Result<SyncResultSummary> {
+                    crate::sync_ops::sync_one_commitbook(
+                        &workspaces_root,
+                        &commitbook_id,
+                        mode,
+                        &token,
+                    )
+                })
+                .await
+                .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
+            })
+            .await
+            .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
     }
 
     pub fn list_conflicts(&self, commitbook_id: String) -> Result<Vec<ConflictSummary>> {

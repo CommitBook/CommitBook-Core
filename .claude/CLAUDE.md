@@ -21,10 +21,10 @@ crates/
   commitbook-cli/      # CLI binary (commitbook)
   commitbook-tui/      # Terminal dashboard (commitbook-tui)
   commitbook-web/      # Web dashboard (commitbook-web)
-  commitbook-mobile/   # Mobile FFI scaffolding (placeholder)
+  commitbook-client/   # Mobile FFI SDK (UniFFI)
 ```
 
-All UI crates depend on `commitbook-engine`. No database — all state is file-based in `.CommitBook/`.
+All UI crates depend on `commitbook-engine`. No database: all state is file-based in `.CommitBook/`.
 
 ## Architecture
 
@@ -32,28 +32,27 @@ All UI crates depend on `commitbook-engine`. No database — all state is file-b
 - **No global config.** Each repo is self-contained. No `~/.commitbook/`.
 - **Explicit init.** `commitbook init` is a separate command. Other commands hard-fail with "CommitBook is not initialized" if `.CommitBook/` is missing.
 - **Exactly one remote required.** `init` blocks if the repo has 0 or >1 remotes; the remote's name is persisted in `config.git.remote` (need not be `origin`).
-- **Thin git wrapper.** Sync is `git pull --rebase --autostash` → optional commit → `git push`, retrying once on a non-fast-forward push race. Conflicts surface only at the stash-pop step and are resolved by the configured AI CLI (or left as `<<<<<<<` markers in `manual` mode).
+- **libgit2 merge-based sync.** Sync commits dirty markdown first, then fetches, runs an in-process libgit2 3-way merge (fast-forward, true merge, or surfaced conflicts), then pushes, retrying once on a non-fast-forward push race. Same single code path on desktop and mobile. Conflicts surface at the merge step and are resolved by the configured AI CLI (or left as `<<<<<<<` markers in `manual` mode).
 - `.CommitBook/` folder always uses capital C and B.
 
 ### Key Modules (commitbook-engine)
 
 | Module | Purpose |
 |---|---|
-| `sync/` | `sync_repository` orchestrator: pull-rebase-autostash → commit → push |
+| `sync/` | `sync_repository` orchestrator: commit dirty markdown → fetch → libgit2 3-way merge → push |
 | `state/` | File-based state: `SyncState` (`last_sync_at`, `last_error`), `AuthConfig` |
-| `config/` | `LocalConfig` reads/writes `.CommitBook/config.toml` (incl. `[conflict]`, `[commit]`, and `[sync]`) |
+| `config/` | `LocalConfig` reads/writes `.CommitBook/config.toml` (incl. `[conflict]` and `[commit]`) |
 | `ai/` | Commit-message providers + conflict resolvers: Claude, Codex, Copilot, Gemini, Cursor, fallback |
-| `git/` | Git operations via git2 + shells to `git` CLI for pull/rebase/merge |
+| `git/` | Git operations via git2 (libgit2): fetch, merge, commit, push |
 | `cron/` | Scheduler: launchd (macOS), crontab (Linux) |
 | `logger/` | File-backed JSON-lines logger under `.CommitBook/local/logs/` |
 | `platform/` | `CredentialProvider`, secret store, logger trait |
-| `ffi/` | UDL for mobile bindings (placeholder) |
 
 ## CLI Commands
 
 ```
 commitbook init        # Initialize .CommitBook/ (required before any other command)
-commitbook sync        # Pull-rebase-autostash + (optional) commit + push
+commitbook sync        # Commit dirty markdown + libgit2 merge + push
 commitbook start       # Install scheduler
 commitbook stop        # Stop scheduler
 commitbook status      # Show state
@@ -66,14 +65,14 @@ commitbook login       # Store auth token
 ## Conflict resolution
 
 `.CommitBook/config.toml` `[conflict]` section selects the AI CLI invoked when
-`git pull --rebase --autostash` leaves conflict markers:
+the libgit2 3-way merge leaves conflict markers:
 
 ```toml
 [conflict]
 resolver = "manual"   # manual | claude | codex | copilot | gemini | cursor
 ```
 
-`manual` (the default) leaves the markers in place; the user resolves with `git status` and re-runs `commitbook sync`. Any other value spawns the corresponding CLI to rewrite each conflicted file; the orchestrator stages the resolved files and finishes the rebase/stash-pop.
+`manual` (the default) leaves the markers in place; the user resolves with `git status` and re-runs `commitbook sync`. Any other value spawns the corresponding CLI to rewrite each conflicted file; the orchestrator stages the resolved files and finishes the merge commit.
 
 ## Commit messages
 
@@ -115,7 +114,7 @@ selection lives in `commit_provider_keys` (`commitbook-cli/src/commands/sync_cmd
 ```
 
 Path helpers in code:
-- `LocalConfig::local_dir(repo_path)` — returns `.CommitBook/local/`
-- `LocalConfig::logs_dir(repo_path)` — returns `.CommitBook/local/logs/`
-- `LocalConfig::lock_path(repo_path)` — returns `.CommitBook/local/.lock`
+- `LocalConfig::local_dir(repo_path)`: returns `.CommitBook/local/`
+- `LocalConfig::logs_dir(repo_path)`: returns `.CommitBook/local/logs/`
+- `LocalConfig::lock_path(repo_path)`: returns `.CommitBook/local/.lock`
 - `AuthConfig` and `SyncState` take `commitbook_dir` (`.CommitBook/`) and internally join `local/` before their filename

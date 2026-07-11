@@ -31,7 +31,7 @@ pub fn plist_path(repo_path: &Path) -> PathBuf {
 /// captured PATH is narrow instead of inheriting the full shell PATH
 /// (which can reach into TCC-protected roots like ~/Downloads and cause
 /// macOS to prompt for folder access on every scheduled run).
-const REQUIRED_TOOLS: &[&str] = &["git", "claude", "codex", "gh"];
+const REQUIRED_TOOLS: &[&str] = &["git", "claude", "codex", "gh", "gemini", "cursor-agent"];
 
 /// Baseline directories always included so scheduled runs keep working
 /// if a tool is installed into a standard location after the scheduler

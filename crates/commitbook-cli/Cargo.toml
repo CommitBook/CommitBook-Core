@@ -1,6 +1,6 @@
 [package]
 name = "commitbook-cli"
-description = "CLI for CommitBook — automated git commits for markdown notebooks"
+description = "CLI for CommitBook, automated git commits for markdown notebooks"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

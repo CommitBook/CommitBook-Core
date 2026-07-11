@@ -641,3 +641,71 @@ fn test_merge_abort_resets_conflicted_state() {
         "line A LOCAL\n"
     );
 }
+
+#[test]
+fn test_fast_forward_refuses_to_overwrite_dirty_tracked_file() {
+    let fx = setup_repo_with_bare_remote();
+
+    // Commit + push a non-markdown tracked file so it exists in history.
+    fs::write(fx.repo_dir.path().join("data.txt"), "base\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add data").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+
+    // Remote advances by modifying that same file: a pure fast-forward for us.
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "data.txt", "remote change\n");
+
+    // Locally dirty the same tracked file (uncommitted). The scheduler only
+    // commits dirty markdown, so a dirty .txt reaches the fast-forward checkout.
+    fs::write(
+        fx.repo_dir.path().join("data.txt"),
+        "uncommitted local change\n",
+    )
+    .unwrap();
+
+    // The fast-forward must refuse rather than silently discard the local edit.
+    let result = fx.repo.merge_from_remote("origin", &fx.branch);
+    assert!(
+        result.is_err(),
+        "fast-forward must refuse to overwrite a dirty tracked file, got {result:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("data.txt")).unwrap(),
+        "uncommitted local change\n",
+        "the local edit must be preserved"
+    );
+}
+
+#[test]
+fn test_last_commit_touching_skips_merge_equal_to_parent() {
+    let fx = setup_repo_with_bare_remote();
+
+    // Commit + push f.md = v1.
+    fs::write(fx.repo_dir.path().join("f.md"), "v1\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add f v1").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+
+    // Remote advances by touching a different file; f.md stays v1 there.
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "other.md", "# other\n");
+
+    // Locally edit f.md -> v2 and commit; capture that SHA.
+    fs::write(fx.repo_dir.path().join("f.md"), "v2\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("edit f to v2").unwrap();
+    let edit_sha = fx.repo.rev_parse("HEAD").unwrap();
+
+    // Diverged merge creates a merge commit whose f.md (v2) equals the local
+    // parent (base v1, ours v2, theirs v1 merges cleanly to v2).
+    let outcome = fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
+    assert_eq!(outcome, MergeOutcome::Clean);
+    let merge_sha = fx.repo.rev_parse("HEAD").unwrap();
+    assert_ne!(merge_sha, edit_sha, "expected a merge commit");
+
+    // The edit, not the merge commit, is the last commit that touched f.md.
+    // (This is the regression guard for the `.all` fix; `.any` would return
+    // the merge commit here.)
+    assert_eq!(fx.repo.last_commit_touching("f.md").unwrap(), Some(edit_sha));
+}

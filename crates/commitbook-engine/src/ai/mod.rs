@@ -35,7 +35,7 @@ pub trait CommitMessageProvider: Send + Sync {
     async fn generate(&self, summary: &ChangesSummary, repo_path: &Path) -> Result<String>;
 }
 
-/// Ordered chain of providers — tries each in sequence, falls back to timestamp.
+/// Ordered chain of providers, tries each in sequence, falls back to timestamp.
 pub struct ProviderChain {
     providers: Vec<Box<dyn CommitMessageProvider>>,
 }
@@ -80,7 +80,7 @@ impl ProviderChain {
             }
         }
 
-        // Ultimate fallback — always succeeds
+        // Ultimate fallback, always succeeds
         let fb = fallback::FallbackProvider;
         let msg = fb.generate(summary, repo_path).await.unwrap();
         (msg, fb.name().to_string())
@@ -169,6 +169,62 @@ pub(crate) fn clean_message(raw: &str) -> String {
     }
 
     msg
+}
+
+/// Wait for a child process with a timeout, draining stdout and stderr on
+/// separate threads so a child that fills the pipe buffer cannot deadlock the
+/// parent (the previous per-provider version read the pipes only after the
+/// child exited, which hung on output larger than the ~64 KB pipe buffer).
+///
+/// All resolver/provider callers run inside `spawn_blocking`, so the blocking
+/// reader threads are fine.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) fn wait_with_timeout(
+    mut child: std::process::Child,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output> {
+    use std::io::Read;
+
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let out_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(s) = stdout.as_mut() {
+            let _ = s.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let err_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(s) = stderr.as_mut() {
+            let _ = s.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    anyhow::bail!("Process timed out after {:?}", timeout);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => anyhow::bail!("Error waiting for process: {}", e),
+        }
+    };
+
+    let stdout = out_handle.join().unwrap_or_default();
+    let stderr = err_handle.join().unwrap_or_default();
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 #[cfg(test)]

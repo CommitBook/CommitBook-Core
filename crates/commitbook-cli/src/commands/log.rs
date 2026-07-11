@@ -16,6 +16,10 @@ pub fn run(
 
     if !logs_dir.exists() {
         println!("{}", "No log entries found.".dimmed());
+        // With -f, wait for the first entry rather than exiting immediately.
+        if tail {
+            follow_today(repo_root, json)?;
+        }
         return Ok(());
     }
 
@@ -33,6 +37,9 @@ pub fn run(
 
     if log_files.is_empty() {
         println!("{}", "No log entries found.".dimmed());
+        if tail {
+            follow_today(repo_root, json)?;
+        }
         return Ok(());
     }
 
@@ -84,7 +91,7 @@ fn follow_today(repo_root: &Path, json: bool) -> Result<()> {
     let logs_dir = LocalConfig::logs_dir(repo_root);
     let mut current_path = logs_dir.join(format!(
         "{}.log",
-        chrono::Utc::now().format("%Y-%m-%d")
+        commitbook_engine::utils::datetime::today_date()
     ));
     let mut pos = std::fs::metadata(&current_path)
         .map(|m| m.len())
@@ -93,10 +100,10 @@ fn follow_today(repo_root: &Path, json: bool) -> Result<()> {
     loop {
         let today_path = logs_dir.join(format!(
             "{}.log",
-            chrono::Utc::now().format("%Y-%m-%d")
+            commitbook_engine::utils::datetime::today_date()
         ));
         if today_path != current_path {
-            // Day rolled over — start reading the new file from the start.
+            // Day rolled over, start reading the new file from the start.
             current_path = today_path;
             pos = 0;
         }
@@ -120,7 +127,7 @@ fn follow_today(repo_root: &Path, json: bool) -> Result<()> {
             }
             pos = len;
         } else if len < pos {
-            // File rotated/truncated — restart.
+            // File rotated/truncated, restart.
             pos = 0;
         }
 
@@ -148,7 +155,7 @@ fn format_log_line(line: &str) -> String {
             format!("{} {} {}", ts, level_colored, msg)
         }
     } else {
-        // Not JSON — print as-is.
+        // Not JSON, print as-is.
         line.to_string()
     }
 }

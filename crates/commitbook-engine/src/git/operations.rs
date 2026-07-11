@@ -40,7 +40,7 @@ impl StatusSummary {
 ///
 /// `Clean` covers up-to-date, fast-forward, and a successful 3-way merge with
 /// no conflicts (in which case a merge commit is auto-created). `Conflicts`
-/// signals unmerged paths in the index — the caller resolves them, stages,
+/// signals unmerged paths in the index, the caller resolves them, stages,
 /// and calls `finalize_merge_commit` to complete the merge.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MergeOutcome {
@@ -218,7 +218,7 @@ impl GitRepo {
     pub fn has_real_staged_changes(&self) -> Result<bool> {
         let head_tree = match self.repo.head() {
             Ok(head) => Some(head.peel_to_tree().context("Failed to peel HEAD to tree")?),
-            Err(_) => None, // No HEAD yet — any staged content counts as change.
+            Err(_) => None, // No HEAD yet, any staged content counts as change.
         };
         let diff = self
             .repo
@@ -266,7 +266,7 @@ impl GitRepo {
         tree: &git2::Tree,
         parents: &[&git2::Commit],
     ) -> Result<git2::Oid> {
-        // Unsigned fast path — preserves prior behavior exactly.
+        // Unsigned fast path, preserves prior behavior exactly.
         let signing_enabled = self
             .repo
             .config()
@@ -300,7 +300,7 @@ impl GitRepo {
             None => {
                 // Signing was enabled but produced no signature (mobile
                 // platform, or signing module declined). Fall through to
-                // a plain commit — better than failing the sync.
+                // a plain commit, better than failing the sync.
                 return self
                     .repo
                     .commit(Some("HEAD"), sig, sig, message, tree, parents)
@@ -354,7 +354,18 @@ impl GitRepo {
             .with_context(|| format!("Remote '{}' not found", remote_name))?;
 
         let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(|url, username_from_url, allowed| {
+        // Bound the callback: libgit2 re-invokes it on every rejection, so a
+        // stateless provider that keeps returning bad credentials would loop
+        // forever. Fail after 3 attempts instead.
+        let attempts = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        callbacks.credentials(move |url, username_from_url, allowed| {
+            let n = attempts.get();
+            if n >= 3 {
+                return Err(git2::Error::from_str(
+                    "authentication failed: credentials rejected after 3 attempts",
+                ));
+            }
+            attempts.set(n + 1);
             creds
                 .provide(url, username_from_url, allowed)
                 .map_err(|e| git2::Error::from_str(&format!("credential provider failed: {e}")))
@@ -421,7 +432,7 @@ impl GitRepo {
     ///
     /// Produces a `git diff --stat HEAD` style summary vs HEAD (or vs an empty
     /// tree for the initial commit). Each changed file appears exactly once
-    /// with its total delta — regardless of staging state. Covers working-tree
+    /// with its total delta, regardless of staging state. Covers working-tree
     /// and index in a single diff so the AI never sees a file twice.
     pub fn diff_summary(&self) -> Result<String> {
         let head_tree = self
@@ -471,7 +482,18 @@ impl GitRepo {
             .with_context(|| format!("Remote '{}' not found", remote))?;
 
         let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(|url, username_from_url, allowed| {
+        // Bound the callback: libgit2 re-invokes it on every rejection, so a
+        // stateless provider that keeps returning bad credentials would loop
+        // forever. Fail after 3 attempts instead.
+        let attempts = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        callbacks.credentials(move |url, username_from_url, allowed| {
+            let n = attempts.get();
+            if n >= 3 {
+                return Err(git2::Error::from_str(
+                    "authentication failed: credentials rejected after 3 attempts",
+                ));
+            }
+            attempts.set(n + 1);
             creds
                 .provide(url, username_from_url, allowed)
                 .map_err(|e| git2::Error::from_str(&format!("credential provider failed: {e}")))
@@ -483,6 +505,75 @@ impl GitRepo {
         remote_obj
             .fetch(&[branch], Some(&mut opts), None)
             .with_context(|| format!("Failed to fetch {}/{}", remote, branch))
+    }
+
+    /// Paths that a fast-forward to `target_oid` would need to update and that
+    /// also carry uncommitted local modifications. A non-empty result means the
+    /// fast-forward would clobber local edits, so it must be refused rather than
+    /// silently discarding them (libgit2's safe checkout would otherwise skip
+    /// them without surfacing an error).
+    fn ff_dirty_conflicts(&self, target_oid: git2::Oid) -> Result<Vec<String>> {
+        let head_tree = self
+            .repo
+            .head()
+            .ok()
+            .and_then(|h| h.peel_to_tree().ok());
+        let target_tree = self
+            .repo
+            .find_commit(target_oid)
+            .context("Failed to load fast-forward target commit")?
+            .tree()
+            .context("Failed to load fast-forward target tree")?;
+
+        // Files that differ between HEAD and the fast-forward target.
+        let tree_diff = self
+            .repo
+            .diff_tree_to_tree(head_tree.as_ref(), Some(&target_tree), None)
+            .context("Failed to diff HEAD against fast-forward target")?;
+        let mut changed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        tree_diff
+            .foreach(
+                &mut |delta, _| {
+                    if let Some(p) = delta.new_file().path().or_else(|| delta.old_file().path()) {
+                        changed.insert(p.to_string_lossy().into_owned());
+                    }
+                    true
+                },
+                None,
+                None,
+                None,
+            )
+            .context("Failed to walk fast-forward diff")?;
+        if changed.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Of those, which have uncommitted working-tree or staged edits.
+        let mut opts = git2::StatusOptions::new();
+        opts.include_untracked(false).include_ignored(false);
+        let statuses = self
+            .repo
+            .statuses(Some(&mut opts))
+            .context("Failed to read working-tree status")?;
+        let dirty = git2::Status::WT_MODIFIED
+            | git2::Status::WT_DELETED
+            | git2::Status::WT_TYPECHANGE
+            | git2::Status::INDEX_MODIFIED
+            | git2::Status::INDEX_DELETED
+            | git2::Status::INDEX_TYPECHANGE;
+        let mut conflicts = Vec::new();
+        for entry in statuses.iter() {
+            if entry.status().intersects(dirty) {
+                if let Some(p) = entry.path() {
+                    if changed.contains(p) {
+                        conflicts.push(p.to_string());
+                    }
+                }
+            }
+        }
+        conflicts.sort();
+        conflicts.dedup();
+        Ok(conflicts)
     }
 
     /// Attempt a fast-forward-only merge of the given ref into HEAD.
@@ -513,6 +604,17 @@ impl GitRepo {
             return Ok(false);
         }
 
+        // Refuse to fast-forward if it would overwrite uncommitted local edits
+        // to a tracked file, rather than silently discarding them.
+        let clobbered = self.ff_dirty_conflicts(target_oid)?;
+        if !clobbered.is_empty() {
+            bail!(
+                "Fast-forward blocked by uncommitted local changes to: {}. \
+                 Commit or stash them and re-run sync.",
+                clobbered.join(", ")
+            );
+        }
+
         let head_name = head_ref.name().context("HEAD is detached")?.to_string();
         drop(head_ref);
 
@@ -521,7 +623,11 @@ impl GitRepo {
             .with_context(|| format!("Failed to update {}", head_name))?;
         self.repo.set_head(&head_name)?;
         self.repo
-            .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .checkout_head(Some(
+                git2::build::CheckoutBuilder::new()
+                    .safe()
+                    .recreate_missing(true),
+            ))
             .context("Failed to check out fast-forwarded HEAD")?;
 
         Ok(true)
@@ -620,8 +726,12 @@ impl GitRepo {
         let target = Path::new(path);
         let mut revwalk = self.repo.revwalk().context("Failed to create revwalk")?;
         revwalk.push_head().context("Failed to push HEAD to revwalk")?;
+        // Topological ordering guarantees children are visited before their
+        // parents, so the first matching commit is the most recent one to touch
+        // the path. TIME alone is unstable when commits share a timestamp and
+        // can otherwise yield an ancestor before its descendant.
         revwalk
-            .set_sorting(git2::Sort::TIME)
+            .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
             .context("Failed to set revwalk sorting")?;
 
         for oid in revwalk {
@@ -634,10 +744,12 @@ impl GitRepo {
 
             // A commit "touched" the path if the blob differs from every
             // parent (including the root-commit case, where it's simply new).
+            // Using `all` matches git's history simplification: a merge whose
+            // result equals either parent's blob is not an editing commit.
             let touched = if commit.parent_count() == 0 {
                 blob.is_some()
             } else {
-                commit.parents().any(|parent| {
+                commit.parents().all(|parent| {
                     let parent_blob = parent
                         .tree()
                         .ok()
@@ -719,10 +831,20 @@ impl GitRepo {
         }
 
         if analysis.is_fast_forward() {
-            // Update HEAD ref + checkout the new tree. Use `force` because
-            // by the time we get here the scheduler has already committed
-            // any dirty markdown — there's nothing to lose. `safe` mode
-            // skips creating files that aren't tracked locally.
+            // Refuse to fast-forward if it would overwrite uncommitted local
+            // edits to a tracked file, rather than silently discarding them.
+            let clobbered = self.ff_dirty_conflicts(upstream_oid)?;
+            if !clobbered.is_empty() {
+                bail!(
+                    "Fast-forward blocked by uncommitted local changes to: {}. \
+                     Commit or stash them and re-run sync.",
+                    clobbered.join(", ")
+                );
+            }
+
+            // Update HEAD ref + checkout the new tree. `safe` mode still avoids
+            // clobbering unrelated local modifications; `recreate_missing`
+            // creates files the fast-forward adds.
             let head_ref = self.repo.head().context("Failed to get HEAD")?;
             let head_name = head_ref
                 .name()
@@ -734,7 +856,11 @@ impl GitRepo {
                 .with_context(|| format!("Failed to update {}", head_name))?;
             self.repo.set_head(&head_name)?;
             self.repo
-                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+                .checkout_head(Some(
+                    git2::build::CheckoutBuilder::new()
+                        .safe()
+                        .recreate_missing(true),
+                ))
                 .context("Failed to check out fast-forwarded HEAD")?;
             return Ok(MergeOutcome::Clean);
         }
@@ -750,7 +876,7 @@ impl GitRepo {
                 return Ok(MergeOutcome::Conflicts(conflicted));
             }
 
-            // Clean merge — write tree and create merge commit.
+            // Clean merge, write tree and create merge commit.
             self.create_merge_commit("Merge remote-tracking branch via CommitBook")?;
             return Ok(MergeOutcome::Clean);
         }
@@ -776,6 +902,13 @@ impl GitRepo {
         let msg = message.unwrap_or("Merge resolved via CommitBook");
         self.create_merge_commit(msg)?;
         Ok(())
+    }
+
+    /// True if a merge is in progress (MERGE_HEAD present). A previous
+    /// manual-mode or failed-resolver cycle can leave the repo in this state;
+    /// the scheduler recovers from it before touching the working tree.
+    pub fn merge_in_progress(&self) -> bool {
+        self.repo.state() == git2::RepositoryState::Merge
     }
 
     /// Abort an in-flight merge: clear MERGE_HEAD and reset working tree

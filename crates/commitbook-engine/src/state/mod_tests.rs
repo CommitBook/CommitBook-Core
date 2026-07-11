@@ -31,7 +31,7 @@ fn test_find_commitbook_dir_skips_commitbook_without_git() {
     let tmp = tempdir().unwrap();
     let repo = tmp.path();
     std::fs::create_dir_all(repo.join(".CommitBook")).unwrap();
-    // No .git — must not return this directory
+    // No .git, must not return this directory
 
     let err = find_commitbook_dir_from(repo).unwrap_err().to_string();
     assert!(err.contains("not initialized"));

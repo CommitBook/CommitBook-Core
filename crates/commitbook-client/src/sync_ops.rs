@@ -13,7 +13,7 @@ use commitbook_engine::sync::scheduler::sync_with_resolver;
 use crate::errors::{CommitBookError, Result};
 use crate::types::{SyncMode, SyncResultSummary};
 
-/// In-memory logger that swallows messages — apps can subscribe via
+/// In-memory logger that swallows messages, apps can subscribe via
 /// callback later if desired. For v1, sync results are returned as
 /// `SyncResultSummary` and per-line logs are not threaded through FFI.
 struct NullLogger;

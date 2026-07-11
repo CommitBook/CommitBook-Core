@@ -1,6 +1,6 @@
 [package]
 name = "commitbook-engine"
-description = "Shared engine for CommitBook — config, git, AI, scheduling, logging"
+description = "Shared engine for CommitBook, config, git, AI, scheduling, logging"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -26,10 +26,11 @@ tokio = { version = "1", features = ["full"] }
 toml = "0.8"
 
 # Desktop-only deps. iOS/Android builds skip these; their consumers
-# (cron/*, ai/{claude,copilot,codex,gemini,cursor}.rs) are cfg-gated off mobile.
+# (cron/*, ai/{claude,copilot,codex,gemini,cursor}.rs, git/signing.rs) are
+# cfg-gated off mobile.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 dirs = "5.0"
 which = "7"
-
-[dev-dependencies]
+# Used by git/signing.rs to materialize literal SSH signing keys, and by the
+# test fixtures. Desktop-only: mobile signing returns early without it.
 tempfile = "3"

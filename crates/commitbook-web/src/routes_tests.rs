@@ -255,7 +255,7 @@ async fn test_api_logs_filter_then_paginate() {
     }
     std::fs::write(&log_file, entries).unwrap();
 
-    // 3 ERROR entries total; request limit=2 — should get exactly 2
+    // 3 ERROR entries total; request limit=2, should get exactly 2
     let (_, body): (_, LogsResponse) = get_json(app, "/api/logs?level=ERROR&limit=2").await;
     assert_eq!(body.entries.len(), 2);
     assert!(body.entries.iter().all(|e| e.level == "ERROR"));

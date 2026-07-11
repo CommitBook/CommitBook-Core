@@ -37,7 +37,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
         all_ok = false;
     }
 
-    // 3. Remote — CommitBook requires exactly one remote. Also verify the
+    // 3. Remote, CommitBook requires exactly one remote. Also verify the
     //    name in config matches what's actually configured.
     print!("  Git remote... ");
     match commitbook_engine::git::remote::list_remote_names(repo_root) {
@@ -223,15 +223,15 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
                 Ok((ahead, behind)) => {
                     println!("{}", "DIVERGED".red().bold());
                     println!(
-                        "    {} ahead, {} behind — local and origin have different histories.",
-                        ahead, behind
+                        "    {} ahead, {} behind: local and {} have different histories.",
+                        ahead, behind, remote_name
                     );
                     println!(
                         "    If CommitBook has been pushing your content, local-only commits are redundant. Recovery:"
                     );
                     println!(
                         "    {}",
-                        "git fetch origin".dimmed()
+                        format!("git fetch {}", remote_name).dimmed()
                     );
                     println!(
                         "    {}",
@@ -263,8 +263,12 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
         println!("  {}", "Auto-repair:".bold().cyan());
         let repaired = run_fixes(cb_dir, repo_root);
         if repaired > 0 {
-            // Re-evaluate "all_ok" — the fix may have resolved earlier failures.
-            all_ok = true;
+            // Do not force `all_ok`: the exit status must keep reflecting the
+            // checks so `--fix` cannot mask a still-failing condition.
+            println!(
+                "  {}",
+                "Repairs applied. Re-run `commitbook doctor` to verify.".dimmed()
+            );
         }
     }
 
@@ -349,7 +353,7 @@ fn fix_stale_lock(repo_root: &Path) -> bool {
         return false;
     }
 
-    // Probe the lock — if anyone holds it, leave it alone.
+    // Probe the lock, if anyone holds it, leave it alone.
     use fs2::FileExt;
     let still_held = std::fs::OpenOptions::new()
         .read(true)
@@ -399,7 +403,7 @@ fn fix_plist_binary_path(repo_root: &Path) -> bool {
         return false;
     }
 
-    // Only reinstall if the scheduler is loaded — otherwise it's a no-op anyway.
+    // Only reinstall if the scheduler is loaded, otherwise it's a no-op anyway.
     if !cron::is_loaded(repo_root) {
         return false;
     }

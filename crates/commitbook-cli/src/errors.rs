@@ -34,7 +34,7 @@ pub fn humanize(e: &anyhow::Error) -> String {
             .to_string();
     }
     if joined.contains("no such file") || joined.contains("not found") {
-        // Surface the original message — it's usually specific enough already
+        // Surface the original message, it's usually specific enough already
         // (e.g. "Configured remote `upstream` not found").
         return chain
             .first()
@@ -51,46 +51,5 @@ pub fn humanize(e: &anyhow::Error) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use anyhow::anyhow;
-
-    #[test]
-    fn test_humanize_network() {
-        let e = anyhow!("Could not resolve host: github.com").context("git fetch failed");
-        let msg = humanize(&e);
-        assert!(msg.contains("network"), "unexpected: {msg}");
-    }
-
-    #[test]
-    fn test_humanize_non_ff() {
-        let e = anyhow!("non-fast-forward").context("git push failed");
-        let msg = humanize(&e);
-        assert!(msg.contains("Remote has diverged"), "unexpected: {msg}");
-    }
-
-    #[test]
-    fn test_humanize_auth() {
-        let e = anyhow!("authentication required");
-        let msg = humanize(&e);
-        assert!(msg.contains("Authentication"), "unexpected: {msg}");
-        assert!(msg.contains("Git credentials"), "unexpected: {msg}");
-        assert!(!msg.contains("commitbook login"), "unexpected: {msg}");
-    }
-
-    #[test]
-    fn test_humanize_not_initialized() {
-        let e = anyhow!("CommitBook is not initialized. Run `commitbook init` first.");
-        let msg = humanize(&e);
-        assert!(msg.contains("commitbook init"), "unexpected: {msg}");
-    }
-
-    #[test]
-    fn test_humanize_falls_back_to_top_context() {
-        let e = anyhow!("low-level libgit2 error 0x42").context("Could not push origin/main");
-        let msg = humanize(&e);
-        // Top context wins — the libgit2 internals don't appear.
-        assert!(msg.contains("Could not push"), "unexpected: {msg}");
-        assert!(!msg.contains("libgit2"), "leaked internals: {msg}");
-    }
-}
+#[path = "errors_tests.rs"]
+mod tests;

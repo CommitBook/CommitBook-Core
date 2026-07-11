@@ -2,4 +2,4 @@
 module_name = "CommitBookEngineFFI"
 
 [bindings.kotlin]
-package_name = "com.commitbook.engine.ffi"
+package_name = "com.zaai.commitbook.engine.ffi"

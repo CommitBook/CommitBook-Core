@@ -77,7 +77,7 @@ commitbook sync
      - Pull remote changes
      - Three-way section-aware merge (base vs local vs remote)
      - Push merged result
-     - Update .CommitBook/local/base/ and state.toml
+     - Update state.toml
        |
        v
   3. On failure:
@@ -128,7 +128,6 @@ CommitBook stores all state inside `.CommitBook/` in the repository root. No glo
   local/            # Local state and secrets (gitignored)
     auth.toml       # Optional token-backed credentials
     state.toml      # Sync state
-    base/           # Base versions for merge
     logs/           # Activity logs
     .lock           # Prevents concurrent runs
 ```
@@ -194,7 +193,7 @@ crates/
   commitbook-cli/     # Command-line interface
   commitbook-tui/     # Terminal dashboard (ratatui)
   commitbook-web/     # Web dashboard (axum + htmx)
-  commitbook-mobile/  # iOS/Android FFI bindings
+  commitbook-client/  # iOS/Android FFI SDK (UniFFI)
 ```
 
 All state is file-based (no database). The `.CommitBook/` directory is self-contained per repository.
@@ -203,15 +202,16 @@ All state is file-based (no database). The `.CommitBook/` directory is self-cont
 
 | Module | Purpose |
 |---|---|
+| `ai/` | Commit-message generation and conflict resolution (Copilot, Claude, Codex, Gemini, Cursor, fallback) |
+| `commitbooks/` | CommitBook init, registry, discovery, and preferences |
 | `config/` | `LocalConfig`: reads/writes `.CommitBook/config.toml` |
-| `state/` | `SyncState`, `AuthConfig`, base version management |
-| `sync/` | Sync planner, pipeline (pull/merge/push), scheduler |
-| `merge/` | Section-aware three-way merge engine |
-| `transport/` | `RemoteTransport` trait: local repo, SSH, PAT, GitHub App |
-| `ai/` | Commit message generation (Copilot, Claude, Codex, fallback) |
-| `git/` | Git operations via `git2` and CLI |
 | `cron/` | Scheduler (launchd on macOS, crontab on Linux) |
-| `markdown/` | Parser, reassembler, frontmatter handling |
+| `git/` | Git operations via `git2` (libgit2) |
+| `logger/` | File-backed JSON-lines activity logger |
+| `platform/` | `CredentialProvider`, secret store, logger trait |
+| `state/` | `SyncState`, `AuthConfig` |
+| `sync/` | Sync pipeline (commit, fetch, libgit2 3-way merge, push) and scheduler |
+| `utils/` | Shared helpers (date/time formatting) |
 
 ## Installation
 

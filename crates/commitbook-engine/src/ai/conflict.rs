@@ -1,4 +1,4 @@
-//! Conflict resolvers — invoke an AI CLI to rewrite a file containing git
+//! Conflict resolvers, invoke an AI CLI to rewrite a file containing git
 //! conflict markers and return resolved content.
 //!
 //! Mirrors the `CommitMessageProvider` pattern in `super::mod`: each
@@ -99,9 +99,14 @@ pub(crate) fn strip_outer_code_fence(s: &str) -> String {
         Some(idx) => &trimmed[idx + 1..],
         None => return trimmed.to_string(),
     };
+    // Only unwrap when the closing fence is the final content: otherwise a note
+    // that legitimately opens with a fenced block followed by prose (e.g.
+    // "```py\ncode\n```\nprose") would be truncated at the inner fence.
     let inner = match after_open.rfind("```") {
-        Some(idx) => after_open[..idx].trim_end_matches('\n'),
-        None => return trimmed.to_string(),
+        Some(idx) if after_open[idx + 3..].trim().is_empty() => {
+            after_open[..idx].trim_end_matches('\n')
+        }
+        _ => return trimmed.to_string(),
     };
     inner.to_string()
 }
@@ -113,7 +118,7 @@ pub(crate) fn build_resolve_prompt(file_path: &Path, content_with_markers: &str)
     format!(
         "Resolve all git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) \
          in the file below. Output ONLY the resolved file contents with no \
-         markers, no commentary, no markdown fencing — exactly what should be \
+         markers, no commentary, no markdown fencing, exactly what should be \
          written back to disk. Preserve all non-conflicting content verbatim.\n\
          \n\
          File: {display}\n\

@@ -5,7 +5,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
-use super::{clean_message, looks_like_diff_narration, truncate, CommitMessageProvider};
+use super::{clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider};
 use crate::git::ChangesSummary;
 
 const COPILOT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -118,7 +118,11 @@ impl ConflictResolver for CopilotProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        Ok(strip_outer_code_fence(&raw))
+        let resolved = strip_outer_code_fence(&raw);
+        if resolved.trim().is_empty() {
+            bail!("Empty resolution from gh copilot");
+        }
+        Ok(resolved)
     }
 }
 
@@ -194,7 +198,7 @@ fn extract_from_code_block(output: &str) -> Option<String> {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {
             if in_block {
-                // End of block — return what we collected
+                // End of block, return what we collected
                 let msg = content.join("\n").trim().to_string();
                 if !msg.is_empty() {
                     return Some(msg);
@@ -237,33 +241,6 @@ fn is_copilot_noise(line: &str) -> bool {
         return true;
     }
     false
-}
-
-/// Wait for a child process with a timeout.
-fn wait_with_timeout(
-    child: std::process::Child,
-    timeout: Duration,
-) -> Result<std::process::Output> {
-    let mut child = child;
-    let start = std::time::Instant::now();
-
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .context("Failed to get process output");
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    bail!("Process timed out after {:?}", timeout);
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => bail!("Error waiting for process: {}", e),
-        }
-    }
 }
 
 #[cfg(test)]

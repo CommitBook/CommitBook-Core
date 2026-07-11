@@ -1,4 +1,4 @@
-//! `commitbook-client` — UniFFI SDK exposing `CommitBookEngineClient` to
+//! `commitbook-client`, UniFFI SDK exposing `CommitBookEngineClient` to
 //! native iOS/macOS/Android apps. Wraps `commitbook-engine` orchestration.
 //!
 //! UDL spec: `crates/commitbook-client/src/commitbook.udl`.
@@ -9,6 +9,7 @@ mod commitbooks_ops;
 mod conflicts;
 mod documents;
 mod errors;
+mod runtime;
 mod sync_ops;
 mod types;
 

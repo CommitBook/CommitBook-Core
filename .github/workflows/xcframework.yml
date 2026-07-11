@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-xcframework:
-    name: Build CommitBookCore.xcframework
+    name: Build CommitBookEngine.xcframework
     runs-on: macos-latest
 
     steps:
@@ -27,38 +27,20 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
 
-      - name: Build aarch64 (Apple Silicon)
-        run: cargo build --release --target aarch64-apple-darwin --package commitbook-core
-
-      - name: Build x86_64 (Intel)
-        run: cargo build --release --target x86_64-apple-darwin --package commitbook-core
-
-      - name: Create universal binary
-        run: |
-          mkdir -p target/universal-apple-darwin/release
-          lipo -create \
-            target/aarch64-apple-darwin/release/libcommitbook_core.a \
-            target/x86_64-apple-darwin/release/libcommitbook_core.a \
-            -output target/universal-apple-darwin/release/libcommitbook_core.a
-
-      - name: Create XCFramework
-        run: |
-          xcodebuild -create-xcframework \
-            -library target/universal-apple-darwin/release/libcommitbook_core.a \
-            -headers crates/commitbook-core/src/ffi/ \
-            -output CommitBookCore.xcframework
-
-      - name: Package XCFramework
-        run: |
-          zip -r CommitBookCore.xcframework.zip CommitBookCore.xcframework
+      # Single source of truth: the script builds every slice, generates the
+      # UniFFI bindings, assembles the xcframework, and emits the zip + sha256.
+      - name: Build XCFramework
+        run: ./crates/commitbook-client/scripts/build-xcframework.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CommitBookCore.xcframework
-          path: CommitBookCore.xcframework.zip
+          name: CommitBookEngine.xcframework
+          path: |
+            target/CommitBookEngine.xcframework.zip
+            target/CommitBookEngine.xcframework.zip.sha256
 
       - name: Upload to release
         if: ${{ inputs.release_tag != '' }}
@@ -66,4 +48,6 @@ jobs:
         with:
           tag_name: ${{ inputs.release_tag }}
           target_commitish: ${{ inputs.ref }}
-          files: CommitBookCore.xcframework.zip
+          files: |
+            target/CommitBookEngine.xcframework.zip
+            target/CommitBookEngine.xcframework.zip.sha256

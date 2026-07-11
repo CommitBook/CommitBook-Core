@@ -1,7 +1,7 @@
 //! Document operations: walking markdown files in a clone, reading their
 //! content + revision SHA, and saving + staging + committing edits.
 //!
-//! Sync (push to remote) is `sync_commitbook`'s job — `save_document` only
+//! Sync (push to remote) is `sync_commitbook`'s job; `save_document` only
 //! commits locally.
 
 use std::path::Path;
@@ -73,7 +73,7 @@ pub fn read_document(
         .ok_or_else(|| {
             CommitBookError::not_found(format!("CommitBook {commitbook_id} not found"))
         })?;
-    let abs = cb.local_path.join(path);
+    let abs = safe_rel_join(&cb.local_path, path)?;
     if !abs.exists() {
         return Err(CommitBookError::not_found(format!("Document {path} not found")));
     }
@@ -105,7 +105,7 @@ pub fn save_document(
         .ok_or_else(|| {
             CommitBookError::not_found(format!("CommitBook {commitbook_id} not found"))
         })?;
-    let abs = cb.local_path.join(path);
+    let abs = safe_rel_join(&cb.local_path, path)?;
     if let Some(parent) = abs.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| CommitBookError::database(format!("Create dirs: {e}")))?;
@@ -113,7 +113,7 @@ pub fn save_document(
     std::fs::write(&abs, content)
         .map_err(|e| CommitBookError::database(format!("Write {path}: {e}")))?;
 
-    // Stage + commit (no push — sync_commitbook handles pushing).
+    // Stage + commit (no push; sync_commitbook handles pushing).
     let repo = GitRepo::open(&cb.local_path)
         .map_err(|e| CommitBookError::database(format!("Open repo: {e}")))?;
     repo.stage_paths(&[path.to_string()])
@@ -127,6 +127,39 @@ pub fn save_document(
             .map_err(|e| CommitBookError::database(format!("Commit: {e}")))?;
     }
     Ok(())
+}
+
+/// Join a caller-supplied relative path onto the clone root, rejecting any
+/// path that could escape it: absolute paths, `.`/`..` or other non-normal
+/// segments, and any `.CommitBook` segment. Guards `read_document` /
+/// `save_document` against path traversal from an FFI caller.
+fn safe_rel_join(base: &Path, rel: &str) -> Result<std::path::PathBuf> {
+    let rel_path = Path::new(rel);
+    if rel_path.is_absolute() {
+        return Err(CommitBookError::invalid_input(format!(
+            "Absolute path not allowed: {rel}"
+        )));
+    }
+    for comp in rel_path.components() {
+        match comp {
+            std::path::Component::Normal(seg) => {
+                // Case-insensitive: on case-insensitive filesystems (default
+                // APFS/HFS+ on macOS) `.commitbook` resolves to the real
+                // `.CommitBook` directory, so an exact-case check is bypassable.
+                if seg.to_string_lossy().eq_ignore_ascii_case(".CommitBook") {
+                    return Err(CommitBookError::invalid_input(format!(
+                        "Path into .CommitBook not allowed: {rel}"
+                    )));
+                }
+            }
+            _ => {
+                return Err(CommitBookError::invalid_input(format!(
+                    "Illegal path segment in: {rel}"
+                )));
+            }
+        }
+    }
+    Ok(base.join(rel_path))
 }
 
 fn walk_markdown(root: &Path, dir: &Path, out: &mut Vec<String>) {
@@ -149,3 +182,7 @@ fn walk_markdown(root: &Path, dir: &Path, out: &mut Vec<String>) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "documents_tests.rs"]
+mod tests;

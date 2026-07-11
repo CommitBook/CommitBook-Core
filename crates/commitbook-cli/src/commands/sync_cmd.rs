@@ -7,7 +7,8 @@ use commitbook_engine::git::GitRepo;
 use commitbook_engine::logger::FileLogger;
 use commitbook_engine::sync::sync_repository;
 
-/// Run a manual sync: pull-rebase-autostash → optional commit → push.
+/// Run a manual sync: commit dirty markdown, fetch, libgit2 3-way merge, then
+/// push (retrying once on a non-fast-forward race).
 ///
 /// Returns an error if the sync surfaced any errors or unresolved manual
 /// conflicts so `commitbook sync && next-step` chains correctly.
@@ -19,24 +20,28 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     let _ = logger.info("Sync started");
 
     // Generate the commit message upfront so the engine can use it for the
-    // single commit it creates per cycle. Falls back to a per-file default
-    // if there are no git-visible changes.
-    let commit_message = match repo.changes_summary() {
-        Ok(summary) if !summary.is_empty() => {
-            Some(generate_commit_message(repo_root, &summary, config.commit.ai_messages).await)
-        }
-        _ => None,
+    // single commit it creates per cycle. Gate on the same predicate the engine
+    // commits on (dirty markdown) so we never spawn an AI CLI when the engine
+    // will not commit.
+    let commit_message = if repo.has_dirty_markdown().unwrap_or(false) {
+        let summary = repo.changes_summary().unwrap_or_default();
+        Some(generate_commit_message(repo_root, &summary, config.commit.ai_messages).await)
+    } else {
+        None
     };
 
     let outcome = sync_repository(cb_dir, repo_root, &config, &logger, commit_message).await;
 
     let exit_err: Option<anyhow::Error> = match outcome {
         Ok(o) => {
-            if o.pulled > 0 {
-                println!("  {} Pulled {} commit(s).", "OK".green().bold(), o.pulled);
-            }
-            if o.pushed > 0 {
-                println!("  {} Pushed {} commit(s).", "OK".green().bold(), o.pushed);
+            // Only claim success counts when the cycle had no errors.
+            if o.errors.is_empty() {
+                if o.pulled > 0 {
+                    println!("  {} Pulled {} commit(s).", "OK".green().bold(), o.pulled);
+                }
+                if o.pushed > 0 {
+                    println!("  {} Pushed {} commit(s).", "OK".green().bold(), o.pushed);
+                }
             }
             if o.conflicts_resolved > 0 {
                 println!(

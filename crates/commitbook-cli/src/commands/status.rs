@@ -67,9 +67,9 @@ pub fn run(cb_dir: &Path, repo_root: &Path, json: bool) -> Result<()> {
         println!("  Last error: {}", err.red());
     }
 
-    // Local vs origin divergence check — only meaningful when a remote is configured.
+    // Local vs remote divergence check: only meaningful when a remote is configured.
     if repo.has_remote() {
-        let remote_ref = format!("origin/{}", config.git.branch);
+        let remote_ref = format!("{}/{}", config.git.remote, config.git.branch);
         if let Ok((ahead, behind)) = repo.ahead_behind("HEAD", &remote_ref) {
             if ahead > 0 || behind > 0 {
                 println!(
@@ -87,7 +87,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, json: bool) -> Result<()> {
         }
     }
 
-    // Recent activity — pull the last few JSON lines from today's log file
+    // Recent activity, pull the last few JSON lines from today's log file
     // and render them human-readable. Skipped silently when there's no log
     // yet (FileLogger lazily creates the dir on first write).
     if let Ok(logger) = FileLogger::new(repo_root, config.logging.max_log_days) {
@@ -117,7 +117,7 @@ fn format_recent(line: &str) -> Option<String> {
     let level = v["level"].as_str().unwrap_or("INFO");
     let msg = v["msg"].as_str().unwrap_or("");
 
-    // ts comes in as "YYYY-MM-DD HH:MM:SS" — keep just the time portion.
+    // ts comes in as "YYYY-MM-DD HH:MM:SS", keep just the time portion.
     let time = ts.split(' ').nth(1).unwrap_or(ts);
 
     let level_colored = match level {

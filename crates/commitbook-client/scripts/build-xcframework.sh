@@ -31,7 +31,7 @@ ASSEMBLY_DIR="$OUT_DIR/staging"
 rm -rf "$OUT_DIR"
 mkdir -p "$BINDINGS_DIR" "$ASSEMBLY_DIR"
 
-# iOS deployment target — match what libgit2-sys ships (ios 14+ on
+# iOS deployment target, match what libgit2-sys ships (ios 14+ on
 # modern Xcode). Override via env if needed.
 export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-15.0}"
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
@@ -80,12 +80,16 @@ lipo -create \
 stage_headers() {
     local dir="$1"
     mkdir -p "$dir"
-    if [ -f "$BINDINGS_DIR/commitbookFFI.h" ]; then
-        cp "$BINDINGS_DIR/commitbookFFI.h" "$dir/${SWIFT_MODULE}.h"
-    fi
-    if [ -f "$BINDINGS_DIR/commitbookFFI.modulemap" ]; then
-        cp "$BINDINGS_DIR/commitbookFFI.modulemap" "$dir/module.modulemap"
-    fi
+    # UniFFI names the header/modulemap after the UDL namespace (commitbook),
+    # not the Swift module. Discover them and fail loudly if bindgen did not
+    # emit them, rather than silently producing a header-less framework.
+    local hdr modmap
+    hdr=$(find "$BINDINGS_DIR" -name '*FFI.h' | head -n1)
+    modmap=$(find "$BINDINGS_DIR" -name '*FFI.modulemap' | head -n1)
+    [ -n "$hdr" ] || { echo "error: no generated *FFI.h in $BINDINGS_DIR" >&2; exit 1; }
+    [ -n "$modmap" ] || { echo "error: no generated *FFI.modulemap in $BINDINGS_DIR" >&2; exit 1; }
+    cp "$hdr" "$dir/${SWIFT_MODULE}.h"
+    cp "$modmap" "$dir/module.modulemap"
 }
 
 mkdir -p "$ASSEMBLY_DIR/ios-device-headers" \

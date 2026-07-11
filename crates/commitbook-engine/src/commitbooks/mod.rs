@@ -1,8 +1,8 @@
 //! Multi-CommitBook support layer.
 //!
 //! A "CommitBook" is a GitHub repo with `.CommitBook/` committed at its root.
-//! This module models the *runtime* view of one — its identity, on-disk
-//! location, and per-clone preferences — and provides registry operations
+//! This module models the *runtime* view of one, its identity, on-disk
+//! location, and per-clone preferences, and provides registry operations
 //! for scanning a `workspacesRoot` directory containing many such clones.
 //!
 //! No central registry file: subdirectories of `workspacesRoot` ARE the
@@ -24,7 +24,7 @@ pub use slug::slug_for;
 /// Runtime view of a CommitBook clone on this device.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitBook {
-    /// `<owner>/<repo>` — stable across devices.
+    /// `<owner>/<repo>`, stable across devices.
     pub id: String,
     pub owner: String,
     pub repo: String,

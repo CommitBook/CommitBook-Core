@@ -1,5 +1,5 @@
 //! Blocking libgit2 operations for CommitBook initialization/cloning. Run from
-//! `tokio::task::spawn_blocking` — these can do filesystem I/O and network
+//! `tokio::task::spawn_blocking`, these can do filesystem I/O and network
 //! operations that take seconds.
 
 use std::path::Path;

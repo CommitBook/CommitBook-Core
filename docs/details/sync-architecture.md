@@ -11,9 +11,11 @@ No configuration option. No automatic fallback to a different algorithm. One pat
 ## Sync algorithm
 
 ```
-1. fetch <remote> <branch>
-2. analyze:  merge_analysis(FETCH_HEAD)
-3. dispatch on analysis:
+1. stage all dirty markdown
+2. if index has real changes vs HEAD: commit_files
+3. fetch <remote> <branch>
+4. analyze:  merge_analysis(FETCH_HEAD)
+5. dispatch on analysis:
      UP_TO_DATE        -> nothing pulled
      FAST_FORWARD      -> update HEAD ref, checkout, mark pulled
      NORMAL (3-way)    -> repo.merge(FETCH_HEAD)
@@ -24,10 +26,8 @@ No configuration option. No automatic fallback to a different algorithm. One pat
                                   AiResolve -> resolver.resolve(path) for each conflicted path
                                                re-stage, write_tree, commit
                                   Manual    -> leave markers, return ConflictSummary list
-4. stage all dirty markdown
-5. if index has real changes vs HEAD: commit_files
 6. push
-   on non-fast-forward race: refetch + repeat from step 2 (one retry)
+   on non-fast-forward race: refetch + repeat from step 4 (one retry)
 ```
 
 The whole flow is sync-callable; the only async parts are the optional `ConflictResolver::resolve(...)` calls, which spawn AI-CLI subprocesses on desktop and HTTP requests on mobile.
@@ -68,7 +68,7 @@ The old planner approach. For each tracked file: compare local working-tree cont
 
 **Pros**: no rebase or merge state machine. Sidesteps libgit2's merge driver entirely. Plays naturally with section-level merging if we ever bring that back.
 
-**Cons**: re-implements what git's merge already does well — three-way merge with renames, mode changes, binary file detection. We'd lose those for free. And the "compare to last sync" base requires tracking sync state per file (the deleted `git/base.rs` did this), which is exactly the complexity v2 set out to remove.
+**Cons**: re-implements what git's merge already does well: three-way merge with renames, mode changes, binary file detection. We'd lose those for free. And the "compare to last sync" base requires tracking sync state per file (the deleted `git/base.rs` did this), which is exactly the complexity v2 set out to remove.
 
 **Why not chosen**: re-introduces the planner-shaped complexity v2 just deleted.
 
@@ -86,7 +86,7 @@ Try to fast-forward only. If non-fast-forward, error out and ask the user to res
 
 Keep `pull --rebase --autostash` shell-outs on desktop (proven, fast, well-tested git CLI) and only use libgit2 on iOS/Android.
 
-**Pros**: leverages git's full feature set on desktop where it's available — hooks, `core.autocrlf`, advanced merge drivers, signed commits via `commit.gpgsign`.
+**Pros**: leverages git's full feature set on desktop where it's available: hooks, `core.autocrlf`, advanced merge drivers, signed commits via `commit.gpgsign`.
 
 **Cons**: doubled implementation, doubled tests, doubled docs. Behavior drift inevitable. We already chose the libgit2-everywhere path in commits `0e0fb67` + `619b6e1` and shipped it; the v2 commit `5ade9d0` accidentally regressed back to shell-outs for the new helpers, which is what this work corrects.
 
@@ -113,11 +113,11 @@ A tempting pattern: "try rebase, fall back to merge if rebase fails." But:
 - "Rebase failed" needs precise definition. Most failures (conflicts) are normal behavior the AI resolver handles, not an architecture-level fallback condition.
 - Once a fallback fires, history is non-deterministic. User's Tuesday morning sync rebases; afternoon hits a transient lock and merges. The history mixes two semantics.
 - Debugging doubles: "why did it pick merge?" requires reproducing the failure path.
-- We'd ship two implementations to support one user-visible behavior — same cost as configurability, less benefit.
+- We'd ship two implementations to support one user-visible behavior: same cost as configurability, less benefit.
 
 The valid form of fallback is *within* an architecture. When `Repository::merge` reports conflicts, we hand them to the resolver; if the resolver returns "manual", we surface them to the caller. That's normal control flow within the merge architecture, not a fallback to a different one.
 
-## Conflict surface — `SyncMode`
+## Conflict surface: `SyncMode`
 
 Every `sync_commitbook` call takes a mode:
 
@@ -181,7 +181,7 @@ Two devices touched the same CommitBook between syncs. No conflict (different se
 * 9876abc Initial CommitBook setup
 ```
 
-The merge commit holds the conflict markers; the next commit holds the AI-resolved content. Two-commit pattern keeps the resolution auditable — `git log -p` shows what the resolver did.
+The merge commit holds the conflict markers; the next commit holds the AI-resolved content. Two-commit pattern keeps the resolution auditable: `git log -p` shows what the resolver did.
 
 ### Conflicted flow with Manual mode
 
@@ -189,10 +189,10 @@ The merge commit holds the conflict markers; the next commit holds the AI-resolv
 
 ## Compatibility with existing repos
 
-Notebooks already synced under v2-shellout-rebase have linear histories. After this change, future merges will produce merge commits. There is no migration step — git accepts both shapes coexisting in the same repo. Users who care about linearity can still `git rebase -i` manually if they want.
+Notebooks already synced under v2-shellout-rebase have linear histories. After this change, future merges will produce merge commits. There is no migration step: git accepts both shapes coexisting in the same repo. Users who care about linearity can still `git rebase -i` manually if they want.
 
 ## Implementation pointers
 
-- `commitbook-engine/src/git/operations.rs` — replaces `pull_rebase_autostash` / `list_conflicted_paths` / `continue_rebase_or_stash` / `rebase_abort` with libgit2 equivalents. New return type: `enum MergeOutcome { Clean, Conflicts(Vec<ConflictedPath>) }`.
-- `commitbook-engine/src/sync/scheduler.rs` — the `SyncMode` parameter threads from FFI calls down to the merge handler.
+- `commitbook-engine/src/git/operations.rs`: replaces `pull_rebase_autostash` / `list_conflicted_paths` / `continue_rebase_or_stash` / `rebase_abort` with libgit2 equivalents. New return type: `enum MergeOutcome { Clean, Conflicts(Vec<ConflictedPath>) }`.
+- `commitbook-engine/src/sync/scheduler.rs`: the `SyncMode` parameter threads from FFI calls down to the merge handler.
 - Both desktop and mobile share the same code path; no `#[cfg(target_os = ...)]` guards on this module.
