@@ -260,3 +260,7 @@ impl CommitBookEngineClient {
         crate::conflicts::resolve_conflict(&self.workspaces_root, &input)
     }
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;

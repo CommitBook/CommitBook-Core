@@ -22,7 +22,8 @@ cd "$REPO_ROOT"
 CRATE="commitbook-client"
 LIB_NAME="commitbook_client"
 FRAMEWORK_NAME="CommitBookEngine"
-SWIFT_MODULE="CommitBookEngineFFI"
+# The Swift module name comes from `module_name` in uniffi.toml and is baked
+# into the generated .swift/.h/.modulemap basenames; it is not set here.
 
 OUT_DIR="$REPO_ROOT/target/xcframework"
 BINDINGS_DIR="$OUT_DIR/Bindings"
@@ -74,22 +75,41 @@ lipo -create \
     "target/x86_64-apple-darwin/release/lib${LIB_NAME}.a" \
     -output "$ASSEMBLY_DIR/macos-fat/lib${LIB_NAME}.a"
 
-# 5. Stage headers + modulemap per slice. UniFFI emits files named after
-#    the UDL namespace (`commitbook`); rename to the framework module
-#    name for xcframework consumption.
+# 5. Stage headers + modulemap per slice.
+#
+#    UniFFI derives these names from `module_name` in uniffi.toml, not from the
+#    UDL namespace: with module_name = "CommitBookEngineFFI" it emits
+#    CommitBookEngineFFIFFI.h / .modulemap (the C module is module_name + FFI)
+#    alongside CommitBookEngineFFI.swift. Discover them by glob so the exact
+#    prefix does not matter, and fail loudly if bindgen emitted neither.
+#
+#    The header MUST keep its generated basename: the modulemap refers to it by
+#    name (`header "CommitBookEngineFFIFFI.h"`), so renaming it leaves the
+#    modulemap pointing at a missing file and every Swift consumer fails to
+#    build the module. Only the modulemap is renamed, to the `module.modulemap`
+#    filename Xcode looks for in a framework's Headers directory.
 stage_headers() {
     local dir="$1"
     mkdir -p "$dir"
-    # UniFFI names the header/modulemap after the UDL namespace (commitbook),
-    # not the Swift module. Discover them and fail loudly if bindgen did not
-    # emit them, rather than silently producing a header-less framework.
     local hdr modmap
     hdr=$(find "$BINDINGS_DIR" -name '*FFI.h' | head -n1)
     modmap=$(find "$BINDINGS_DIR" -name '*FFI.modulemap' | head -n1)
     [ -n "$hdr" ] || { echo "error: no generated *FFI.h in $BINDINGS_DIR" >&2; exit 1; }
     [ -n "$modmap" ] || { echo "error: no generated *FFI.modulemap in $BINDINGS_DIR" >&2; exit 1; }
-    cp "$hdr" "$dir/${SWIFT_MODULE}.h"
+    cp "$hdr" "$dir/$(basename "$hdr")"
     cp "$modmap" "$dir/module.modulemap"
+
+    # Self-check: every header the modulemap references must exist alongside it.
+    # A mismatch still zips "successfully" but breaks every Swift consumer, so
+    # fail the build here instead of shipping an unimportable framework.
+    local referenced
+    while IFS= read -r referenced; do
+        [ -n "$referenced" ] || continue
+        [ -f "$dir/$referenced" ] || {
+            echo "error: module.modulemap references '$referenced' but it is not staged in $dir" >&2
+            exit 1
+        }
+    done < <(awk -F'"' '/[[:space:]]header[[:space:]]/{print $2}' "$dir/module.modulemap")
 }
 
 mkdir -p "$ASSEMBLY_DIR/ios-device-headers" \
