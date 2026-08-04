@@ -1,0 +1,25 @@
+.github/workflows/xcframework.yml
+  s_6b4f67c6fabdb8::t_d3d7aad0b030a7 37-42
+crates/commitbook-client/scripts/smoke-swift.sh
+  s_6b4f67c6fabdb8::t_be503d68aeb7e6 1-92
+crates/commitbook-client/scripts/build-xcframework.sh
+  s_6b4f67c6fabdb8::t_098c59522d9a79 81-84,87
+crates/commitbook-client/uniffi.toml
+  s_6b4f67c6fabdb8::t_e8c735f584f578 2-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "6ba978baa3d2f94f3938d37ee7fa108143923783",
+  "prompts": {},
+  "sessions": {
+    "s_6b4f67c6fabdb8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e727bfd3-b83d-494c-8ab9-fe383960a0bd",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
