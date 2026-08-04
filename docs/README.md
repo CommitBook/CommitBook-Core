@@ -50,6 +50,7 @@ commitbook start
 | `commitbook log` | View recent activity log |
 | `commitbook login --token <T>` | Store an optional token for token-backed transports |
 | `commitbook login --provider github` | Label the stored token with a provider |
+| `commitbook completions <shell>` | Generate shell completion scripts |
 
 ### Schedule Presets
 

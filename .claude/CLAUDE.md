@@ -60,6 +60,7 @@ commitbook schedule    # Change schedule
 commitbook doctor      # Health check
 commitbook log         # Activity log
 commitbook login       # Store auth token
+commitbook completions # Generate shell completion scripts
 ```
 
 ## Conflict resolution
