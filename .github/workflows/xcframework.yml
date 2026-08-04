@@ -34,6 +34,12 @@ jobs:
       - name: Build XCFramework
         run: ./crates/commitbook-client/scripts/build-xcframework.sh
 
+      # Compile, link, and run a Swift consumer against the framework. Catches
+      # a header/modulemap mismatch or an async method that traps, neither of
+      # which fails the build itself, so never publish without this passing.
+      - name: Swift smoke test
+        run: ./crates/commitbook-client/scripts/smoke-swift.sh
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

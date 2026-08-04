@@ -78,13 +78,13 @@ lipo -create \
 # 5. Stage headers + modulemap per slice.
 #
 #    UniFFI derives these names from `module_name` in uniffi.toml, not from the
-#    UDL namespace: with module_name = "CommitBookEngineFFI" it emits
-#    CommitBookEngineFFIFFI.h / .modulemap (the C module is module_name + FFI)
-#    alongside CommitBookEngineFFI.swift. Discover them by glob so the exact
-#    prefix does not matter, and fail loudly if bindgen emitted neither.
+#    UDL namespace: module_name = "CommitBookEngine" emits CommitBookEngineFFI.h
+#    / .modulemap (the C module is module_name + FFI) alongside
+#    CommitBookEngine.swift. Discover them by glob so the exact prefix does not
+#    matter, and fail loudly if bindgen emitted neither.
 #
 #    The header MUST keep its generated basename: the modulemap refers to it by
-#    name (`header "CommitBookEngineFFIFFI.h"`), so renaming it leaves the
+#    name (`header "CommitBookEngineFFI.h"`), so renaming it leaves the
 #    modulemap pointing at a missing file and every Swift consumer fails to
 #    build the module. Only the modulemap is renamed, to the `module.modulemap`
 #    filename Xcode looks for in a framework's Headers directory.

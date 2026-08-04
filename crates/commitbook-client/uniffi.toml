@@ -1,5 +1,10 @@
 [bindings.swift]
-module_name = "CommitBookEngineFFI"
+# UniFFI appends "FFI" to this for the low-level C module, so "CommitBookEngine"
+# yields the C module `CommitBookEngineFFI` (header CommitBookEngineFFI.h)
+# alongside CommitBookEngine.swift. That is the module name the Apple repo
+# imports, per docs/handoff/apple-app-todo.md. Setting this to
+# "CommitBookEngineFFI" would emit a doubled `CommitBookEngineFFIFFI`.
+module_name = "CommitBookEngine"
 
 [bindings.kotlin]
 package_name = "com.zaai.commitbook.engine.ffi"
