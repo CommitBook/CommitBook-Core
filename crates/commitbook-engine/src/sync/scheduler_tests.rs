@@ -891,12 +891,7 @@ async fn first_sync_against_empty_remote_bootstraps_branch() {
         let sig = Signature::now("Test User", "test@example.com").unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
-        let branch = repo
-            .head()
-            .unwrap()
-            .shorthand()
-            .unwrap_or("main")
-            .to_string();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
         repo.remote("origin", &format!("file://{}", remote_dir.path().display()))
             .unwrap();
         branch

@@ -17,7 +17,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 fs2 = "0.4"
-git2 = "0.19"
+git2 = { version = "0.21.0", default-features = false, features = ["https", "ssh"] }
 hex = "0.4"
 libc = "0.2"
 log = "0.4"

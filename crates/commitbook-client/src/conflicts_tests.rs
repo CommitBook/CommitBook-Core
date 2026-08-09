@@ -5,7 +5,7 @@ use super::*;
 
 fn side(content: &[u8]) -> ConflictSide {
     ConflictSide {
-        oid: Oid::zero(),
+        oid: Oid::ZERO_SHA1,
         mode: 0o100644,
         content: content.to_vec(),
     }

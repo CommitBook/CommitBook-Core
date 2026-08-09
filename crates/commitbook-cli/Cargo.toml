@@ -25,5 +25,4 @@ serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
-git2 = "0.19"
 tempfile = "3"

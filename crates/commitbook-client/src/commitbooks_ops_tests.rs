@@ -349,8 +349,8 @@ fn fresh_clone_checks_out_configured_branch_and_tracks_renamed_remote() {
         .find_branch(configured_branch, git2::BranchType::Local)
         .unwrap();
     assert_eq!(
-        local_branch.upstream().unwrap().get().name(),
-        Some("refs/remotes/upstream/sync-notes")
+        local_branch.upstream().unwrap().get().name().unwrap(),
+        "refs/remotes/upstream/sync-notes"
     );
     drop(local_branch);
     drop(repository);
@@ -365,8 +365,8 @@ fn fresh_clone_checks_out_configured_branch_and_tracks_renamed_remote() {
 
     let repository = git2::Repository::open(&clone_path).unwrap();
     assert_eq!(
-        repository.head().unwrap().shorthand(),
-        Some(configured_branch)
+        repository.head().unwrap().shorthand().unwrap(),
+        configured_branch
     );
     assert!(repository.find_remote("origin").is_err());
     assert!(repository.find_remote("upstream").is_ok());
@@ -438,8 +438,8 @@ fn fresh_clone_missing_configured_branch_fails_without_partial_reconfiguration()
 
     let repository = git2::Repository::open(&clone_path).unwrap();
     assert_eq!(
-        repository.head().unwrap().shorthand(),
-        Some(clone_branch.as_str())
+        repository.head().unwrap().shorthand().unwrap(),
+        clone_branch
     );
     assert_eq!(repository.head().unwrap().target(), Some(head_before));
     assert!(repository.find_remote("origin").is_ok());
@@ -641,8 +641,9 @@ fn initialization_refuses_branch_mismatch_before_metadata_write() {
             .unwrap()
             .head()
             .unwrap()
-            .shorthand(),
-        Some(branch.as_str())
+            .shorthand()
+            .unwrap(),
+        branch
     );
 }
 

@@ -1,37 +1,58 @@
 use super::*;
-use git2::{Repository, RepositoryInitOptions, Signature, Status};
 use std::path::Path;
+use std::process::{Command, Output};
 use tempfile::tempdir;
+
+fn git_output(repo: &Path, args: &[&str]) -> Output {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap()
+}
+
+fn git(repo: &Path, args: &[&str]) -> String {
+    let output = git_output(repo, args);
+    assert!(
+        output.status.success(),
+        "git -C {} {args:?} failed\nstdout: {}\nstderr: {}",
+        repo.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn tree_contains(repo: &Path, reference: &str, path: &str) -> bool {
+    let object = format!("{reference}:{path}");
+    git_output(repo, &["cat-file", "-e", &object])
+        .status
+        .success()
+}
 
 fn initialize_repo_with_remote_on_branch(branch: &str) -> (tempfile::TempDir, tempfile::TempDir) {
     let remote = tempdir().unwrap();
-    Repository::init_bare(remote.path()).unwrap();
+    git(remote.path(), &["init", "--bare"]);
 
     let local = tempdir().unwrap();
-    let mut options = RepositoryInitOptions::new();
-    options.initial_head(branch);
-    let repo = Repository::init_opts(local.path(), &options).unwrap();
-    {
-        let mut config = repo.config().unwrap();
-        config.set_str("user.name", "CommitBook Test").unwrap();
-        config
-            .set_str("user.email", "test@commitbook.local")
-            .unwrap();
-        config.set_bool("commit.gpgsign", false).unwrap();
-    }
+    git(local.path(), &["init"]);
+    let branch_ref = format!("refs/heads/{branch}");
+    git(local.path(), &["symbolic-ref", "HEAD", &branch_ref]);
+    git(local.path(), &["config", "user.name", "CommitBook Test"]);
+    git(
+        local.path(),
+        &["config", "user.email", "test@commitbook.local"],
+    );
+    git(local.path(), &["config", "commit.gpgsign", "false"]);
+    git(local.path(), &["config", "core.hooksPath", "/dev/null"]);
     std::fs::write(local.path().join("README.md"), "# Notes\n").unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(Path::new("README.md")).unwrap();
-    index.write().unwrap();
-    let tree_oid = index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_oid).unwrap();
-    let signature = Signature::now("CommitBook Test", "test@commitbook.local").unwrap();
-    repo.commit(Some("HEAD"), &signature, &signature, "base", &tree, &[])
-        .unwrap();
-    repo.remote("origin", &format!("file://{}", remote.path().display()))
-        .unwrap();
-    drop(tree);
-    drop(repo);
+    git(local.path(), &["add", "README.md"]);
+    git(local.path(), &["commit", "-m", "base"]);
+    let remote_url = format!("file://{}", remote.path().display());
+    git(local.path(), &["remote", "add", "origin", &remote_url]);
 
     let repo = GitRepo::open(local.path()).unwrap();
     repo.push("origin", branch).unwrap();
@@ -45,60 +66,67 @@ fn initialize_repo_with_remote() -> (tempfile::TempDir, tempfile::TempDir) {
 #[test]
 fn initialization_commits_only_metadata_and_pushes_it() {
     let (local, remote) = initialize_repo_with_remote();
-    let repo = Repository::open(local.path()).unwrap();
     std::fs::write(local.path().join("unrelated.txt"), "keep staged\n").unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(Path::new("unrelated.txt")).unwrap();
-    index.write().unwrap();
-    drop(index);
-    drop(repo);
+    git(local.path(), &["add", "unrelated.txt"]);
 
     initialize_and_publish(local.path(), Some("origin")).unwrap();
 
-    let repo = Repository::open(local.path()).unwrap();
-    assert!(repo
-        .status_file(Path::new("unrelated.txt"))
-        .unwrap()
-        .contains(Status::INDEX_NEW));
-    let head_tree = repo.head().unwrap().peel_to_tree().unwrap();
-    assert!(head_tree.get_path(Path::new("unrelated.txt")).is_err());
-    assert!(head_tree
-        .get_path(Path::new(".CommitBook/config.toml"))
-        .is_ok());
-    assert!(head_tree
-        .get_path(Path::new(".CommitBook/.gitignore"))
-        .is_ok());
+    let staged = git(
+        local.path(),
+        &["diff", "--cached", "--name-only", "--", "unrelated.txt"],
+    );
+    assert_eq!(staged.trim(), "unrelated.txt");
+    assert!(!tree_contains(local.path(), "HEAD", "unrelated.txt"));
+    assert!(tree_contains(
+        local.path(),
+        "HEAD",
+        ".CommitBook/config.toml"
+    ));
+    assert!(tree_contains(
+        local.path(),
+        "HEAD",
+        ".CommitBook/.gitignore"
+    ));
     assert!(!local.path().join(".gitignore").exists());
 
-    let remote_repo = Repository::open_bare(remote.path()).unwrap();
-    let remote_tree = remote_repo
-        .find_reference("refs/heads/main")
-        .unwrap()
-        .peel_to_tree()
-        .unwrap();
-    assert!(remote_tree
-        .get_path(Path::new(".CommitBook/config.toml"))
-        .is_ok());
-    assert!(remote_tree
-        .get_path(Path::new(".CommitBook/.gitignore"))
-        .is_ok());
+    assert!(tree_contains(
+        remote.path(),
+        "refs/heads/main",
+        ".CommitBook/config.toml"
+    ));
+    assert!(tree_contains(
+        remote.path(),
+        "refs/heads/main",
+        ".CommitBook/.gitignore"
+    ));
 }
 
 #[test]
 fn failed_initialization_push_leaves_metadata_committed() {
     let (local, _remote) = initialize_repo_with_remote();
-    let repo = Repository::open(local.path()).unwrap();
-    repo.remote_set_url("origin", "file:///definitely/missing/commitbook.git")
-        .unwrap();
-    drop(repo);
+    git(
+        local.path(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "file:///definitely/missing/commitbook.git",
+        ],
+    );
 
     let error = initialize_and_publish(local.path(), Some("origin")).unwrap_err();
     assert!(error.to_string().contains("committed locally"));
 
-    let repo = Repository::open(local.path()).unwrap();
-    let tree = repo.head().unwrap().peel_to_tree().unwrap();
-    assert!(tree.get_path(Path::new(".CommitBook/config.toml")).is_ok());
-    assert!(tree.get_path(Path::new(".CommitBook/.gitignore")).is_ok());
+    assert!(tree_contains(
+        local.path(),
+        "HEAD",
+        ".CommitBook/config.toml"
+    ));
+    assert!(tree_contains(
+        local.path(),
+        "HEAD",
+        ".CommitBook/.gitignore"
+    ));
 }
 
 #[test]
@@ -109,43 +137,32 @@ fn new_initialization_uses_the_checked_out_branch() {
 
     let config = LocalConfig::load(local.path()).unwrap();
     assert_eq!(config.git.branch, "notes");
-    let remote_repo = Repository::open_bare(remote.path()).unwrap();
-    let remote_tree = remote_repo
-        .find_reference("refs/heads/notes")
-        .unwrap()
-        .peel_to_tree()
-        .unwrap();
-    assert!(remote_tree
-        .get_path(Path::new(".CommitBook/config.toml"))
-        .is_ok());
+    assert!(tree_contains(
+        remote.path(),
+        "refs/heads/notes",
+        ".CommitBook/config.toml"
+    ));
 }
 
 #[test]
 fn initialization_refuses_to_commit_metadata_on_another_branch() {
     let (local, remote) = initialize_repo_with_remote();
     state::initialize(local.path(), "origin").unwrap();
-    let repo = Repository::open(local.path()).unwrap();
-    let main = repo.head().unwrap().peel_to_commit().unwrap();
-    repo.branch("other", &main, false).unwrap();
-    repo.set_head("refs/heads/other").unwrap();
-    repo.checkout_head(None).unwrap();
-    drop(main);
-    drop(repo);
+    git(local.path(), &["branch", "other"]);
+    git(local.path(), &["checkout", "other"]);
 
     let error = initialize_and_publish(local.path(), None)
         .unwrap_err()
         .to_string();
     assert!(error.contains("does not match configured branch"));
 
-    let repo = Repository::open(local.path()).unwrap();
-    assert_eq!(repo.head().unwrap().shorthand(), Some("other"));
-    let remote_repo = Repository::open_bare(remote.path()).unwrap();
-    let remote_tree = remote_repo
-        .find_reference("refs/heads/main")
-        .unwrap()
-        .peel_to_tree()
-        .unwrap();
-    assert!(remote_tree
-        .get_path(Path::new(".CommitBook/config.toml"))
-        .is_err());
+    assert_eq!(
+        git(local.path(), &["branch", "--show-current"]).trim(),
+        "other"
+    );
+    assert!(!tree_contains(
+        remote.path(),
+        "refs/heads/main",
+        ".CommitBook/config.toml"
+    ));
 }

@@ -238,6 +238,29 @@ fn test_changes_summary_modified() {
 }
 
 #[test]
+fn test_diff_summary_handles_clean_repository() {
+    let fx = setup_repo_with_base(&[("notes.md", "clean\n")]);
+
+    // A clean diff still travels through git2::Buf formatting. Keep exercising
+    // that zero-change path so upgrades cannot reintroduce the former null-buffer issue.
+    assert_eq!(
+        fx.repo().diff_summary().unwrap(),
+        "0 files changed, 0 insertions(+), 0 deletions(-)"
+    );
+}
+
+#[test]
+fn test_compiled_libgit2_supports_https_and_ssh_transports() {
+    let version = git2::Version::get();
+
+    assert!(
+        version.https(),
+        "libgit2 was compiled without HTTPS support"
+    );
+    assert!(version.ssh(), "libgit2 was compiled without SSH support");
+}
+
+#[test]
 fn test_diff_summary_lists_each_file_once_after_concurrent_edit() {
     // Simulates the race condition that produced commit messages like
     // "The staged change adds an entry; the unstaged ...":

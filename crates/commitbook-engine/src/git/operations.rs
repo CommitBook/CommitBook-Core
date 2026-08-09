@@ -243,7 +243,10 @@ impl GitRepo {
             .repo
             .find_reference("HEAD")
             .context("Failed to read HEAD")?;
-        let symbolic_target = head.symbolic_target().map(str::to_string);
+        let symbolic_target = head
+            .symbolic_target()
+            .context("HEAD symbolic target is not valid UTF-8")?
+            .map(str::to_string);
         let direct_oid = head.target();
         drop(head);
 
@@ -291,7 +294,10 @@ impl GitRepo {
             .repo
             .find_reference("HEAD")
             .with_context(|| format!("Failed to re-read HEAD while {action}"))?;
-        let symbolic_target = head.symbolic_target().map(str::to_string);
+        let symbolic_target = head
+            .symbolic_target()
+            .with_context(|| format!("HEAD symbolic target is not valid UTF-8 while {action}"))?
+            .map(str::to_string);
         let direct_oid = head.target();
         drop(head);
         if symbolic_target != expected.symbolic_target {
@@ -325,7 +331,10 @@ impl GitRepo {
         let mut summary = ChangesSummary::default();
 
         for entry in statuses.iter() {
-            let path = entry.path().unwrap_or("unknown").to_string();
+            let path = entry
+                .path()
+                .context("Changed path is not valid UTF-8")?
+                .to_string();
             let status = entry.status();
 
             if status.is_wt_new() || status.is_index_new() {
@@ -479,7 +488,11 @@ impl GitRepo {
                 .repo
                 .find_reference("HEAD")
                 .context("Failed to revalidate HEAD for metadata publication")?;
-            if head.symbolic_target() != Some(branch_ref.as_str()) {
+            if head
+                .symbolic_target()
+                .context("HEAD symbolic target is not valid UTF-8")?
+                != Some(branch_ref.as_str())
+            {
                 bail!(
                     "Cannot publish CommitBook metadata because HEAD changed while locking the configured branch. Retry after checking out {:?}.",
                     expected_branch
@@ -740,7 +753,11 @@ impl GitRepo {
             .repo
             .find_reference("HEAD")
             .context("Failed to re-read locked HEAD")?;
-        if locked_head.symbolic_target() != expected_head.symbolic_target.as_deref() {
+        if locked_head
+            .symbolic_target()
+            .context("Locked HEAD symbolic target is not valid UTF-8")?
+            != expected_head.symbolic_target.as_deref()
+        {
             bail!("HEAD changed while publishing a commit; retry the operation");
         }
 
@@ -857,7 +874,11 @@ impl GitRepo {
         if remotes.is_empty() {
             bail!("No remotes configured");
         }
-        Ok(remotes.get(0).unwrap_or("origin").to_string())
+        remotes
+            .get(0)
+            .context("Default remote name is not valid UTF-8")?
+            .map(str::to_string)
+            .context("Default remote disappeared while reading it")
     }
 
     /// Get the current branch name.
@@ -883,6 +904,7 @@ impl GitRepo {
                     .context("Failed to read unborn HEAD")?;
                 let target = head
                     .symbolic_target()
+                    .context("Unborn HEAD symbolic target is not valid UTF-8")?
                     .context("Unborn HEAD is not symbolic")?;
                 target
                     .strip_prefix("refs/heads/")
@@ -1032,9 +1054,10 @@ impl GitRepo {
                 continue;
             }
             let mut candidates = Vec::new();
-            if let Some(path) = entry.path() {
-                candidates.push(PathBuf::from(path));
-            }
+            let path = entry
+                .path()
+                .context("Working-tree status path is not valid UTF-8")?;
+            candidates.push(PathBuf::from(path));
             for delta in [entry.head_to_index(), entry.index_to_workdir()]
                 .into_iter()
                 .flatten()
@@ -1048,9 +1071,10 @@ impl GitRepo {
             }
             for path in candidates {
                 if changed.iter().any(|target| paths_overlap(target, &path)) {
-                    if let Some(path) = path.to_str() {
-                        conflicts.insert(path.to_string());
-                    }
+                    let path = path
+                        .to_str()
+                        .context("Conflicting working-tree path is not valid UTF-8")?;
+                    conflicts.insert(path.to_string());
                 }
             }
         }
@@ -1110,7 +1134,11 @@ impl GitRepo {
             .repo
             .find_reference("HEAD")
             .context("Failed to re-read locked HEAD")?;
-        if locked_head.symbolic_target() != Some(head_name) {
+        if locked_head
+            .symbolic_target()
+            .context("Locked HEAD symbolic target is not valid UTF-8")?
+            != Some(head_name)
+        {
             bail!("HEAD changed while preparing fast-forward; retry sync");
         }
         let locked_branch = self
@@ -1289,20 +1317,29 @@ impl GitRepo {
             .with_context(|| format!("Ref '{}' does not point to a tree", refname))?;
 
         let mut files = Vec::new();
-        tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
+        let mut invalid_name = None;
+        let walk_result = tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
             if entry.kind() == Some(git2::ObjectType::Blob) {
-                if let Some(name) = entry.name() {
-                    let path = if dir.is_empty() {
-                        name.to_string()
-                    } else {
-                        format!("{}{}", dir, name)
-                    };
-                    files.push(path);
-                }
+                let name = match entry.name() {
+                    Ok(name) => name,
+                    Err(error) => {
+                        invalid_name = Some(error);
+                        return git2::TreeWalkResult::Abort;
+                    }
+                };
+                let path = if dir.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{}{}", dir, name)
+                };
+                files.push(path);
             }
             git2::TreeWalkResult::Ok
-        })
-        .context("Failed to walk tree")?;
+        });
+        if let Some(error) = invalid_name {
+            return Err(error).context("Tree entry name is not valid UTF-8");
+        }
+        walk_result.context("Failed to walk tree")?;
 
         Ok(files)
     }

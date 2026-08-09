@@ -15,7 +15,9 @@ commitbook-engine = { path = "../commitbook-engine", features = ["vendored-tls"]
 anyhow = "1.0"
 async-trait = "0.1"
 chrono = "0.4"
-git2 = "0.19"
+# Static SDK artifacts must not inherit a host pkg-config libgit2; otherwise
+# the native symbols are absent from the XCFramework/AAR archive.
+git2 = { version = "0.21.0", default-features = false, features = ["https", "ssh", "vendored-libgit2"] }
 hex = "0.4"
 libc = "0.2"
 sha2 = "0.10"

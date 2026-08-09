@@ -472,6 +472,7 @@ fn infer_single_remote(repo_path: &Path) -> Result<String> {
     match remotes.len() {
         1 => remotes
             .get(0)
+            .context("The only configured Git remote name is not valid UTF-8")?
             .map(str::to_string)
             .ok_or_else(|| anyhow::anyhow!("The only configured Git remote has no name")),
         0 => bail!(

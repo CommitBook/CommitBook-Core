@@ -1,14 +1,40 @@
 name: Security Audit
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**/Cargo.toml
+      - .github/workflows/audit.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**/Cargo.toml
+      - .github/workflows/audit.yml
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   audit:
     name: Audit Dependencies
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked --no-default-features
+      - name: Deny all RustSec findings
+        run: cargo audit --deny warnings

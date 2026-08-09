@@ -28,7 +28,7 @@ impl ConflictResolverCallback for ContentCallback {
 
 fn text_conflict() -> GitConflict {
     let side = |content: &str| commitbook_engine::git::ConflictSide {
-        oid: git2::Oid::zero(),
+        oid: git2::Oid::ZERO_SHA1,
         mode: 0o100644,
         content: content.as_bytes().to_vec(),
     };

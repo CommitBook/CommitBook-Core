@@ -69,7 +69,7 @@ fn strip_outer_code_fence_keeps_note_opening_with_fence_then_prose() {
 #[test]
 fn build_resolve_prompt_includes_path_and_structured_sides() {
     let side = |content: &str| crate::git::ConflictSide {
-        oid: git2::Oid::zero(),
+        oid: git2::Oid::ZERO_SHA1,
         mode: 0o100644,
         content: content.as_bytes().to_vec(),
     };

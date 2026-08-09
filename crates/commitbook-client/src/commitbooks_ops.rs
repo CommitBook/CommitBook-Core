@@ -101,8 +101,21 @@ fn configure_fresh_clone_target(
         if !unrenamed_refspecs.is_empty() {
             let refspecs = unrenamed_refspecs
                 .iter()
-                .map(|refspec| refspec.unwrap_or("<non-UTF-8 refspec>"))
-                .collect::<Vec<_>>()
+                .map(|refspec| {
+                    refspec
+                        .map_err(|error| {
+                            CommitBookError::database(format!(
+                                "Read unrenamed remote refspec as UTF-8: {error}"
+                            ))
+                        })?
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            CommitBookError::database(
+                                "An unrenamed remote refspec disappeared while reading it",
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?
                 .join(", ");
             return Err(CommitBookError::database(format!(
                 "Renamed fresh clone remote to {remote:?}, but could not update non-default refspecs: {refspecs}"
@@ -198,6 +211,11 @@ fn checkout_fresh_clone_branch(
         .find_reference("HEAD")
         .map_err(|error| CommitBookError::database(format!("Read fresh clone HEAD: {error}")))?
         .symbolic_target()
+        .map_err(|error| {
+            CommitBookError::database(format!(
+                "Read fresh clone HEAD symbolic target as UTF-8: {error}"
+            ))
+        })?
         .map(str::to_string)
         .ok_or_else(|| CommitBookError::merge("Fresh clone unexpectedly has detached HEAD"))?;
     if current_reference != local_reference {
@@ -399,6 +417,11 @@ fn configured_or_inferred_target(
     let remote = match remotes.len() {
         1 => remotes
             .get(0)
+            .map_err(|error| {
+                CommitBookError::invalid_input(format!(
+                    "The only Git remote name is not valid UTF-8: {error}"
+                ))
+            })?
             .map(ToOwned::to_owned)
             .ok_or_else(|| CommitBookError::invalid_input("The only Git remote has no name"))?,
         0 => {

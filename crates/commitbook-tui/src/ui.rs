@@ -235,3 +235,7 @@ fn draw_footer(f: &mut Frame, _app: &App, area: Rect) {
     let paragraph = Paragraph::new(keys).style(Style::default().fg(Color::White));
     f.render_widget(paragraph, area);
 }
+
+#[cfg(test)]
+#[path = "ui_tests.rs"]
+mod tests;
