@@ -1,9 +1,9 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[allow(dead_code)]
-pub mod macos;
+pub mod linux;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[allow(dead_code)]
-pub mod linux;
+pub mod macos;
 
 use anyhow::Result;
 use std::path::Path;
@@ -174,11 +174,7 @@ pub fn list_presets() -> &'static str {
 }
 
 /// Install a scheduler job for a repo. Platform-specific.
-pub fn install(
-    repo_path: &Path,
-    schedule: &str,
-    commitbook_bin: &Path,
-) -> Result<String> {
+pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<String> {
     #[cfg(target_os = "macos")]
     {
         macos::install(repo_path, schedule, commitbook_bin)
@@ -259,7 +255,9 @@ fn validate_cron_field(field: &str, max_val: u32) -> Result<()> {
 
     // */N
     if let Some(step) = field.strip_prefix("*/") {
-        let n: u32 = step.parse().map_err(|_| anyhow::anyhow!("invalid step value"))?;
+        let n: u32 = step
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid step value"))?;
         if n < 1 || n > max_val {
             anyhow::bail!("step value {} out of range (1-{})", n, max_val);
         }
@@ -269,8 +267,12 @@ fn validate_cron_field(field: &str, max_val: u32) -> Result<()> {
     // N-M range
     if field.contains('-') {
         let parts: Vec<&str> = field.splitn(2, '-').collect();
-        let low: u32 = parts[0].parse().map_err(|_| anyhow::anyhow!("invalid range start"))?;
-        let high: u32 = parts[1].parse().map_err(|_| anyhow::anyhow!("invalid range end"))?;
+        let low: u32 = parts[0]
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid range start"))?;
+        let high: u32 = parts[1]
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid range end"))?;
         if low > max_val || high > max_val || low > high {
             anyhow::bail!("range {}-{} out of bounds (0-{})", low, high, max_val);
         }
@@ -279,7 +281,10 @@ fn validate_cron_field(field: &str, max_val: u32) -> Result<()> {
 
     // N,M,... list
     for part in field.split(',') {
-        let n: u32 = part.trim().parse().map_err(|_| anyhow::anyhow!("invalid value '{}'", part))?;
+        let n: u32 = part
+            .trim()
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid value '{}'", part))?;
         if n > max_val {
             anyhow::bail!("value {} out of range (0-{})", n, max_val);
         }

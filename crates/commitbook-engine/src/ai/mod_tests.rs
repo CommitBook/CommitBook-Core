@@ -93,36 +93,52 @@ fn test_diff_narration_detects_staged_unstaged_pair() {
 
 #[test]
 fn test_diff_narration_detects_prefix_the_diff() {
-    assert!(looks_like_diff_narration("The diff shows a few formatting tweaks"));
+    assert!(looks_like_diff_narration(
+        "The diff shows a few formatting tweaks"
+    ));
 }
 
 #[test]
 fn test_diff_narration_detects_prefix_this_diff() {
-    assert!(looks_like_diff_narration("This diff modifies multiple files"));
+    assert!(looks_like_diff_narration(
+        "This diff modifies multiple files"
+    ));
 }
 
 #[test]
 fn test_diff_narration_detects_prefix_the_changes_show() {
-    assert!(looks_like_diff_narration("The changes show new content added"));
+    assert!(looks_like_diff_narration(
+        "The changes show new content added"
+    ));
 }
 
 #[test]
 fn test_diff_narration_case_insensitive() {
-    assert!(looks_like_diff_narration("THE STAGED CHANGES ADD X; THE UNSTAGED Y"));
+    assert!(looks_like_diff_narration(
+        "THE STAGED CHANGES ADD X; THE UNSTAGED Y"
+    ));
 }
 
 #[test]
 fn test_diff_narration_passes_normal_messages() {
-    assert!(!looks_like_diff_narration("Add pagination to user list endpoint"));
-    assert!(!looks_like_diff_narration("Fix race condition in sync pipeline"));
-    assert!(!looks_like_diff_narration("Update README with install steps"));
+    assert!(!looks_like_diff_narration(
+        "Add pagination to user list endpoint"
+    ));
+    assert!(!looks_like_diff_narration(
+        "Fix race condition in sync pipeline"
+    ));
+    assert!(!looks_like_diff_narration(
+        "Update README with install steps"
+    ));
 }
 
 #[test]
 fn test_diff_narration_lone_word_staged_is_ok() {
     // A legitimate message about staging behavior should not be rejected
     // unless BOTH "staged" and "unstaged" appear together.
-    assert!(!looks_like_diff_narration("Stage all changes before commit"));
+    assert!(!looks_like_diff_narration(
+        "Stage all changes before commit"
+    ));
 }
 
 // --- MockProvider + ProviderChain async tests ---
@@ -136,9 +152,15 @@ struct MockProvider {
 
 #[async_trait]
 impl CommitMessageProvider for MockProvider {
-    fn name(&self) -> &str { self.name }
-    fn key(&self) -> &str { self.key }
-    fn is_available(&self) -> bool { self.available }
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn key(&self) -> &str {
+        self.key
+    }
+    fn is_available(&self) -> bool {
+        self.available
+    }
 
     async fn generate(&self, _summary: &ChangesSummary, _repo_path: &Path) -> Result<String> {
         match self.response {
@@ -152,12 +174,31 @@ impl CommitMessageProvider for MockProvider {
 async fn test_chain_skips_unavailable() {
     let chain = ProviderChain {
         providers: vec![
-            Box::new(MockProvider { name: "Unavail", key: "unavail", available: false, response: Some("nope") }),
-            Box::new(MockProvider { name: "Avail", key: "avail", available: true, response: Some("good msg") }),
+            Box::new(MockProvider {
+                name: "Unavail",
+                key: "unavail",
+                available: false,
+                response: Some("nope"),
+            }),
+            Box::new(MockProvider {
+                name: "Avail",
+                key: "avail",
+                available: true,
+                response: Some("good msg"),
+            }),
         ],
     };
-    let summary = ChangesSummary { new_files: vec!["a.txt".into()], ..Default::default() };
-    let (msg, provider) = chain.generate(&summary, &["unavail".into(), "avail".into()], Path::new("/tmp")).await;
+    let summary = ChangesSummary {
+        new_files: vec!["a.txt".into()],
+        ..Default::default()
+    };
+    let (msg, provider) = chain
+        .generate(
+            &summary,
+            &["unavail".into(), "avail".into()],
+            Path::new("/tmp"),
+        )
+        .await;
     assert_eq!(msg, "good msg");
     assert_eq!(provider, "Avail");
 }
@@ -166,12 +207,22 @@ async fn test_chain_skips_unavailable() {
 async fn test_chain_all_fail_uses_fallback() {
     let chain = ProviderChain {
         providers: vec![
-            Box::new(MockProvider { name: "Bad", key: "bad", available: true, response: None }),
+            Box::new(MockProvider {
+                name: "Bad",
+                key: "bad",
+                available: true,
+                response: None,
+            }),
             Box::new(fallback::FallbackProvider),
         ],
     };
-    let summary = ChangesSummary { new_files: vec!["a.txt".into()], ..Default::default() };
-    let (msg, provider) = chain.generate(&summary, &["bad".into()], Path::new("/tmp")).await;
+    let summary = ChangesSummary {
+        new_files: vec!["a.txt".into()],
+        ..Default::default()
+    };
+    let (msg, provider) = chain
+        .generate(&summary, &["bad".into()], Path::new("/tmp"))
+        .await;
     assert_eq!(provider, "Fallback");
     assert!(!msg.is_empty());
 }
@@ -180,13 +231,23 @@ async fn test_chain_all_fail_uses_fallback() {
 fn test_check_availability() {
     let chain = ProviderChain {
         providers: vec![
-            Box::new(MockProvider { name: "Yes", key: "yes", available: true, response: None }),
-            Box::new(MockProvider { name: "No", key: "no", available: false, response: None }),
+            Box::new(MockProvider {
+                name: "Yes",
+                key: "yes",
+                available: true,
+                response: None,
+            }),
+            Box::new(MockProvider {
+                name: "No",
+                key: "no",
+                available: false,
+                response: None,
+            }),
         ],
     };
     let result = chain.check_availability(&["yes".into(), "no".into(), "missing".into()]);
     assert_eq!(result.len(), 3);
-    assert!(result[0].2);          // "yes" is available
-    assert!(!result[1].2);         // "no" is not
-    assert!(!result[2].2);         // "missing" is not
+    assert!(result[0].2); // "yes" is available
+    assert!(!result[1].2); // "no" is not
+    assert!(!result[2].2); // "missing" is not
 }

@@ -36,12 +36,7 @@ const REQUIRED_TOOLS: &[&str] = &["git", "claude", "codex", "gh", "gemini", "cur
 /// Baseline directories always included so scheduled runs keep working
 /// if a tool is installed into a standard location after the scheduler
 /// was registered. `launchctl` lives in `/bin`, already covered here.
-const BASELINE_PATHS: &[&str] = &[
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    "/usr/bin",
-    "/bin",
-];
+const BASELINE_PATHS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
 
 /// TCC-protected roots (relative to `$HOME`). Any PATH entry that sits
 /// under one of these triggers macOS's Files-and-Folders prompt when the
@@ -96,7 +91,12 @@ fn build_plist_path() -> String {
     }
 
     if let Some(home) = dirs::home_dir() {
-        entries.push(home.join(".cargo").join("bin").to_string_lossy().to_string());
+        entries.push(
+            home.join(".cargo")
+                .join("bin")
+                .to_string_lossy()
+                .to_string(),
+        );
     }
 
     let home_for_filter = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
@@ -114,18 +114,14 @@ fn build_plist_path() -> String {
 /// Escape special XML characters in a string value.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
-     .replace('<', "&lt;")
-     .replace('>', "&gt;")
-     .replace('"', "&quot;")
-     .replace('\'', "&apos;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 /// Generate the plist XML content with PATH environment variable baked in.
-fn generate_plist(
-    repo_path: &Path,
-    schedule: &str,
-    commitbook_bin: &Path,
-) -> String {
+fn generate_plist(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> String {
     let label = plist_label(repo_path);
     let repo_str = repo_path.to_string_lossy();
     let bin_str = commitbook_bin.to_string_lossy();
@@ -179,11 +175,7 @@ fn generate_plist(
 }
 
 /// Install a launchd job for the repo. Returns the plist path as scheduler_id.
-pub fn install(
-    repo_path: &Path,
-    schedule: &str,
-    commitbook_bin: &Path,
-) -> Result<String> {
+pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<String> {
     let path = plist_path(repo_path);
     let content = generate_plist(repo_path, schedule, commitbook_bin);
 
@@ -265,8 +257,7 @@ pub fn validate_binary_path(repo_path: &Path) -> Result<bool> {
         return Ok(false);
     }
 
-    let content = fs::read_to_string(&path)
-        .with_context(|| "Failed to read plist")?;
+    let content = fs::read_to_string(&path).with_context(|| "Failed to read plist")?;
 
     // Extract binary path from ProgramArguments (first <string> after the array)
     if let Some(start) = content.find("<array>") {

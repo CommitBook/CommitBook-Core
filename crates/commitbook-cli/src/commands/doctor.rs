@@ -43,9 +43,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
     match commitbook_engine::git::remote::list_remote_names(repo_root) {
         Ok(names) if names.len() == 1 => {
             let actual = &names[0];
-            let configured = LocalConfig::load(repo_root)
-                .ok()
-                .map(|c| c.git.remote);
+            let configured = LocalConfig::load(repo_root).ok().map(|c| c.git.remote);
             if let Some(cfg_remote) = configured {
                 if cfg_remote == *actual {
                     println!("{} ({})", "OK".green().bold(), actual);
@@ -65,8 +63,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
             println!("{}", "FAILED".red().bold());
             println!(
                 "    {}",
-                "No remote configured. CommitBook requires exactly 1 remote."
-                    .dimmed()
+                "No remote configured. CommitBook requires exactly 1 remote.".dimmed()
             );
             all_ok = false;
         }
@@ -156,15 +153,9 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
             .collect();
         if available.is_empty() {
             println!("{}", "none found".yellow());
-            println!(
-                "    {}",
-                "Commit messages will use fallback text.".dimmed()
-            );
+            println!("    {}", "Commit messages will use fallback text.".dimmed());
         } else {
-            println!(
-                "{}",
-                available.join(", ").green()
-            );
+            println!("{}", available.join(", ").green());
         }
     }
 
@@ -201,24 +192,12 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
             match repo.ahead_behind("HEAD", &remote_ref) {
                 Ok((0, 0)) => println!("{}", "in sync".green().bold()),
                 Ok((ahead, 0)) => {
-                    println!(
-                        "{}",
-                        format!("{} commit(s) ahead", ahead).yellow().bold()
-                    );
-                    println!(
-                        "    {}",
-                        "Next sync will try to push.".dimmed()
-                    );
+                    println!("{}", format!("{} commit(s) ahead", ahead).yellow().bold());
+                    println!("    {}", "Next sync will try to push.".dimmed());
                 }
                 Ok((0, behind)) => {
-                    println!(
-                        "{}",
-                        format!("{} commit(s) behind", behind).yellow().bold()
-                    );
-                    println!(
-                        "    Run: {}",
-                        "git pull --ff-only".dimmed()
-                    );
+                    println!("{}", format!("{} commit(s) behind", behind).yellow().bold());
+                    println!("    Run: {}", "git pull --ff-only".dimmed());
                 }
                 Ok((ahead, behind)) => {
                     println!("{}", "DIVERGED".red().bold());
@@ -229,10 +208,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
                     println!(
                         "    If CommitBook has been pushing your content, local-only commits are redundant. Recovery:"
                     );
-                    println!(
-                        "    {}",
-                        format!("git fetch {}", remote_name).dimmed()
-                    );
+                    println!("    {}", format!("git fetch {}", remote_name).dimmed());
                     println!(
                         "    {}",
                         format!("git diff {} -- '*.md' '*.markdown'", remote_ref).dimmed()
@@ -274,16 +250,10 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
 
     println!();
     if all_ok {
-        println!(
-            "  {}",
-            "All checks passed.".green().bold()
-        );
+        println!("  {}", "All checks passed.".green().bold());
         Ok(())
     } else {
-        println!(
-            "  {}",
-            "Some checks failed. See above.".red().bold()
-        );
+        println!("  {}", "Some checks failed. See above.".red().bold());
         if !fix {
             println!(
                 "  {}",

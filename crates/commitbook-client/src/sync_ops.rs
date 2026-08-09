@@ -40,7 +40,6 @@ pub fn sync_one_commitbook(
             CommitBookError::not_found(format!("CommitBook {commitbook_id} not found"))
         })?;
 
-    let cb_dir = cb.local_path.join(".CommitBook");
     let config = LocalConfig::load(&cb.local_path)
         .map_err(|e| CommitBookError::database(format!("Load config: {e}")))?;
 
@@ -65,7 +64,6 @@ pub fn sync_one_commitbook(
         .map_err(|e| CommitBookError::database(format!("Tokio runtime: {e}")))?;
     let outcome = runtime
         .block_on(sync_with_resolver(
-            &cb_dir,
             &cb.local_path,
             &config.git.remote,
             &config.git.branch,

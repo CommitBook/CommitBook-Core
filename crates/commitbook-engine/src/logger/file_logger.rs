@@ -30,7 +30,12 @@ impl FileLogger {
     }
 
     /// Write a structured log entry with optional extra fields.
-    pub fn log_with(&self, level: &str, message: &str, extra: Option<&[(&str, &str)]>) -> Result<()> {
+    pub fn log_with(
+        &self,
+        level: &str,
+        message: &str,
+        extra: Option<&[(&str, &str)]>,
+    ) -> Result<()> {
         let filename = format!("{}.log", datetime::today_date());
         let log_path = self.logs_dir.join(&filename);
         let timestamp = datetime::now_formatted();
@@ -49,8 +54,8 @@ impl FileLogger {
             }
         }
 
-        let mut line = serde_json::to_string(&entry)
-            .with_context(|| "Failed to serialize log entry")?;
+        let mut line =
+            serde_json::to_string(&entry).with_context(|| "Failed to serialize log entry")?;
         line.push('\n');
 
         let mut file = fs::OpenOptions::new()
@@ -93,29 +98,22 @@ impl FileLogger {
             return Ok(());
         }
 
-        let cutoff = chrono::Local::now()
-            .date_naive()
-            - chrono::Duration::days(self.max_log_days as i64);
+        let cutoff =
+            chrono::Local::now().date_naive() - chrono::Duration::days(self.max_log_days as i64);
 
-        let entries = fs::read_dir(&self.logs_dir)
-            .with_context(|| "Failed to read logs directory")?;
+        let entries =
+            fs::read_dir(&self.logs_dir).with_context(|| "Failed to read logs directory")?;
 
         for entry in entries.flatten() {
             let path = entry.path();
 
-            let is_log = path
-                .extension()
-                .map(|ext| ext == "log")
-                .unwrap_or(false);
+            let is_log = path.extension().map(|ext| ext == "log").unwrap_or(false);
             if !is_log {
                 continue;
             }
 
             // Parse date from filename: "2026-04-07.log" → NaiveDate
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
 
             if let Ok(log_date) = chrono::NaiveDate::parse_from_str(stem, "%Y-%m-%d") {
                 if log_date < cutoff {
@@ -136,8 +134,7 @@ impl FileLogger {
             return Ok(Vec::new());
         }
 
-        let content = fs::read_to_string(&log_path)
-            .with_context(|| "Failed to read log file")?;
+        let content = fs::read_to_string(&log_path).with_context(|| "Failed to read log file")?;
 
         let lines: Vec<String> = content
             .lines()

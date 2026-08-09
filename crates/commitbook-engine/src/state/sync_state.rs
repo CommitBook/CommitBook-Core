@@ -31,8 +31,8 @@ impl SyncState {
         let local = commitbook_dir.join("local");
         std::fs::create_dir_all(&local)?;
         let path = local.join("state.toml");
-        let content = toml::to_string_pretty(self)
-            .with_context(|| "Failed to serialize state.toml")?;
+        let content =
+            toml::to_string_pretty(self).with_context(|| "Failed to serialize state.toml")?;
         std::fs::write(&path, content)
             .with_context(|| format!("Failed to write {}", path.display()))?;
         Ok(())

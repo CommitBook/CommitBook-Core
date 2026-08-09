@@ -145,9 +145,16 @@ pub(crate) fn clean_message(raw: &str) -> String {
     let mut msg = raw.trim().to_string();
 
     // Strip markdown code fences
-    msg = msg.trim_start_matches("```").trim_end_matches("```").to_string();
+    msg = msg
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .to_string();
     // Strip surrounding quotes
-    msg = msg.trim_matches('"').trim_matches('\'').trim_matches('`').to_string();
+    msg = msg
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_matches('`')
+        .to_string();
     msg = msg.trim().to_string();
 
     // Take only the first line

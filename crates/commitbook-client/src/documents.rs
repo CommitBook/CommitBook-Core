@@ -75,7 +75,9 @@ pub fn read_document(
         })?;
     let abs = safe_rel_join(&cb.local_path, path)?;
     if !abs.exists() {
-        return Err(CommitBookError::not_found(format!("Document {path} not found")));
+        return Err(CommitBookError::not_found(format!(
+            "Document {path} not found"
+        )));
     }
     let content = std::fs::read_to_string(&abs)
         .map_err(|e| CommitBookError::database(format!("Read {path}: {e}")))?;
@@ -163,10 +165,14 @@ fn safe_rel_join(base: &Path, rel: &str) -> Result<std::path::PathBuf> {
 }
 
 fn walk_markdown(root: &Path, dir: &Path, out: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
-        let Ok(rel) = path.strip_prefix(root) else { continue };
+        let Ok(rel) = path.strip_prefix(root) else {
+            continue;
+        };
         let rel_str = rel.to_string_lossy();
         // Skip hidden directories (anything starting with '.').
         if rel_str.split('/').any(|seg| seg.starts_with('.')) {

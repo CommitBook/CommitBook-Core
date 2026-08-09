@@ -5,7 +5,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
-use super::{clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider};
+use super::{
+    clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
+};
 use crate::git::ChangesSummary;
 
 const COPILOT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -52,8 +54,7 @@ impl CommitMessageProvider for CopilotProvider {
             .spawn()
             .context("Failed to run gh copilot")?;
 
-        let output = wait_with_timeout(child, COPILOT_TIMEOUT)
-            .context("gh copilot timed out")?;
+        let output = wait_with_timeout(child, COPILOT_TIMEOUT).context("gh copilot timed out")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -110,7 +111,8 @@ impl ConflictResolver for CopilotProvider {
             .spawn()
             .context("Failed to run gh copilot")?;
 
-        let output = wait_with_timeout(child, COPILOT_RESOLVE_TIMEOUT).context("gh copilot timed out")?;
+        let output =
+            wait_with_timeout(child, COPILOT_RESOLVE_TIMEOUT).context("gh copilot timed out")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -171,9 +173,7 @@ fn extract_message(output: &str) -> String {
             continue;
         }
         // Strip "git commit -m " prefix if present
-        let cleaned = cleaned
-            .strip_prefix("git commit -m ")
-            .unwrap_or(cleaned);
+        let cleaned = cleaned.strip_prefix("git commit -m ").unwrap_or(cleaned);
         let cleaned = cleaned.trim_matches('"').trim_matches('\'');
         if !cleaned.is_empty() {
             return clean_message(cleaned);

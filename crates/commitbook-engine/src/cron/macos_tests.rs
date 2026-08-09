@@ -125,7 +125,12 @@ fn test_build_plist_path_excludes_protected_roots() {
     let path = build_plist_path();
     if let Some(home) = dirs::home_dir() {
         let home_str = home.to_string_lossy().to_string();
-        for sub in &["Downloads", "Desktop", "Documents", "Library/Mobile Documents"] {
+        for sub in &[
+            "Downloads",
+            "Desktop",
+            "Documents",
+            "Library/Mobile Documents",
+        ] {
             let protected_root = format!("{}/{}", home_str, sub);
             for entry in path.split(':') {
                 assert!(

@@ -5,7 +5,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
-use super::{clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider};
+use super::{
+    clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
+};
 use crate::git::ChangesSummary;
 
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -48,8 +50,7 @@ impl CommitMessageProvider for ClaudeProvider {
                 .spawn()
                 .context("Failed to start claude CLI")?;
 
-            wait_with_timeout(child, CLAUDE_TIMEOUT)
-                .context("claude CLI timed out")
+            wait_with_timeout(child, CLAUDE_TIMEOUT).context("claude CLI timed out")
         })
         .await
         .context("spawn_blocking panicked")??;

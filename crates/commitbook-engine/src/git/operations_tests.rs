@@ -1,6 +1,6 @@
 use super::*;
 use crate::git::test_support::{
-    clone_second_workdir, commit_and_push_from, setup_repo_with_base, setup_repo_with_bare_remote,
+    clone_second_workdir, commit_and_push_from, setup_repo_with_bare_remote, setup_repo_with_base,
 };
 use std::fs;
 
@@ -218,10 +218,7 @@ fn test_rev_parse_resolves_head() {
 fn test_rev_parse_resolves_remote_ref() {
     let fx = setup_repo_with_bare_remote();
     let head_sha = fx.repo.rev_parse("HEAD").unwrap();
-    let remote_sha = fx
-        .repo
-        .rev_parse(&format!("origin/{}", fx.branch))
-        .unwrap();
+    let remote_sha = fx.repo.rev_parse(&format!("origin/{}", fx.branch)).unwrap();
     assert_eq!(head_sha, remote_sha);
 }
 
@@ -253,10 +250,7 @@ fn test_show_file_at_ref_ignores_uncommitted_edits() {
 fn test_fetch_advances_remote_ref() {
     let fx = setup_repo_with_bare_remote();
 
-    let before = fx
-        .repo
-        .rev_parse(&format!("origin/{}", fx.branch))
-        .unwrap();
+    let before = fx.repo.rev_parse(&format!("origin/{}", fx.branch)).unwrap();
 
     // A second workdir pushes a new commit.
     let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
@@ -265,10 +259,7 @@ fn test_fetch_advances_remote_ref() {
     // Fetch in the original repo picks up the new commit.
     fx.repo.fetch("origin", &fx.branch).unwrap();
 
-    let after = fx
-        .repo
-        .rev_parse(&format!("origin/{}", fx.branch))
-        .unwrap();
+    let after = fx.repo.rev_parse(&format!("origin/{}", fx.branch)).unwrap();
     assert_ne!(before, after);
 }
 
@@ -339,10 +330,7 @@ fn test_merge_ff_only_fast_forwards_when_linear() {
     let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
     commit_and_push_from(other.path(), &fx.branch, "new.md", "# new\n");
     fx.repo.fetch("origin", &fx.branch).unwrap();
-    let remote_sha = fx
-        .repo
-        .rev_parse(&format!("origin/{}", fx.branch))
-        .unwrap();
+    let remote_sha = fx.repo.rev_parse(&format!("origin/{}", fx.branch)).unwrap();
 
     let advanced = fx
         .repo
@@ -482,10 +470,7 @@ fn test_has_dirty_markdown_ignores_non_md() {
 #[test]
 fn test_merge_from_remote_clean_when_in_sync() {
     let fx = setup_repo_with_bare_remote();
-    let outcome = fx
-        .repo
-        .merge_from_remote("origin", &fx.branch)
-        .unwrap();
+    let outcome = fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
     assert_eq!(outcome, MergeOutcome::Clean);
 }
 
@@ -495,10 +480,7 @@ fn test_merge_from_remote_fast_forwards_when_behind() {
     let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
     commit_and_push_from(other.path(), &fx.branch, "new.md", "# new\n");
 
-    let outcome = fx
-        .repo
-        .merge_from_remote("origin", &fx.branch)
-        .unwrap();
+    let outcome = fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
     assert_eq!(outcome, MergeOutcome::Clean);
     // Working tree should now contain the pulled file.
     assert!(fx.repo_dir.path().join("new.md").exists());
@@ -525,7 +507,10 @@ fn test_merge_from_remote_creates_merge_commit_on_diverge() {
     assert!(fx.repo_dir.path().join("local-only.md").exists());
     assert!(fx.repo_dir.path().join("remote-only.md").exists());
     let new_sha = fx.repo.rev_parse("HEAD").unwrap();
-    assert_ne!(new_sha, local_sha, "HEAD should advance to the merge commit");
+    assert_ne!(
+        new_sha, local_sha,
+        "HEAD should advance to the merge commit"
+    );
 }
 
 #[test]
@@ -707,5 +692,8 @@ fn test_last_commit_touching_skips_merge_equal_to_parent() {
     // The edit, not the merge commit, is the last commit that touched f.md.
     // (This is the regression guard for the `.all` fix; `.any` would return
     // the merge commit here.)
-    assert_eq!(fx.repo.last_commit_touching("f.md").unwrap(), Some(edit_sha));
+    assert_eq!(
+        fx.repo.last_commit_touching("f.md").unwrap(),
+        Some(edit_sha)
+    );
 }

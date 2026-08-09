@@ -25,10 +25,7 @@ fn test_save_and_load_roundtrip() {
     state.save(tmp.path()).unwrap();
 
     let loaded = SyncState::load(tmp.path()).unwrap();
-    assert_eq!(
-        loaded.last_sync_at.as_deref(),
-        Some("2026-04-09T10:00:00Z")
-    );
+    assert_eq!(loaded.last_sync_at.as_deref(), Some("2026-04-09T10:00:00Z"));
     assert!(loaded.last_error.is_none());
 }
 
@@ -59,10 +56,7 @@ fn test_save_overwrites_existing() {
     state2.save(tmp.path()).unwrap();
 
     let loaded = SyncState::load(tmp.path()).unwrap();
-    assert_eq!(
-        loaded.last_sync_at.as_deref(),
-        Some("2026-04-09T12:00:00Z")
-    );
+    assert_eq!(loaded.last_sync_at.as_deref(), Some("2026-04-09T12:00:00Z"));
     assert!(loaded.last_error.is_none());
 }
 
@@ -79,8 +73,5 @@ last_sync_at = "2026-04-09T10:00:00Z"
     std::fs::write(tmp.path().join("local").join("state.toml"), legacy).unwrap();
 
     let loaded = SyncState::load(tmp.path()).unwrap();
-    assert_eq!(
-        loaded.last_sync_at.as_deref(),
-        Some("2026-04-09T10:00:00Z")
-    );
+    assert_eq!(loaded.last_sync_at.as_deref(), Some("2026-04-09T10:00:00Z"));
 }

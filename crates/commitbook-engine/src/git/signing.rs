@@ -162,9 +162,7 @@ fn sign_gpg(config: &git2::Config, unsigned_bytes: &[u8]) -> Result<String> {
         .write_all(unsigned_bytes)
         .context("Failed to pipe commit bytes to gpg")?;
 
-    let output = child
-        .wait_with_output()
-        .context("Failed to wait for gpg")?;
+    let output = child.wait_with_output().context("Failed to wait for gpg")?;
     if !output.status.success() {
         anyhow::bail!(
             "gpg sign failed: {}",

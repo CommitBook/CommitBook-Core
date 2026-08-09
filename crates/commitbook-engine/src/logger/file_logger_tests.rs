@@ -10,7 +10,12 @@ fn make_logger() -> (tempfile::TempDir, FileLogger) {
 fn test_creates_logs_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let _logger = FileLogger::new(tmp.path(), 10).unwrap();
-    assert!(tmp.path().join(".CommitBook").join("local").join("logs").exists());
+    assert!(tmp
+        .path()
+        .join(".CommitBook")
+        .join("local")
+        .join("logs")
+        .exists());
 }
 
 #[test]
@@ -38,10 +43,13 @@ fn test_all_log_levels() {
     let lines = logger.read_recent(10).unwrap();
     assert_eq!(lines.len(), 4);
 
-    let levels: Vec<String> = lines.iter().map(|l| {
-        let v: serde_json::Value = serde_json::from_str(l).unwrap();
-        v["level"].as_str().unwrap().to_string()
-    }).collect();
+    let levels: Vec<String> = lines
+        .iter()
+        .map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).unwrap();
+            v["level"].as_str().unwrap().to_string()
+        })
+        .collect();
     // read_recent returns reversed (most recent first)
     assert!(levels.contains(&"INFO".to_string()));
     assert!(levels.contains(&"WARN".to_string()));
@@ -52,7 +60,13 @@ fn test_all_log_levels() {
 #[test]
 fn test_extra_fields() {
     let (_tmp, logger) = make_logger();
-    logger.log_with("INFO", "commit done", Some(&[("provider", "Claude"), ("hash", "abc1234")])).unwrap();
+    logger
+        .log_with(
+            "INFO",
+            "commit done",
+            Some(&[("provider", "Claude"), ("hash", "abc1234")]),
+        )
+        .unwrap();
 
     let lines = logger.read_recent(10).unwrap();
     let entry: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();

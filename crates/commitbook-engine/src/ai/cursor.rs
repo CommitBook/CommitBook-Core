@@ -40,7 +40,8 @@ impl ConflictResolver for CursorProvider {
             .spawn()
             .context("Failed to start cursor-agent CLI")?;
 
-        let output = wait_with_timeout(child, CURSOR_RESOLVE_TIMEOUT).context("cursor-agent CLI timed out")?;
+        let output = wait_with_timeout(child, CURSOR_RESOLVE_TIMEOUT)
+            .context("cursor-agent CLI timed out")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

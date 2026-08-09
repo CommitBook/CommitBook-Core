@@ -78,7 +78,6 @@ fn cb_dir_of(fx: &RepoFixture) -> std::path::PathBuf {
 async fn scenario_1_up_to_date_no_changes() {
     let (fx, logger) = setup_with_state();
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -89,7 +88,10 @@ async fn scenario_1_up_to_date_no_changes() {
     )
     .await
     .unwrap();
-    assert!(outcome.is_clean(), "expected clean outcome, got {outcome:?}");
+    assert!(
+        outcome.is_clean(),
+        "expected clean outcome, got {outcome:?}"
+    );
 }
 
 #[tokio::test]
@@ -98,7 +100,6 @@ async fn scenario_2_local_only_edit_commits_and_pushes() {
     std::fs::write(fx.repo_dir.path().join("note.md"), "# note\n").unwrap();
 
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -122,7 +123,6 @@ async fn scenario_3_remote_only_changes_pulls() {
     commit_and_push_from(other.path(), &fx.branch, "remote.md", "# remote\n");
 
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -152,7 +152,6 @@ async fn scenario_4_local_and_remote_different_files() {
     commit_and_push_from(other.path(), &fx.branch, "remote.md", "# remote\n");
 
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -188,7 +187,11 @@ async fn scenario_5_same_file_non_overlapping_lines() {
     assert!(push.status.success());
 
     // Local: edit line A (uncommitted).
-    std::fs::write(fx.repo_dir.path().join("shared.md"), "line A LOCAL\nline B\nline C\n").unwrap();
+    std::fs::write(
+        fx.repo_dir.path().join("shared.md"),
+        "line A LOCAL\nline B\nline C\n",
+    )
+    .unwrap();
 
     // Remote: edit line C.
     let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
@@ -200,7 +203,6 @@ async fn scenario_5_same_file_non_overlapping_lines() {
     );
 
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -236,7 +238,6 @@ async fn scenario_6_same_lines_manual_mode_returns_manual_conflicts() {
     commit_and_push_from(other.path(), &fx.branch, "shared.md", "line A REMOTE\n");
 
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -273,7 +274,6 @@ async fn scenario_7_same_lines_ai_mock_resolves() {
 
     let resolver = MockResolver::ok("line A RESOLVED\n");
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -312,7 +312,6 @@ async fn scenario_8_failing_resolver_falls_back_to_manual() {
 
     let resolver = MockResolver::failing();
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -343,7 +342,6 @@ async fn scenario_9_unpushed_local_commits_rebase_onto_remote() {
     commit_and_push_from(other.path(), &fx.branch, "remote.md", "# remote\n");
 
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -368,7 +366,6 @@ async fn scenario_10_pull_failure_surfaces_error() {
     let (fx, logger) = setup_with_state();
     // Use a remote name that doesn't exist to force a pull failure.
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "nonexistent-remote",
         &fx.branch,
@@ -407,7 +404,6 @@ async fn leave_merge_in_progress(fx: &RepoFixture, logger: &FileLogger) {
     commit_and_push_from(other.path(), &fx.branch, "shared.md", "line A REMOTE\n");
 
     let first = sync_with_resolver(
-        &cb_dir_of(fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -444,7 +440,6 @@ async fn resolver_returning_conflict_markers_falls_back_to_manual() {
     let resolver =
         MockResolver::ok("<<<<<<< HEAD\nstill conflicted\n=======\nnope\n>>>>>>> other\n");
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -468,7 +463,6 @@ async fn scenario_11_merge_in_progress_unresolved_reports_manual() {
 
     // A second cycle recovers the in-progress merge; still unresolved.
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -498,7 +492,6 @@ async fn scenario_12_merge_in_progress_resolved_finalizes() {
 
     // A second cycle finalizes the merge and pushes it.
     let outcome = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -523,7 +516,6 @@ async fn failed_cycle_records_last_error_without_advancing_last_sync_at() {
     // A successful cycle stamps last_sync_at and clears last_error.
     std::fs::write(fx.repo_dir.path().join("note.md"), "# note\n").unwrap();
     let ok = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -554,7 +546,6 @@ async fn failed_cycle_records_last_error_without_advancing_last_sync_at() {
 
     let resolver = MockResolver::failing();
     let bad = sync_with_resolver(
-        &cb_dir_of(&fx),
         fx.repo_dir.path(),
         "origin",
         &fx.branch,
@@ -568,7 +559,10 @@ async fn failed_cycle_records_last_error_without_advancing_last_sync_at() {
     assert!(!bad.errors.is_empty());
 
     let state2 = SyncState::load(&cb_dir_of(&fx)).unwrap();
-    assert!(state2.last_error.is_some(), "failure should record last_error");
+    assert!(
+        state2.last_error.is_some(),
+        "failure should record last_error"
+    );
     assert_eq!(
         state2.last_sync_at, state1.last_sync_at,
         "a failed cycle must not advance last_sync_at"
@@ -608,11 +602,8 @@ async fn first_sync_against_empty_remote_bootstraps_branch() {
             .shorthand()
             .unwrap_or("main")
             .to_string();
-        repo.remote(
-            "origin",
-            &format!("file://{}", remote_dir.path().display()),
-        )
-        .unwrap();
+        repo.remote("origin", &format!("file://{}", remote_dir.path().display()))
+            .unwrap();
         branch
     };
 
@@ -621,7 +612,6 @@ async fn first_sync_against_empty_remote_bootstraps_branch() {
     let logger = FileLogger::new(repo_dir.path(), 30).unwrap();
 
     let outcome = sync_with_resolver(
-        &cb_dir,
         repo_dir.path(),
         "origin",
         &branch,
@@ -638,8 +628,14 @@ async fn first_sync_against_empty_remote_bootstraps_branch() {
         "first sync against an empty remote should succeed: {outcome:?}"
     );
     // The bootstrap push is reported, not shown as "already up to date".
-    assert!(outcome.pushed >= 1, "bootstrap push should count: {outcome:?}");
-    assert!(!outcome.is_clean(), "a real bootstrap push is not a clean no-op");
+    assert!(
+        outcome.pushed >= 1,
+        "bootstrap push should count: {outcome:?}"
+    );
+    assert!(
+        !outcome.is_clean(),
+        "a real bootstrap push is not a clean no-op"
+    );
     // The push bootstrapped the branch on the remote.
     let remote_repo = Repository::open_bare(remote_dir.path()).unwrap();
     assert!(

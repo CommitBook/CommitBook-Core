@@ -73,6 +73,6 @@ fn build_resolve_prompt_includes_path_and_content() {
     let prompt = build_resolve_prompt(&path, content);
     assert!(prompt.contains("notes/intro.md"));
     assert!(prompt.contains("<<<<<<<"));
-    assert!(prompt.contains("=======") );
+    assert!(prompt.contains("======="));
     assert!(prompt.contains(">>>>>>>"));
 }

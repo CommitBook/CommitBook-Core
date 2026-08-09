@@ -46,11 +46,7 @@ pub(super) fn filter_crontab_lines(current: &str, repo_path: &Path) -> String {
 }
 
 /// Install a crontab entry for the repo. Returns "crontab:<repo_path>" as scheduler_id.
-pub fn install(
-    repo_path: &Path,
-    schedule: &str,
-    commitbook_bin: &Path,
-) -> Result<String> {
+pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<String> {
     // Remove any existing entry first
     let _ = uninstall(repo_path);
 
@@ -101,9 +97,9 @@ pub fn is_loaded(repo_path: &Path) -> bool {
     let cd_arg = format!("cd \"{}\"", repo_str);
     get_current_crontab()
         .map(|crontab| {
-            crontab.lines().any(|line| {
-                line.contains(&cd_arg) && line.contains("commitbook")
-            })
+            crontab
+                .lines()
+                .any(|line| line.contains(&cd_arg) && line.contains("commitbook"))
         })
         .unwrap_or(false)
 }

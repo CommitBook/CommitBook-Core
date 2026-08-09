@@ -64,14 +64,8 @@ pub fn initialize(repo_root: &Path, remote_name: &str) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(
-            &cb_dir,
-            std::fs::Permissions::from_mode(0o700),
-        );
-        let _ = std::fs::set_permissions(
-            &local,
-            std::fs::Permissions::from_mode(0o700),
-        );
+        let _ = std::fs::set_permissions(&cb_dir, std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::set_permissions(&local, std::fs::Permissions::from_mode(0o700));
     }
 
     // Write default config if missing
@@ -91,13 +85,10 @@ pub fn initialize(repo_root: &Path, remote_name: &str) -> Result<()> {
 /// Ensure CommitBook entries are in .gitignore.
 fn update_gitignore(repo_root: &Path) -> Result<()> {
     let gitignore_path = repo_root.join(".gitignore");
-    let entries = [
-        ".CommitBook/local/",
-    ];
+    let entries = [".CommitBook/local/"];
 
     let content = if gitignore_path.exists() {
-        std::fs::read_to_string(&gitignore_path)
-            .with_context(|| "Failed to read .gitignore")?
+        std::fs::read_to_string(&gitignore_path).with_context(|| "Failed to read .gitignore")?
     } else {
         String::new()
     };

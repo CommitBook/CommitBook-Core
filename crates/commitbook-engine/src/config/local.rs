@@ -355,9 +355,7 @@ impl LocalConfig {
     /// Ensure CommitBook entries are in .gitignore.
     fn update_gitignore(repo_path: &Path) -> Result<()> {
         let gitignore_path = repo_path.join(".gitignore");
-        let entries = [
-            ".CommitBook/local/",
-        ];
+        let entries = [".CommitBook/local/"];
 
         let content = if gitignore_path.exists() {
             fs::read_to_string(&gitignore_path).with_context(|| "Failed to read .gitignore")?

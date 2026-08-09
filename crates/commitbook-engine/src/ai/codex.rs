@@ -5,7 +5,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
-use super::{clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider};
+use super::{
+    clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
+};
 use crate::git::ChangesSummary;
 
 const CODEX_TIMEOUT: Duration = Duration::from_secs(30);
@@ -46,8 +48,7 @@ impl CommitMessageProvider for CodexProvider {
             .spawn()
             .context("Failed to start codex CLI")?;
 
-        let output = wait_with_timeout(child, CODEX_TIMEOUT)
-            .context("codex CLI timed out")?;
+        let output = wait_with_timeout(child, CODEX_TIMEOUT).context("codex CLI timed out")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -97,7 +98,8 @@ impl ConflictResolver for CodexProvider {
             .spawn()
             .context("Failed to start codex CLI")?;
 
-        let output = wait_with_timeout(child, CODEX_RESOLVE_TIMEOUT).context("codex CLI timed out")?;
+        let output =
+            wait_with_timeout(child, CODEX_RESOLVE_TIMEOUT).context("codex CLI timed out")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

@@ -3,7 +3,10 @@ use super::*;
 #[test]
 fn test_parse_human_interval_minutes() {
     assert_eq!(parse_human_interval("5m"), Some("*/5 * * * *".to_string()));
-    assert_eq!(parse_human_interval("30m"), Some("*/30 * * * *".to_string()));
+    assert_eq!(
+        parse_human_interval("30m"),
+        Some("*/30 * * * *".to_string())
+    );
     assert_eq!(parse_human_interval("1m"), Some("*/1 * * * *".to_string()));
     assert_eq!(
         parse_human_interval("15min"),
@@ -52,7 +55,10 @@ fn test_parse_human_interval_rejects_unsupported() {
 
 #[test]
 fn test_parse_human_interval_tolerates_whitespace_and_case() {
-    assert_eq!(parse_human_interval("  5M "), Some("*/5 * * * *".to_string()));
+    assert_eq!(
+        parse_human_interval("  5M "),
+        Some("*/5 * * * *".to_string())
+    );
     assert_eq!(parse_human_interval("1H"), Some("0 * * * *".to_string()));
 }
 

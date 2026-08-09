@@ -118,4 +118,4 @@ These are separate repos consuming the engine through UniFFI bindings. The Apple
 - Repository: `CommitBook-Core` (this repo, the engine).
 - Apple app: `CommitBook/CommitBook-Apple`: current UI is a placeholder; rename `Workspace*` → `CommitBook*` is in flight.
 - Android app: `CommitBook/CommitBook-Android`: currently on `MockEngine`, gated on engine AAR.
-- Tag convention on the engine: bare semver (`0.1.0`), no `v` prefix.
+- Tag convention on the engine: bare semver (`0.5.0`), no `v` prefix.

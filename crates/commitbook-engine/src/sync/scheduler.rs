@@ -44,7 +44,6 @@ impl SyncOutcome {
 /// Loads the configured conflict resolver from the registry; programmatic
 /// callers wanting to inject a fake resolver use `sync_with_resolver` directly.
 pub async fn sync_repository(
-    cb_dir: &Path,
     repo_root: &Path,
     config: &LocalConfig,
     logger: &dyn Logger,
@@ -53,7 +52,6 @@ pub async fn sync_repository(
     let registry = ResolverRegistry::new();
     let resolver = registry.get(&config.conflict.resolver);
     sync_with_resolver(
-        cb_dir,
         repo_root,
         &config.git.remote,
         &config.git.branch,
@@ -68,7 +66,6 @@ pub async fn sync_repository(
 /// Lower-level entry that accepts an explicit resolver (or `None` for
 /// manual mode). Used by `sync_repository` and by tests.
 pub async fn sync_with_resolver(
-    cb_dir: &Path,
     repo_root: &Path,
     remote: &str,
     branch: &str,
@@ -77,6 +74,7 @@ pub async fn sync_with_resolver(
     logger: &dyn Logger,
     commit_message: Option<String>,
 ) -> Result<SyncOutcome> {
+    let cb_dir = LocalConfig::commitbook_dir(repo_root);
     let repo = GitRepo::open(repo_root)?;
     let mut outcome = SyncOutcome::default();
 
@@ -95,7 +93,7 @@ pub async fn sync_with_resolver(
                 );
                 let _ = logger.warn(&msg);
                 outcome.errors.push(msg);
-                return Ok(finalize_outcome(cb_dir, outcome));
+                return Ok(finalize_outcome(&cb_dir, outcome));
             }
             // Markers already resolved by the user: complete the merge.
             repo.finalize_merge_commit(None)?;
@@ -108,7 +106,10 @@ pub async fn sync_with_resolver(
             repo.stage_all()?;
             if repo.has_real_staged_changes()? {
                 let msg = commit_message.clone().unwrap_or_else(|| {
-                    format!("Update via CommitBook ({})", crate::utils::datetime::now_iso())
+                    format!(
+                        "Update via CommitBook ({})",
+                        crate::utils::datetime::now_iso()
+                    )
                 });
                 repo.commit(&msg)?;
                 outcome.committed = true;
@@ -121,7 +122,7 @@ pub async fn sync_with_resolver(
             let msg = format!("Fetch failed: {e}");
             let _ = logger.error(&msg);
             outcome.errors.push(msg);
-            return Ok(finalize_outcome(cb_dir, outcome));
+            return Ok(finalize_outcome(&cb_dir, outcome));
         }
 
         let local_tip = repo.rev_parse("HEAD").ok();
@@ -152,7 +153,7 @@ pub async fn sync_with_resolver(
                     let msg = format!("Merge failed: {e}");
                     let _ = logger.error(&msg);
                     outcome.errors.push(msg);
-                    return Ok(finalize_outcome(cb_dir, outcome));
+                    return Ok(finalize_outcome(&cb_dir, outcome));
                 }
             }
         } else {
@@ -165,42 +166,40 @@ pub async fn sync_with_resolver(
                 // `behind` then counts only the newly-arrived remote commits.
                 outcome.pulled += behind;
             }
-            MergeOutcome::Conflicts(conflicted) => {
-                match resolver {
-                    Some(r) => {
-                        match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger).await {
-                            Ok(()) => {
-                                outcome.conflicts_resolved += conflicted.len() as u32;
-                                repo.finalize_merge_commit(None)?;
-                                outcome.pulled += behind;
-                            }
-                            Err(e) => {
-                                outcome.manual_conflicts += conflicted.len() as u32;
-                                let msg = format!(
+            MergeOutcome::Conflicts(conflicted) => match resolver {
+                Some(r) => {
+                    match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger).await {
+                        Ok(()) => {
+                            outcome.conflicts_resolved += conflicted.len() as u32;
+                            repo.finalize_merge_commit(None)?;
+                            outcome.pulled += behind;
+                        }
+                        Err(e) => {
+                            outcome.manual_conflicts += conflicted.len() as u32;
+                            let msg = format!(
                                     "AI resolver failed ({}); {} conflict(s) need manual resolution: {}",
                                     e,
                                     conflicted.len(),
                                     conflicted.join(", ")
                                 );
-                                let _ = logger.warn(&msg);
-                                outcome.errors.push(msg);
-                                return Ok(finalize_outcome(cb_dir, outcome));
-                            }
+                            let _ = logger.warn(&msg);
+                            outcome.errors.push(msg);
+                            return Ok(finalize_outcome(&cb_dir, outcome));
                         }
                     }
-                    None => {
-                        outcome.manual_conflicts += conflicted.len() as u32;
-                        let msg = format!(
-                            "{} conflict(s) need manual resolution: {}",
-                            conflicted.len(),
-                            conflicted.join(", ")
-                        );
-                        let _ = logger.warn(&msg);
-                        outcome.errors.push(msg);
-                        return Ok(finalize_outcome(cb_dir, outcome));
-                    }
                 }
-            }
+                None => {
+                    outcome.manual_conflicts += conflicted.len() as u32;
+                    let msg = format!(
+                        "{} conflict(s) need manual resolution: {}",
+                        conflicted.len(),
+                        conflicted.join(", ")
+                    );
+                    let _ = logger.warn(&msg);
+                    outcome.errors.push(msg);
+                    return Ok(finalize_outcome(&cb_dir, outcome));
+                }
+            },
         }
 
         // 4. Push.
@@ -227,7 +226,7 @@ pub async fn sync_with_resolver(
         }
     }
 
-    Ok(finalize_outcome(cb_dir, outcome))
+    Ok(finalize_outcome(&cb_dir, outcome))
 }
 
 /// Resolve each conflicted path via the resolver, stage the resolution.
@@ -249,7 +248,9 @@ async fn resolve_conflicts_inner(
         let abs_path = repo_root.join(path);
         let content = std::fs::read_to_string(&abs_path)
             .with_context(|| format!("Failed to read {}", abs_path.display()))?;
-        let resolved = resolver.resolve(Path::new(path), &content, repo_root).await?;
+        let resolved = resolver
+            .resolve(Path::new(path), &content, repo_root)
+            .await?;
         // A resolver that returns unresolved markers must not have its output
         // committed; fall back to manual resolution instead.
         if resolved.contains("<<<<<<<") {

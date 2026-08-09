@@ -19,10 +19,7 @@ const SECTION_BASE_MARKER: &str = "|||||||";
 const SECTION_DIVIDER: &str = "=======";
 const SECTION_REMOTE_MARKER: &str = ">>>>>>>";
 
-pub fn list_conflicts(
-    workspaces_root: &Path,
-    commitbook_id: &str,
-) -> Result<Vec<ConflictSummary>> {
+pub fn list_conflicts(workspaces_root: &Path, commitbook_id: &str) -> Result<Vec<ConflictSummary>> {
     let cb = find_by_id(workspaces_root, commitbook_id)
         .map_err(|e| CommitBookError::database(format!("Registry scan: {e}")))?
         .ok_or_else(|| {
@@ -87,9 +84,7 @@ pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) ->
         "manual_edit" => input
             .manual_content
             .clone()
-            .ok_or_else(|| CommitBookError::invalid_input(
-                "manual_edit requires manual_content",
-            ))?,
+            .ok_or_else(|| CommitBookError::invalid_input("manual_edit requires manual_content"))?,
         other => {
             return Err(CommitBookError::invalid_input(format!(
                 "Unknown resolution_type: {other}"
@@ -99,7 +94,7 @@ pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) ->
 
     std::fs::write(&abs, resolved)
         .map_err(|e| CommitBookError::database(format!("Write resolved: {e}")))?;
-    repo.stage_paths(&[input.conflict_id.clone()])
+    repo.stage_paths(std::slice::from_ref(&input.conflict_id))
         .map_err(|e| CommitBookError::database(format!("Stage: {e}")))?;
 
     // If all conflicts cleared, finalize the merge commit.

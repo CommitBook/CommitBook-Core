@@ -50,7 +50,10 @@ fn test_extract_message_long_truncated() {
 #[test]
 fn test_extract_message_new_cli_plain() {
     let output = "Add pagination to user list endpoint\n\n\nTotal usage est:       1 Premium request\nTotal duration (API):  2.9s\nTotal duration (wall): 6.3s\nTotal code changes:    0 lines added, 0 lines removed\nUsage by model:\n    claude-sonnet-4.5    11.4k input, 8 output, 0 cache read, 0 cache write (Est. 1 Premium request)";
-    assert_eq!(extract_message(output), "Add pagination to user list endpoint");
+    assert_eq!(
+        extract_message(output),
+        "Add pagination to user list endpoint"
+    );
 }
 
 #[test]

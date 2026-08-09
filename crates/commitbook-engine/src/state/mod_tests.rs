@@ -40,7 +40,9 @@ fn test_find_commitbook_dir_skips_commitbook_without_git() {
 #[test]
 fn test_find_commitbook_dir_errors_when_not_found() {
     let tmp = tempdir().unwrap();
-    let err = find_commitbook_dir_from(tmp.path()).unwrap_err().to_string();
+    let err = find_commitbook_dir_from(tmp.path())
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("not initialized"));
 }
 

@@ -11,9 +11,7 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, expression: &str) -> Result<()> {
     // Resolve and validate. Try presets first, then natural-time shorthands
     // (`5m`, `1h`, `1d`), and finally fall through to strict cron validation.
     let schedule = match expression {
-        "hourly" | "daily" | "every-30m" | "every-4h" => {
-            cron::resolve_schedule(expression)
-        }
+        "hourly" | "daily" | "every-30m" | "every-4h" => cron::resolve_schedule(expression),
         _ => {
             if let Some(cron_expr) = cron::parse_human_interval(expression) {
                 cron_expr
@@ -29,8 +27,7 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, expression: &str) -> Result<()> {
 
     // Reinstall scheduler if it's currently running.
     if cron::is_loaded(repo_root) {
-        let binary =
-            std::env::current_exe().unwrap_or_else(|_| "commitbook".into());
+        let binary = std::env::current_exe().unwrap_or_else(|_| "commitbook".into());
         cron::install(repo_root, &schedule, &binary)?;
     }
 

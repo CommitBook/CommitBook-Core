@@ -2,9 +2,9 @@
 
 Work needed in [`CommitBook/CommitBook-Android`](https://github.com/CommitBook/CommitBook-Android) once `commitbook-engine` ships an Android artifact. Track each item in a separate PR.
 
-> **Tag convention reminder:** upstream `commitbook-engine` releases use unprefixed tags like `0.1.0`. URLs and version pins must omit the `v`.
+> **Tag convention reminder:** upstream `commitbook-engine` releases use unprefixed tags like `0.5.0`. URLs and version pins must omit the `v`.
 
-> **iOS goes first.** The first engine release `0.1.0` ships an iOS-only xcframework. The Android pipeline (AAR or raw `.so` + bindings) lands in a follow-up engine release. Until then, Android stays on `MockEngine`. This TODO covers the *Android-side* work for when that lands.
+> **iOS goes first.** The first published engine release `0.5.0` ships an iOS-only xcframework. The Android pipeline (AAR or raw `.so` + bindings) lands in a follow-up engine release. Until then, Android stays on `MockEngine`. This TODO covers the *Android-side* work for when that lands.
 
 ## 0. Wait for the engine to ship an Android artifact
 
@@ -18,11 +18,11 @@ Track that work upstream. The remaining items here only become actionable once t
 
 ## 1. Add the Android artifact dependency
 
-- [ ] Wherever the engine ships the AAR (likely a GitHub release), add a download step or a Gradle dependency. If AAR-via-release: stash it in `app/libs/commitbook-engine-0.1.0.aar` and reference it from `app/build.gradle.kts`.
+- [ ] Wherever the engine ships the AAR (likely a GitHub release), add a download step or a Gradle dependency. If AAR-via-release: stash it in `app/libs/commitbook-engine-<version>.aar` and reference it from `app/build.gradle.kts`.
 - [ ] Add a `.core-version` file at the repo root mirroring the Apple convention:
-  - `CORE_VERSION=0.1.0`
+  - `CORE_VERSION=<published-version>`
   - `AAR_CHECKSUM=sha256:<value>`
-  - `AAR_URL=https://github.com/CommitBook/CommitBook-Core/releases/download/0.1.0/commitbook-engine-0.1.0.aar`
+  - `AAR_URL=https://github.com/CommitBook/CommitBook-Core/releases/download/<version>/commitbook-engine-<version>.aar`
 - [ ] Add `scripts/fetch-aar.sh` as the analogue of the Apple repo's `fetch-xcframework.sh`, verifies SHA256, places the AAR under `app/libs/`, fails CI when `.core-version` still has placeholder values.
 
 ## 2. Rename Kotlin types: `Workspace*` → `CommitBook*`
@@ -88,10 +88,10 @@ Track that work upstream. The remaining items here only become actionable once t
 
 ## 10. Background sync (deferred)
 
-`WorkManager` integration for periodic sync isn't in v0.1.0 scope. Add a separate plan when it's needed. The `auto_sync` preference per CommitBook is already supported on the engine side (`Preferences::auto_sync` in `<clone>/.CommitBook/local/preferences.toml`); the Android side just needs to read it and schedule a worker accordingly.
+`WorkManager` integration for periodic sync isn't in the first Android integration scope. Add a separate plan when it's needed. The `auto_sync` preference per CommitBook is already supported on the engine side (`Preferences::auto_sync` in `<clone>/.CommitBook/local/preferences.toml`); the Android side just needs to read it and schedule a worker accordingly.
 
 ## Reminders for the engine repo
 
 - [ ] Add `scripts/build-android-aar.sh` analogous to `scripts/build-xcframework.sh` (lives in `crates/commitbook-client/scripts/`).
-- [ ] Tag conventions match iOS: `0.1.1`, `0.2.0`, no `v` prefix.
+- [ ] Tag conventions match iOS: `0.5.1`, `0.6.0`, no `v` prefix.
 - [ ] Both artifacts (xcframework + AAR) attached to the same release tag, so `.core-version` in both app repos can pin to the same number.

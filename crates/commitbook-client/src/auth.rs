@@ -39,9 +39,7 @@ pub(crate) async fn fetch_user_repos(token: &str) -> Result<Vec<RepoInfo>> {
     let mut all = Vec::new();
     let mut page = 1u32;
     loop {
-        let url = format!(
-            "{GITHUB_API}/user/repos?per_page=100&sort=updated&page={page}"
-        );
+        let url = format!("{GITHUB_API}/user/repos?per_page=100&sort=updated&page={page}");
         let resp = client
             .get(&url)
             .header("Authorization", format!("token {token}"))

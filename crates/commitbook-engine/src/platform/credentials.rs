@@ -28,16 +28,15 @@ impl CredentialProvider for SystemCredentials {
         allowed: CredentialType,
     ) -> Result<Cred> {
         let config = Config::open_default()?;
-        let cred = Cred::credential_helper(&config, url, username_from_url)
-            .or_else(|_| {
-                if allowed.contains(CredentialType::SSH_KEY) {
-                    Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
-                } else if allowed.contains(CredentialType::DEFAULT) {
-                    Cred::default()
-                } else {
-                    Cred::username(username_from_url.unwrap_or(""))
-                }
-            })?;
+        let cred = Cred::credential_helper(&config, url, username_from_url).or_else(|_| {
+            if allowed.contains(CredentialType::SSH_KEY) {
+                Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
+            } else if allowed.contains(CredentialType::DEFAULT) {
+                Cred::default()
+            } else {
+                Cred::username(username_from_url.unwrap_or(""))
+            }
+        })?;
         Ok(cred)
     }
 }

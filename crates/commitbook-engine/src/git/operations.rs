@@ -127,8 +127,7 @@ impl GitRepo {
     /// Get a summary of all uncommitted changes.
     pub fn changes_summary(&self) -> Result<ChangesSummary> {
         let mut opts = StatusOptions::new();
-        opts.include_untracked(true)
-            .recurse_untracked_dirs(true);
+        opts.include_untracked(true).recurse_untracked_dirs(true);
 
         let statuses = self
             .repo
@@ -242,9 +241,11 @@ impl GitRepo {
             .or_else(|_| Signature::now("CommitBook", "commitbook@localhost"))
             .context("Failed to create signature")?;
 
-        let parent_commit = self.repo.head().ok().and_then(|head| {
-            head.peel_to_commit().ok()
-        });
+        let parent_commit = self
+            .repo
+            .head()
+            .ok()
+            .and_then(|head| head.peel_to_commit().ok());
 
         let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
 
@@ -398,10 +399,7 @@ impl GitRepo {
 
     /// Check if the repo has any remotes configured.
     pub fn has_remote(&self) -> bool {
-        self.repo
-            .remotes()
-            .map(|r| !r.is_empty())
-            .unwrap_or(false)
+        self.repo.remotes().map(|r| !r.is_empty()).unwrap_or(false)
     }
 
     /// Get the default remote name (usually "origin").
@@ -416,10 +414,7 @@ impl GitRepo {
     /// Get the current branch name.
     pub fn current_branch(&self) -> Result<String> {
         let head = self.repo.head().context("Failed to get HEAD")?;
-        let branch = head
-            .shorthand()
-            .unwrap_or("main")
-            .to_string();
+        let branch = head.shorthand().unwrap_or("main").to_string();
         Ok(branch)
     }
 
@@ -435,11 +430,7 @@ impl GitRepo {
     /// with its total delta, regardless of staging state. Covers working-tree
     /// and index in a single diff so the AI never sees a file twice.
     pub fn diff_summary(&self) -> Result<String> {
-        let head_tree = self
-            .repo
-            .head()
-            .ok()
-            .and_then(|h| h.peel_to_tree().ok());
+        let head_tree = self.repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         let diff = self
             .repo
             .diff_tree_to_workdir_with_index(head_tree.as_ref(), None)
@@ -513,11 +504,7 @@ impl GitRepo {
     /// silently discarding them (libgit2's safe checkout would otherwise skip
     /// them without surfacing an error).
     fn ff_dirty_conflicts(&self, target_oid: git2::Oid) -> Result<Vec<String>> {
-        let head_tree = self
-            .repo
-            .head()
-            .ok()
-            .and_then(|h| h.peel_to_tree().ok());
+        let head_tree = self.repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         let target_tree = self
             .repo
             .find_commit(target_oid)
@@ -725,7 +712,9 @@ impl GitRepo {
         }
         let target = Path::new(path);
         let mut revwalk = self.repo.revwalk().context("Failed to create revwalk")?;
-        revwalk.push_head().context("Failed to push HEAD to revwalk")?;
+        revwalk
+            .push_head()
+            .context("Failed to push HEAD to revwalk")?;
         // Topological ordering guarantees children are visited before their
         // parents, so the first matching commit is the most recent one to touch
         // the path. TIME alone is unstable when commits share a timestamp and
@@ -736,7 +725,10 @@ impl GitRepo {
 
         for oid in revwalk {
             let oid = oid.context("Failed to read revwalk entry")?;
-            let commit = self.repo.find_commit(oid).context("Failed to find commit")?;
+            let commit = self
+                .repo
+                .find_commit(oid)
+                .context("Failed to find commit")?;
             let blob = commit
                 .tree()
                 .ok()
@@ -846,10 +838,7 @@ impl GitRepo {
             // clobbering unrelated local modifications; `recreate_missing`
             // creates files the fast-forward adds.
             let head_ref = self.repo.head().context("Failed to get HEAD")?;
-            let head_name = head_ref
-                .name()
-                .context("HEAD is detached")?
-                .to_string();
+            let head_name = head_ref.name().context("HEAD is detached")?.to_string();
             drop(head_ref);
             self.repo
                 .reference(&head_name, upstream_oid, true, "commitbook: fast-forward")

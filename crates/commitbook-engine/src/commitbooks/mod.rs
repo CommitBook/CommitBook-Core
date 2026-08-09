@@ -17,7 +17,7 @@ pub mod slug;
 use std::path::PathBuf;
 
 pub use init::init_dot_commitbook;
-pub use preferences::{Preferences, load_preferences, save_preferences};
+pub use preferences::{load_preferences, save_preferences, Preferences};
 pub use registry::scan_workspaces_root;
 pub use slug::slug_for;
 

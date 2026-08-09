@@ -9,7 +9,10 @@ fn test_build_entry_format() {
         Path::new("/usr/bin/commitbook"),
     );
     assert_eq!(comment, "# CommitBook: /tmp/repo");
-    assert_eq!(entry, "0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" run");
+    assert_eq!(
+        entry,
+        "0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" run"
+    );
 }
 
 #[test]
@@ -40,7 +43,8 @@ fn test_build_entry_paths_with_spaces() {
 
 #[test]
 fn test_filter_removes_entry() {
-    let crontab = "# CommitBook: /tmp/repo\n0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" run\n";
+    let crontab =
+        "# CommitBook: /tmp/repo\n0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" run\n";
     let result = filter_crontab_lines(crontab, Path::new("/tmp/repo"));
     assert!(result.trim().is_empty());
 }

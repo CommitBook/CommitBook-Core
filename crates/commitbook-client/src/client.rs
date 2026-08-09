@@ -41,10 +41,7 @@ impl CommitBookEngineClient {
             .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
     }
 
-    pub async fn discover_commitbooks(
-        &self,
-        token: String,
-    ) -> Result<Vec<DiscoveredCommitBook>> {
+    pub async fn discover_commitbooks(&self, token: String) -> Result<Vec<DiscoveredCommitBook>> {
         let workspaces_root = self.workspaces_root.clone();
         // Run the whole discovery (reqwest + tokio::spawn + Semaphore) on the
         // shared runtime; the UDL poller provides none of its own.
@@ -140,8 +137,7 @@ impl CommitBookEngineClient {
     }
 
     pub fn list_commitbooks(&self) -> Result<Vec<CommitBookSummary>> {
-        let books =
-            commitbook_engine::commitbooks::scan_workspaces_root(&self.workspaces_root)?;
+        let books = commitbook_engine::commitbooks::scan_workspaces_root(&self.workspaces_root)?;
         Ok(books
             .into_iter()
             .map(|cb| CommitBookSummary {
@@ -153,7 +149,7 @@ impl CommitBookEngineClient {
                 provider: cb.provider,
                 branch: cb.branch,
                 auto_sync: cb.auto_sync,
-                doc_count: 0,    // computed on demand by list_documents
+                doc_count: 0, // computed on demand by list_documents
                 conflict_count: 0,
             })
             .collect())
@@ -209,11 +205,7 @@ impl CommitBookEngineClient {
         crate::documents::list_documents(&self.workspaces_root, &commitbook_id)
     }
 
-    pub fn read_document(
-        &self,
-        commitbook_id: String,
-        path: String,
-    ) -> Result<DocumentContent> {
+    pub fn read_document(&self, commitbook_id: String, path: String) -> Result<DocumentContent> {
         crate::documents::read_document(&self.workspaces_root, &commitbook_id, &path)
     }
 

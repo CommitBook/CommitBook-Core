@@ -2,24 +2,29 @@
 
 Work needed in [`CommitBook/CommitBook-Apple`](https://github.com/CommitBook/CommitBook-Apple) once `commitbook-engine` ships its first xcframework. Track each item in a separate PR.
 
-> **Tag convention reminder:** the upstream `commitbook-engine` repo uses unprefixed tags like `0.1.0`, not `v0.1.0`. `.core-version` and any URLs you build pointing at the engine's GitHub releases must use the bare version.
+> **Tag convention reminder:** the upstream `commitbook-engine` repo uses unprefixed tags like `0.5.0`, not `v0.5.0`. `.core-version` and any URLs you build pointing at the engine's GitHub releases must use the bare version.
+
+> **Artifact contract:** `CommitBookEngine.xcframework` exposes the C module `CommitBookEngineFFI` through `CommitBookEngineFFI.h` and `module.modulemap`. UniFFI's high-level Swift API is bundled separately at `Sources/CommitBookEngine.swift`; the Apple package must copy that source into a Swift target and compile it. Do not look for a compiled `CommitBookEngineFFI.swiftmodule` inside the XCFramework.
 
 ## 1. Bump `.core-version` to consume the new release
 
-- [ ] Get the published release URL + SHA256 from the engine repo's GitHub release `0.1.0`. The artifact filename is `CommitBookEngine.xcframework.zip`.
+- [ ] Get the published release URL + SHA256 from the engine repo's GitHub release `0.5.0`. The artifact filename is `CommitBookEngine.xcframework.zip`.
 - [ ] Update `.core-version` at the repo root:
-  - `CORE_VERSION=0.1.0`
+  - `CORE_VERSION=0.5.0`
   - `XCFRAMEWORK_CHECKSUM=sha256:<value-from-engine-release>`
-  - `XCFRAMEWORK_URL=https://github.com/CommitBook/CommitBook-Core/releases/download/0.1.0/CommitBookEngine.xcframework.zip`
+  - `XCFRAMEWORK_URL=https://github.com/CommitBook/CommitBook-Core/releases/download/0.5.0/CommitBookEngine.xcframework.zip`
 - [ ] Update `scripts/fetch-xcframework.sh` so:
   - It validates the framework directory name `CommitBookEngine.xcframework` (was `CommitBookCore.xcframework`).
-  - It validates the Swift module `CommitBookEngineFFI` (was `CommitBookCoreFFI`).
-- [ ] Run `scripts/fetch-xcframework.sh` locally and confirm `Packages/CommitBookAppleCore/Binaries/CommitBookEngine.xcframework/` lands with three slots: `ios-arm64`, `ios-arm64_x86_64-simulator`, `macos-arm64_x86_64`.
+  - It validates each slice's `Headers/CommitBookEngineFFI.h` and `Headers/module.modulemap`, plus the bundled `Sources/CommitBookEngine.swift`.
+  - It installs the XCFramework under `Packages/CommitBookAppleCore/Binaries/` and copies `Sources/CommitBookEngine.swift` into `Packages/CommitBookAppleCore/Sources/CommitBookAppleCore/Generated/CommitBookEngine.swift` so SwiftPM compiles the UniFFI API.
+  - For the private Core repository, it reads an access token from `COMMITBOOK_CORE_TOKEN`; do not rely on Apple CI's repo-scoped `github.token`, which cannot download another private repository's release.
+- [ ] Run `scripts/fetch-xcframework.sh` locally and confirm `Packages/CommitBookAppleCore/Binaries/CommitBookEngine.xcframework/` lands with three slices: `ios-arm64`, `ios-arm64_x86_64-simulator`, `macos-arm64_x86_64`, and that the generated Swift source is copied into the package target.
 
 ## 2. Update `Package.swift` to point at the new framework
 
 - [ ] In `Packages/CommitBookAppleCore/Package.swift`, change the binary target name from `CommitBookCoreFFI` to `CommitBookEngineFFI` and the path to `Binaries/CommitBookEngine.xcframework`.
 - [ ] Update the conditional that decides whether to add the binary target, should still gate on `Binaries/CommitBookEngine.xcframework` existing locally.
+- [ ] Keep the copied `Generated/CommitBookEngine.swift` under the existing `CommitBookAppleCore` source target (and gitignore it if generated artifacts are not committed); that source imports the binary target's C module and provides `CommitBookEngineClient`.
 - [ ] Run `swift build` from `Packages/CommitBookAppleCore` to confirm the package compiles with the binary present.
 
 ## 3. Rename Swift types: `Workspace*` → `CommitBook*`
@@ -88,7 +93,7 @@ The engine now exposes a `SyncMode { aiResolve, manual }` flag per sync. Decide 
 
 ## 10. CI updates
 
-- [ ] `.github/workflows/ci.yml`: the `real-core-integration` job's gated trigger should fire on a real `.core-version` (not the placeholder). Confirm it works against the new artifact.
+- [ ] `.github/workflows/ci.yml`: the `real-core-integration` job's gated trigger should fire on a real `.core-version` (not the placeholder). Store a token with read access to `CommitBook/CommitBook-Core` as the `COMMITBOOK_CORE_TOKEN` secret and pass that to `fetch-xcframework.sh`; the default `${{ github.token }}` is scoped only to the Apple repo.
 - [ ] `EngineContractTests` in `Packages/CommitBookAppleCore/Tests/`, add tests for the new methods (`discoverCommitBooks`, `validatePAT`, `syncCommitBook` with both modes).
 
 ## 11. End-to-end smoke test
@@ -104,5 +109,5 @@ The engine now exposes a `SyncMode { aiResolve, manual }` flag per sync. Decide 
 
 These are owned by the engine repo, but the Apple repo waits on them:
 
-- [ ] First real release tagged `0.1.0` (no `v` prefix) with `CommitBookEngine.xcframework.zip` attached and SHA256 in release notes.
-- [ ] Future releases bump to `0.1.1` / `0.2.0` etc., Apple repo bumps `.core-version` per release.
+- [ ] First real release tagged `0.5.0` (no `v` prefix) with `CommitBookEngine.xcframework.zip` attached and SHA256 in release notes.
+- [ ] Future releases bump to `0.5.1` / `0.6.0` etc., Apple repo bumps `.core-version` per release.

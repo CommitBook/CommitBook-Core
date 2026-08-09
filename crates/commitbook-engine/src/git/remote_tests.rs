@@ -11,9 +11,9 @@ fn test_check_remote_connectivity_no_remote() {
     let (tmp, _repo) = create_temp_repo();
     // No remote configured → should return Ok(false) or Err
     let result = check_remote_connectivity(tmp.path());
-    match result {
-        Ok(connected) => assert!(!connected),
-        Err(_) => {} // also acceptable, no remote to connect to
+    // An error is also acceptable when there is no remote to connect to.
+    if let Ok(connected) = result {
+        assert!(!connected);
     }
 }
 
@@ -27,7 +27,8 @@ fn test_get_remote_url_no_remote_errors() {
 #[test]
 fn test_get_remote_url_with_remote() {
     let (tmp, repo) = create_temp_repo();
-    repo.remote("origin", "https://example.com/repo.git").unwrap();
+    repo.remote("origin", "https://example.com/repo.git")
+        .unwrap();
 
     let url = get_remote_url(tmp.path(), "origin").unwrap();
     assert_eq!(url, "https://example.com/repo.git");

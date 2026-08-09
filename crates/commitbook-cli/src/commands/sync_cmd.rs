@@ -12,7 +12,7 @@ use commitbook_engine::sync::sync_repository;
 ///
 /// Returns an error if the sync surfaced any errors or unresolved manual
 /// conflicts so `commitbook sync && next-step` chains correctly.
-pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
+pub async fn run_sync(repo_root: &Path) -> Result<()> {
     let config = LocalConfig::load(repo_root)?;
     let logger = FileLogger::new(repo_root, config.logging.max_log_days)?;
     let repo = GitRepo::open(repo_root)?;
@@ -30,7 +30,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
         None
     };
 
-    let outcome = sync_repository(cb_dir, repo_root, &config, &logger, commit_message).await;
+    let outcome = sync_repository(repo_root, &config, &logger, commit_message).await;
 
     let exit_err: Option<anyhow::Error> = match outcome {
         Ok(o) => {
@@ -92,7 +92,7 @@ pub async fn run_sync(cb_dir: &Path, repo_root: &Path) -> Result<()> {
 }
 
 /// Run a scheduled sync cycle (hidden `commitbook run` command).
-pub async fn run_scheduled(cb_dir: &Path, repo_root: &Path) -> Result<()> {
+pub async fn run_scheduled(repo_root: &Path) -> Result<()> {
     use fs2::FileExt;
 
     let lock_path = LocalConfig::lock_path(repo_root);
@@ -116,7 +116,7 @@ pub async fn run_scheduled(cb_dir: &Path, repo_root: &Path) -> Result<()> {
     let _ = logger.info("Scheduled sync cycle started");
     log::info!("Starting scheduled sync cycle");
 
-    if let Err(e) = run_sync(cb_dir, repo_root).await {
+    if let Err(e) = run_sync(repo_root).await {
         let _ = logger.error(&format!("Scheduled sync failed: {e}"));
         log::error!("Scheduled sync failed: {e}");
     }
@@ -162,4 +162,3 @@ async fn generate_commit_message(
 #[cfg(test)]
 #[path = "sync_cmd_tests.rs"]
 mod tests;
-

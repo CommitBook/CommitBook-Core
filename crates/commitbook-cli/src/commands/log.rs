@@ -5,13 +5,7 @@ use std::time::Duration;
 
 use commitbook_engine::config::LocalConfig;
 
-pub fn run(
-    _cb_dir: &Path,
-    repo_root: &Path,
-    lines: usize,
-    json: bool,
-    tail: bool,
-) -> Result<()> {
+pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, json: bool, tail: bool) -> Result<()> {
     let logs_dir = LocalConfig::logs_dir(repo_root);
 
     if !logs_dir.exists() {
@@ -26,11 +20,7 @@ pub fn run(
     // Collect log files, sorted newest first.
     let mut log_files: Vec<_> = std::fs::read_dir(&logs_dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "log")
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
         .collect();
 
     log_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
@@ -144,9 +134,9 @@ fn format_log_line(line: &str) -> String {
 
         let level_colored = match level {
             "ERROR" => format!("[{}]", level).red().to_string(),
-            "WARN"  => format!("[{}]", level).yellow().to_string(),
-            "INFO"  => format!("[{}]", level).green().to_string(),
-            other   => format!("[{}]", other),
+            "WARN" => format!("[{}]", level).yellow().to_string(),
+            "INFO" => format!("[{}]", level).green().to_string(),
+            other => format!("[{}]", other),
         };
 
         if ts.is_empty() {

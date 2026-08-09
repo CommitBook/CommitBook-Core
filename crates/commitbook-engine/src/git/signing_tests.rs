@@ -26,6 +26,9 @@ fn resolve_ssh_key_file_strips_key_prefix() {
 #[test]
 fn resolve_ssh_key_file_treats_plain_value_as_path() {
     let (path, tmp) = resolve_ssh_key_file("/home/me/.ssh/id_ed25519").unwrap();
-    assert!(tmp.is_none(), "a path value should not be copied to a temp file");
+    assert!(
+        tmp.is_none(),
+        "a path value should not be copied to a temp file"
+    );
     assert_eq!(path, "/home/me/.ssh/id_ed25519");
 }

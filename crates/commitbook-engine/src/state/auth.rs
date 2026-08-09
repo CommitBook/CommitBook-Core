@@ -31,8 +31,8 @@ impl AuthConfig {
         let local = commitbook_dir.join("local");
         std::fs::create_dir_all(&local)?;
         let path = local.join("auth.toml");
-        let content = toml::to_string_pretty(self)
-            .with_context(|| "Failed to serialize auth.toml")?;
+        let content =
+            toml::to_string_pretty(self).with_context(|| "Failed to serialize auth.toml")?;
         std::fs::write(&path, &content)
             .with_context(|| format!("Failed to write {}", path.display()))?;
 
@@ -40,10 +40,7 @@ impl AuthConfig {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
-                &path,
-                std::fs::Permissions::from_mode(0o600),
-            );
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         }
 
         Ok(())

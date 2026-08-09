@@ -11,17 +11,13 @@ pub struct RepoFixture {
     pub branch: String,
 }
 
-/// Planner/pipeline fixture: a local git repo with `files` committed as the
-/// "base" state, plus a `.CommitBook/local/` directory ready for state writes.
-/// Returns the SHA of the base commit so tests can feed it into
-/// `SyncState.remote_head` or `SyncPlan.base_revision`.
+/// Test fixture with `files` committed as the base state and a
+/// `.CommitBook/local/` directory ready for state writes.
 pub struct BaseRepoFixture {
     // Held to keep the temp dir alive for the duration of the test.
     #[allow(dead_code)]
     pub tmp: TempDir,
     pub repo_root: PathBuf,
-    pub cb_dir: PathBuf,
-    pub base_sha: String,
     #[allow(dead_code)]
     pub branch: String,
 }
@@ -34,8 +30,7 @@ impl BaseRepoFixture {
 }
 
 /// Initialize a git repo at a temp dir, commit the provided files, and return
-/// the commit SHA. Use this for planner/pipeline tests that previously wrote
-/// `base/*` files directly.
+/// a ready-to-use fixture.
 pub fn setup_repo_with_base(files: &[(&str, &str)]) -> BaseRepoFixture {
     let tmp = tempdir().unwrap();
     let repo_root = tmp.path().to_path_buf();
@@ -79,14 +74,9 @@ pub fn setup_repo_with_base(files: &[(&str, &str)]) -> BaseRepoFixture {
         branch
     };
 
-    let repo = GitRepo::open(&repo_root).unwrap();
-    let base_sha = repo.rev_parse("HEAD").unwrap();
-
     BaseRepoFixture {
         tmp,
         repo_root,
-        cb_dir,
-        base_sha,
         branch,
     }
 }
@@ -125,11 +115,8 @@ pub fn setup_repo_with_bare_remote() -> RepoFixture {
             .unwrap_or("main")
             .to_string();
 
-        repo.remote(
-            "origin",
-            &format!("file://{}", remote_dir.path().display()),
-        )
-        .unwrap();
+        repo.remote("origin", &format!("file://{}", remote_dir.path().display()))
+            .unwrap();
 
         branch
     };

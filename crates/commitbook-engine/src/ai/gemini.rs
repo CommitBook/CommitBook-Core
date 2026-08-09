@@ -40,7 +40,8 @@ impl ConflictResolver for GeminiProvider {
             .spawn()
             .context("Failed to start gemini CLI")?;
 
-        let output = wait_with_timeout(child, GEMINI_RESOLVE_TIMEOUT).context("gemini CLI timed out")?;
+        let output =
+            wait_with_timeout(child, GEMINI_RESOLVE_TIMEOUT).context("gemini CLI timed out")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

@@ -103,11 +103,7 @@ async fn main() {
         if verbose {
             eprintln!("{} {:#}", "ERROR".red().bold(), e);
         } else {
-            eprintln!(
-                "{} {}",
-                "ERROR".red().bold(),
-                errors::humanize(&e)
-            );
+            eprintln!("{} {}", "ERROR".red().bold(), errors::humanize(&e));
             eprintln!("  {}", "Run with --verbose for the full error.".dimmed());
         }
         std::process::exit(1);
@@ -134,8 +130,7 @@ async fn run(cli: Cli) -> Result<()> {
             return Ok(());
         }
         Commands::Manpage => {
-            clap_mangen::Man::new(Cli::command())
-                .render(&mut std::io::stdout())?;
+            clap_mangen::Man::new(Cli::command()).render(&mut std::io::stdout())?;
             return Ok(());
         }
         Commands::Init => {
@@ -149,7 +144,7 @@ async fn run(cli: Cli) -> Result<()> {
     let repo_root = commitbook_engine::state::repo_root(&cb_dir);
 
     match cli.command {
-        Commands::Sync => commands::sync_cmd::run_sync(&cb_dir, &repo_root).await?,
+        Commands::Sync => commands::sync_cmd::run_sync(&repo_root).await?,
         Commands::Start => commands::start::run(&cb_dir, &repo_root)?,
         Commands::Stop => commands::stop::run(&cb_dir, &repo_root)?,
         Commands::Status => commands::status::run(&cb_dir, &repo_root, cli.json)?,
@@ -164,11 +159,9 @@ async fn run(cli: Cli) -> Result<()> {
             commands::login::run(&cb_dir, &repo_root, token, provider).await?;
         }
         Commands::Run => {
-            commands::sync_cmd::run_scheduled(&cb_dir, &repo_root).await?;
+            commands::sync_cmd::run_scheduled(&repo_root).await?;
         }
-        Commands::Init
-        | Commands::Completions { .. }
-        | Commands::Manpage => unreachable!(),
+        Commands::Init | Commands::Completions { .. } | Commands::Manpage => unreachable!(),
     }
 
     Ok(())

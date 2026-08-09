@@ -47,7 +47,7 @@ fn scan_finds_one_commitbook() {
     assert_eq!(cb.repo, "notes");
     assert_eq!(cb.name, "notes display");
     assert_eq!(cb.branch, "main");
-    assert_eq!(cb.auto_sync, true);
+    assert!(cb.auto_sync);
     assert!(cb.local_path.ends_with("manuel__notes"));
 }
 
@@ -99,11 +99,11 @@ fn preferences_round_trip() {
     fs::create_dir_all(clone.join(".CommitBook").join("local")).unwrap();
 
     let mut prefs = Preferences::default();
-    assert_eq!(prefs.auto_sync, true);
+    assert!(prefs.auto_sync);
     prefs.auto_sync = false;
     save_preferences(&clone, &prefs).unwrap();
     let loaded = load_preferences(&clone).unwrap();
-    assert_eq!(loaded.auto_sync, false);
+    assert!(!loaded.auto_sync);
 }
 
 #[test]
@@ -113,14 +113,14 @@ fn auto_sync_reflects_per_clone_preferences() {
 
     // Default scan: auto_sync = true
     let cb = scan_workspaces_root(tmp.path()).unwrap().pop().unwrap();
-    assert_eq!(cb.auto_sync, true);
+    assert!(cb.auto_sync);
 
     // Override via preferences
     let prefs = Preferences { auto_sync: false };
     save_preferences(&cb.local_path, &prefs).unwrap();
 
     let cb = scan_workspaces_root(tmp.path()).unwrap().pop().unwrap();
-    assert_eq!(cb.auto_sync, false);
+    assert!(!cb.auto_sync);
 }
 
 #[test]
@@ -155,12 +155,24 @@ fn init_writes_config_with_commitbook_section() {
 fn init_is_idempotent_on_commitbook_section() {
     let tmp = tempfile::tempdir().unwrap();
     init::init_dot_commitbook(
-        tmp.path(), "First", "manuel", "notes", "main", "github", "pat",
+        tmp.path(),
+        "First",
+        "manuel",
+        "notes",
+        "main",
+        "github",
+        "pat",
     )
     .unwrap();
     // Second call with different name doesn't overwrite.
     init::init_dot_commitbook(
-        tmp.path(), "Second", "manuel", "notes", "main", "github", "pat",
+        tmp.path(),
+        "Second",
+        "manuel",
+        "notes",
+        "main",
+        "github",
+        "pat",
     )
     .unwrap();
     let config = LocalConfig::load(tmp.path()).unwrap();
