@@ -35,6 +35,31 @@ fn scan_skips_subdirs_without_dot_commitbook() {
     assert!(cbs.is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn scan_never_follows_workspace_or_commitbook_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    write_commitbook(outside.path(), "outside", "notes", "main");
+    symlink(
+        outside.path().join("outside__notes"),
+        root.path().join("linked-clone"),
+    )
+    .unwrap();
+
+    let clone = root.path().join("linked-config");
+    fs::create_dir(&clone).unwrap();
+    symlink(
+        outside.path().join("outside__notes/.CommitBook"),
+        clone.join(".CommitBook"),
+    )
+    .unwrap();
+
+    assert!(scan_workspaces_root(root.path()).unwrap().is_empty());
+}
+
 #[test]
 fn scan_finds_one_commitbook() {
     let tmp = tempfile::tempdir().unwrap();
@@ -72,6 +97,39 @@ fn scan_skips_config_without_commitbook_section() {
 
     let cbs = scan_workspaces_root(tmp.path()).unwrap();
     assert!(cbs.is_empty());
+}
+
+#[test]
+fn scan_surfaces_missing_remote_migration_error_with_clone_context() {
+    let tmp = tempfile::tempdir().unwrap();
+    let clone = tmp.path().join("manuel__notes");
+    git2::Repository::init(&clone).unwrap();
+    fs::create_dir_all(clone.join(".CommitBook")).unwrap();
+    fs::write(
+        clone.join(".CommitBook/config.toml"),
+        r#"config_version = "1"
+enabled = true
+schedule = "hourly"
+created_at = "now"
+
+[git]
+branch = "main"
+auto_push = true
+
+[commitbook]
+name = "Notes"
+owner = "manuel"
+repo = "notes"
+provider = "github"
+mode = "pat"
+"#,
+    )
+    .unwrap();
+
+    let error = scan_workspaces_root(tmp.path()).unwrap_err().to_string();
+    assert!(error.contains("Failed to load CommitBook config"));
+    assert!(error.contains("manuel__notes"));
+    assert!(error.contains("has no remotes; add one and retry"));
 }
 
 #[test]
@@ -146,9 +204,10 @@ fn init_writes_config_with_commitbook_section() {
     assert_eq!(cb.mode, "pat");
     assert_eq!(config.git.branch, "main");
 
-    // .gitignore created with the local entry.
-    let gi = std::fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
-    assert!(gi.contains(".CommitBook/local/"));
+    // Nested ignore created without modifying repository-root policy.
+    let gi = std::fs::read_to_string(tmp.path().join(".CommitBook/.gitignore")).unwrap();
+    assert_eq!(gi, "/local/\n");
+    assert!(!tmp.path().join(".gitignore").exists());
 }
 
 #[test]
@@ -170,11 +229,12 @@ fn init_is_idempotent_on_commitbook_section() {
         "Second",
         "manuel",
         "notes",
-        "main",
+        "other-branch",
         "github",
         "pat",
     )
     .unwrap();
     let config = LocalConfig::load(tmp.path()).unwrap();
+    assert_eq!(config.git.branch, "main");
     assert_eq!(config.commitbook.unwrap().name, "First");
 }

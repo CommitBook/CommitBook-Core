@@ -11,7 +11,7 @@ pub mod fallback;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod gemini;
 
-pub use conflict::{ConflictResolver, ResolverRegistry};
+pub use conflict::{ConflictResolution, ConflictResolver, ResolverRegistry};
 
 use anyhow::Result;
 use async_trait::async_trait;

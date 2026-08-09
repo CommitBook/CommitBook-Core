@@ -32,3 +32,25 @@ fn resolve_ssh_key_file_treats_plain_value_as_path() {
     );
     assert_eq!(path, "/home/me/.ssh/id_ed25519");
 }
+
+#[test]
+fn gpg_arguments_allow_default_key_selection() {
+    let arguments = gpg_arguments(None);
+    assert_eq!(arguments, ["--sign", "--armor", "--detach-sign"]);
+    assert!(!arguments.iter().any(|argument| argument == "--local-user"));
+}
+
+#[test]
+fn gpg_arguments_include_explicit_key_when_configured() {
+    let arguments = gpg_arguments(Some("ABC123"));
+    assert_eq!(
+        arguments,
+        [
+            "--sign",
+            "--armor",
+            "--detach-sign",
+            "--local-user",
+            "ABC123"
+        ]
+    );
+}

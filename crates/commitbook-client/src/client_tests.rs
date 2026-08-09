@@ -18,6 +18,7 @@ fn async_ffi_methods_run_without_ambient_tokio_runtime() {
     let client = CommitBookEngineClient::new(
         "unused-db-path".to_string(),
         tmp.path().to_string_lossy().into_owned(),
+        None,
     )
     .unwrap();
 
@@ -46,4 +47,53 @@ fn async_ffi_methods_run_without_ambient_tokio_runtime() {
         matches!(second, Err(CommitBookError::NotFound { .. })),
         "second call should also return NotFound, got: {second:?}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn delete_never_follows_workspace_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    commitbook_engine::commitbooks::init_dot_commitbook(
+        outside.path(),
+        "Outside",
+        "owner",
+        "repo",
+        "main",
+        "github",
+        "pat",
+    )
+    .unwrap();
+    symlink(outside.path(), root.path().join("owner__repo")).unwrap();
+    let client = CommitBookEngineClient::new(
+        "unused".to_string(),
+        root.path().to_string_lossy().into_owned(),
+        None,
+    )
+    .unwrap();
+
+    let error = client
+        .delete_commitbook("owner/repo".to_string())
+        .expect_err("symlinked clone must not be registered or deleted");
+    assert!(matches!(error, CommitBookError::NotFound { .. }));
+    assert!(outside.path().join(".CommitBook/config.toml").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn constructor_rejects_symlink_workspace_root() {
+    use std::os::unix::fs::symlink;
+
+    let parent = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let linked = parent.path().join("linked-root");
+    symlink(outside.path(), &linked).unwrap();
+    assert!(CommitBookEngineClient::new(
+        "unused".to_string(),
+        linked.to_string_lossy().into_owned(),
+        None,
+    )
+    .is_err());
 }

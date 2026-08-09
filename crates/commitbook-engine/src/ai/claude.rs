@@ -4,11 +4,13 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
+use super::conflict::{
+    build_resolve_prompt, strip_outer_code_fence, ConflictResolution, ConflictResolver,
+};
 use super::{
     clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
 };
-use crate::git::ChangesSummary;
+use crate::git::{ChangesSummary, GitConflict};
 
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(30);
 const CLAUDE_RESOLVE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -90,11 +92,10 @@ impl ConflictResolver for ClaudeProvider {
 
     async fn resolve(
         &self,
-        file_path: &Path,
-        content_with_markers: &str,
+        conflict: &GitConflict,
         repo_path: &Path,
-    ) -> Result<String> {
-        let prompt = build_resolve_prompt(file_path, content_with_markers);
+    ) -> Result<ConflictResolution> {
+        let prompt = build_resolve_prompt(conflict)?;
         let repo_path = repo_path.to_path_buf();
         let output = tokio::task::spawn_blocking(move || {
             let child = Command::new("claude")
@@ -119,7 +120,7 @@ impl ConflictResolver for ClaudeProvider {
         if resolved.trim().is_empty() {
             bail!("Empty resolution from claude CLI");
         }
-        Ok(resolved)
+        Ok(ConflictResolution::WriteContent(resolved))
     }
 }
 

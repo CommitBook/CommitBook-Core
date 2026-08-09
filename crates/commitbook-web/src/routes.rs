@@ -298,7 +298,7 @@ pub async fn api_config(
         let mut config = LocalConfig::load(&state.repo_path)?;
 
         if let Some(schedule) = &update.schedule {
-            cron::validate_cron_expression(schedule)?;
+            cron::validate_platform_schedule(schedule)?;
             config.schedule = schedule.clone();
         }
         if let Some(auto_push) = update.auto_push {

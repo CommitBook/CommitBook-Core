@@ -4,26 +4,54 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::cron_to_interval_seconds;
+use super::{cron_to_interval_seconds, validate_cron_expression};
 
-/// Generate a unique plist label from a repo path.
-pub fn plist_label(repo_path: &Path) -> String {
+const PLIST_LABEL_PREFIX: &str = "com.zaai.commitbook";
+const LEGACY_PLIST_LABEL_PREFIX: &str = "com.commitbook";
+
+fn repository_hash(repo_path: &Path) -> String {
     let canonical = repo_path
         .canonicalize()
         .unwrap_or_else(|_| repo_path.to_path_buf());
     let mut hasher = Sha256::new();
     hasher.update(canonical.to_string_lossy().as_bytes());
     let hash = hex::encode(hasher.finalize());
-    format!("com.zaai.commitbook.{}", &hash[..12])
+    hash[..12].to_string()
+}
+
+/// Generate a unique plist label from a repo path.
+pub fn plist_label(repo_path: &Path) -> String {
+    format!("{PLIST_LABEL_PREFIX}.{}", repository_hash(repo_path))
+}
+
+/// Generate the label used before the com.zaai.commitbook rename.
+pub fn legacy_plist_label(repo_path: &Path) -> String {
+    format!("{LEGACY_PLIST_LABEL_PREFIX}.{}", repository_hash(repo_path))
 }
 
 /// Get the path where the plist file should be written.
 pub fn plist_path(repo_path: &Path) -> PathBuf {
     let home = dirs::home_dir().expect("Could not determine home directory");
-    let label = plist_label(repo_path);
+    plist_path_for_label(&home, &plist_label(repo_path))
+}
+
+/// Get the path used by releases before the launchd label rename.
+pub fn legacy_plist_path(repo_path: &Path) -> PathBuf {
+    let home = dirs::home_dir().expect("Could not determine home directory");
+    plist_path_for_label(&home, &legacy_plist_label(repo_path))
+}
+
+fn plist_path_for_label(home: &Path, label: &str) -> PathBuf {
     home.join("Library")
         .join("LaunchAgents")
         .join(format!("{}.plist", label))
+}
+
+/// Return an installed current or legacy plist, preferring the current one.
+pub fn existing_plist_path(repo_path: &Path) -> Option<PathBuf> {
+    [plist_path(repo_path), legacy_plist_path(repo_path)]
+        .into_iter()
+        .find(|path| path.exists())
 }
 
 /// Binaries commitbook's scheduled runs invoke. Their parent directories
@@ -120,12 +148,57 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+fn launchd_schedule_xml(schedule: &str) -> Result<String> {
+    if let Ok(interval) = cron_to_interval_seconds(schedule) {
+        return Ok(format!(
+            "    <key>StartInterval</key>\n    <integer>{interval}</integer>"
+        ));
+    }
+
+    validate_cron_expression(schedule)?;
+    let parts: Vec<&str> = schedule.split_whitespace().collect();
+    if parts[2..] != ["*", "*", "*"] {
+        anyhow::bail!(
+            "Cron expression '{}' cannot be translated safely to launchd; use an every-N interval or a daily hour/minute schedule",
+            schedule
+        );
+    }
+
+    let minute: u32 = parts[0].parse().map_err(|_| {
+        anyhow::anyhow!(
+            "Cron expression '{}' cannot be translated safely to launchd; minute must be fixed",
+            schedule
+        )
+    })?;
+    let mut fields =
+        format!("            <key>Minute</key>\n            <integer>{minute}</integer>");
+    if parts[1] != "*" {
+        let hour: u32 = parts[1].parse().map_err(|_| {
+            anyhow::anyhow!(
+                "Cron expression '{}' cannot be translated safely to launchd; hour must be fixed",
+                schedule
+            )
+        })?;
+        fields.push_str(&format!(
+            "\n            <key>Hour</key>\n            <integer>{hour}</integer>"
+        ));
+    }
+
+    Ok(format!(
+        "    <key>StartCalendarInterval</key>\n    <dict>\n{fields}\n    </dict>"
+    ))
+}
+
+pub(super) fn validate_schedule(schedule: &str) -> Result<()> {
+    launchd_schedule_xml(schedule).map(|_| ())
+}
+
 /// Generate the plist XML content with PATH environment variable baked in.
-fn generate_plist(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> String {
+fn generate_plist(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<String> {
     let label = plist_label(repo_path);
     let repo_str = repo_path.to_string_lossy();
     let bin_str = commitbook_bin.to_string_lossy();
-    let interval = cron_to_interval_seconds(schedule);
+    let schedule_xml = launchd_schedule_xml(schedule)?;
 
     let logs_dir = repo_path.join(".CommitBook").join("local").join("logs");
     let stdout_log = logs_dir.join("launchd-stdout.log");
@@ -135,7 +208,7 @@ fn generate_plist(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> St
     // Avoids leaking TCC-protected roots (e.g. ~/Downloads) from the shell PATH.
     let path_env = build_plist_path();
 
-    format!(
+    Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -149,8 +222,7 @@ fn generate_plist(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> St
     </array>
     <key>WorkingDirectory</key>
     <string>{repo}</string>
-    <key>StartInterval</key>
-    <integer>{interval}</integer>
+{schedule_xml}
     <key>StandardOutPath</key>
     <string>{stdout}</string>
     <key>StandardErrorPath</key>
@@ -167,17 +239,46 @@ fn generate_plist(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> St
         label = label,
         bin = xml_escape(&bin_str),
         repo = xml_escape(&repo_str),
-        interval = interval,
+        schedule_xml = schedule_xml,
         stdout = xml_escape(&stdout_log.to_string_lossy()),
         stderr = xml_escape(&stderr_log.to_string_lossy()),
         path = xml_escape(&path_env),
-    )
+    ))
+}
+
+fn label_is_loaded(label: &str) -> bool {
+    Command::new("launchctl")
+        .args(["list", label])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn unload_and_remove(path: &Path, label: &str) -> Result<()> {
+    if label_is_loaded(label) {
+        let output = Command::new("launchctl")
+            .args(["remove", label])
+            .output()
+            .with_context(|| format!("Failed to unload launchd job {label}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to unload launchd job {}: {}", label, stderr.trim());
+        }
+    }
+
+    if path.exists() {
+        fs::remove_file(path)
+            .with_context(|| format!("Failed to remove plist: {}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// Install a launchd job for the repo. Returns the plist path as scheduler_id.
 pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<String> {
     let path = plist_path(repo_path);
-    let content = generate_plist(repo_path, schedule, commitbook_bin);
+    let legacy_path = legacy_plist_path(repo_path);
+    // Render first so a bad schedule cannot remove a currently working job.
+    let content = generate_plist(repo_path, schedule, commitbook_bin)?;
 
     // Ensure LaunchAgents directory exists
     if let Some(parent) = path.parent() {
@@ -185,12 +286,9 @@ pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Resul
             .with_context(|| format!("Failed to create LaunchAgents dir: {}", parent.display()))?;
     }
 
-    // Unload existing job if present
-    if path.exists() {
-        let _ = Command::new("launchctl")
-            .args(["unload", &path.to_string_lossy()])
-            .output();
-    }
+    // Leave exactly one current job, migrating the previous label if needed.
+    unload_and_remove(&path, &plist_label(repo_path))?;
+    unload_and_remove(&legacy_path, &legacy_plist_label(repo_path))?;
 
     // Write the plist
     fs::write(&path, content)
@@ -212,22 +310,12 @@ pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Resul
 
 /// Uninstall a launchd job for the repo.
 pub fn uninstall(repo_path: &Path, scheduler_id: Option<&str>) -> Result<()> {
-    let path = if let Some(id) = scheduler_id {
-        PathBuf::from(id)
-    } else {
-        plist_path(repo_path)
-    };
-
-    if path.exists() {
-        let _ = Command::new("launchctl")
-            .args(["unload", &path.to_string_lossy()])
-            .output();
-
-        fs::remove_file(&path)
-            .with_context(|| format!("Failed to remove plist: {}", path.display()))?;
-    }
-
-    Ok(())
+    let _ = scheduler_id;
+    unload_and_remove(&plist_path(repo_path), &plist_label(repo_path))?;
+    unload_and_remove(
+        &legacy_plist_path(repo_path),
+        &legacy_plist_label(repo_path),
+    )
 }
 
 /// Check if launchd is accessible.
@@ -241,21 +329,22 @@ pub fn is_accessible() -> bool {
 
 /// Check if a launchd job is currently loaded for the given repo.
 pub fn is_loaded(repo_path: &Path) -> bool {
-    let label = plist_label(repo_path);
-    Command::new("launchctl")
-        .args(["list", &label])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    [plist_label(repo_path), legacy_plist_label(repo_path)]
+        .iter()
+        .any(|label| label_is_loaded(label))
+}
+
+/// Check specifically for a loaded job using the pre-rename label.
+pub fn is_legacy_loaded(repo_path: &Path) -> bool {
+    label_is_loaded(&legacy_plist_label(repo_path))
 }
 
 /// Validate that the binary path in the plist still exists.
 #[allow(dead_code)]
 pub fn validate_binary_path(repo_path: &Path) -> Result<bool> {
-    let path = plist_path(repo_path);
-    if !path.exists() {
+    let Some(path) = existing_plist_path(repo_path) else {
         return Ok(false);
-    }
+    };
 
     let content = fs::read_to_string(&path).with_context(|| "Failed to read plist")?;
 

@@ -1,8 +1,145 @@
 use anyhow::{bail, Context, Result};
 use git2::{FetchOptions, PushOptions, RemoteCallbacks, Repository, Signature, StatusOptions};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::platform::{CredentialProvider, SystemCredentials};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HeadExpectation {
+    symbolic_target: Option<String>,
+    oid: Option<git2::Oid>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FastForwardFailpoint {
+    BeforeCheckout,
+    BeforeRefPublication,
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAST_FORWARD_FAILPOINT: std::cell::Cell<Option<FastForwardFailpoint>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+#[cfg(test)]
+fn set_fast_forward_failpoint(failpoint: FastForwardFailpoint) {
+    FAST_FORWARD_FAILPOINT.with(|slot| slot.set(Some(failpoint)));
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAST_FORWARD_EXTERNAL_ADVANCE_TO: std::cell::Cell<Option<git2::Oid>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+#[cfg(test)]
+fn set_fast_forward_external_advance_to(oid: git2::Oid) {
+    FAST_FORWARD_EXTERNAL_ADVANCE_TO.with(|slot| slot.set(Some(oid)));
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAST_FORWARD_SWITCH_HEAD_TO: std::cell::RefCell<Option<String>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
+#[cfg(test)]
+fn set_fast_forward_switch_head_to(reference: impl Into<String>) {
+    FAST_FORWARD_SWITCH_HEAD_TO.with(|slot| *slot.borrow_mut() = Some(reference.into()));
+}
+
+fn fail_fast_forward_at(failpoint: FastForwardFailpoint) -> Result<()> {
+    #[cfg(test)]
+    {
+        let injected = FAST_FORWARD_FAILPOINT.with(|slot| {
+            if slot.get() == Some(failpoint) {
+                slot.set(None);
+                true
+            } else {
+                false
+            }
+        });
+        if injected {
+            bail!("Injected fast-forward failure at {failpoint:?}");
+        }
+    }
+    #[cfg(not(test))]
+    let _ = failpoint;
+    Ok(())
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PushFailpoint {
+    NonFastForward,
+    Auth,
+}
+
+#[cfg(test)]
+thread_local! {
+    static PUSH_FAILPOINT: std::cell::Cell<Option<PushFailpoint>> = const {
+        std::cell::Cell::new(None)
+    };
+    static PUSH_ATTEMPTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_push_failpoint(failpoint: PushFailpoint) {
+    PUSH_FAILPOINT.with(|slot| slot.set(Some(failpoint)));
+    PUSH_ATTEMPTS.with(|attempts| attempts.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn push_attempts() -> u32 {
+    PUSH_ATTEMPTS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+fn injected_push_failure() -> Option<git2::Error> {
+    PUSH_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
+    PUSH_FAILPOINT.with(|slot| {
+        slot.take().map(|failpoint| match failpoint {
+            PushFailpoint::NonFastForward => git2::Error::new(
+                git2::ErrorCode::NotFastForward,
+                git2::ErrorClass::Net,
+                "injected non-fast-forward",
+            ),
+            PushFailpoint::Auth => git2::Error::new(
+                git2::ErrorCode::Auth,
+                git2::ErrorClass::Net,
+                "injected authentication failure",
+            ),
+        })
+    })
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMMIT_PUBLISH_ADVANCE_TO: std::cell::Cell<Option<git2::Oid>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+#[cfg(test)]
+fn set_commit_publish_advance_to(oid: git2::Oid) {
+    COMMIT_PUBLISH_ADVANCE_TO.with(|slot| slot.set(Some(oid)));
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMMIT_PUBLISH_SWITCH_HEAD_TO: std::cell::RefCell<Option<String>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
+#[cfg(test)]
+fn set_commit_publish_switch_head_to(reference: impl Into<String>) {
+    COMMIT_PUBLISH_SWITCH_HEAD_TO.with(|slot| *slot.borrow_mut() = Some(reference.into()));
+}
 
 /// Wrapper around git2 for repository operations.
 pub struct GitRepo {
@@ -16,24 +153,6 @@ pub struct ChangesSummary {
     pub new_files: Vec<String>,
     pub modified_files: Vec<String>,
     pub deleted_files: Vec<String>,
-}
-
-/// Markdown-only status view used by the sync planner.
-///
-/// Same source of truth as `ChangesSummary` (git2 statuses) but filtered to
-/// `.md` / `.markdown`, with hidden directories (any path segment starting
-/// with `.`) skipped.
-#[derive(Debug, Default, Clone)]
-pub struct StatusSummary {
-    pub modified: Vec<String>,
-    pub added: Vec<String>,
-    pub deleted: Vec<String>,
-}
-
-impl StatusSummary {
-    pub fn is_empty(&self) -> bool {
-        self.modified.is_empty() && self.added.is_empty() && self.deleted.is_empty()
-    }
 }
 
 /// Outcome of `GitRepo::merge_from_remote`.
@@ -119,6 +238,75 @@ impl GitRepo {
         })
     }
 
+    fn capture_head_expectation(&self) -> Result<HeadExpectation> {
+        let head = self
+            .repo
+            .find_reference("HEAD")
+            .context("Failed to read HEAD")?;
+        let symbolic_target = head.symbolic_target().map(str::to_string);
+        let direct_oid = head.target();
+        drop(head);
+
+        let oid = match symbolic_target.as_deref() {
+            Some(reference) => self.reference_target_or_unborn(reference)?,
+            None => direct_oid,
+        };
+        let expectation = HeadExpectation {
+            symbolic_target,
+            oid,
+        };
+        self.ensure_head_matches(&expectation, "capturing HEAD")?;
+        Ok(expectation)
+    }
+
+    fn capture_head_on_branch(&self, branch: &str) -> Result<HeadExpectation> {
+        let expectation = self.capture_head_expectation()?;
+        let expected_reference = format!("refs/heads/{branch}");
+        if expectation.symbolic_target.as_deref() != Some(expected_reference.as_str()) {
+            let current = expectation
+                .symbolic_target
+                .as_deref()
+                .and_then(|reference| reference.strip_prefix("refs/heads/"))
+                .unwrap_or("detached HEAD");
+            bail!(
+                "Cannot operate on configured branch {branch:?} while HEAD is {current:?}. Check out the configured branch and retry."
+            );
+        }
+        Ok(expectation)
+    }
+
+    fn reference_target_or_unborn(&self, reference_name: &str) -> Result<Option<git2::Oid>> {
+        match self.repo.find_reference(reference_name) {
+            Ok(reference) => reference
+                .target()
+                .map(Some)
+                .with_context(|| format!("Reference {reference_name} is unexpectedly symbolic")),
+            Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(None),
+            Err(error) => Err(error).with_context(|| format!("Failed to read {reference_name}")),
+        }
+    }
+
+    fn ensure_head_matches(&self, expected: &HeadExpectation, action: &str) -> Result<()> {
+        let head = self
+            .repo
+            .find_reference("HEAD")
+            .with_context(|| format!("Failed to re-read HEAD while {action}"))?;
+        let symbolic_target = head.symbolic_target().map(str::to_string);
+        let direct_oid = head.target();
+        drop(head);
+        if symbolic_target != expected.symbolic_target {
+            bail!("HEAD changed while {action}; retry the operation");
+        }
+        let oid = match symbolic_target.as_deref() {
+            Some(reference) => self.reference_target_or_unborn(reference)?,
+            None => direct_oid,
+        };
+        if oid != expected.oid {
+            bail!("HEAD advanced while {action}; refusing to overwrite external Git work");
+        }
+        Ok(())
+    }
+
     /// Check if a directory is a git repository.
     pub fn is_repo(path: &Path) -> bool {
         Repository::discover(path).is_ok()
@@ -150,42 +338,6 @@ impl GitRepo {
         }
 
         Ok(summary)
-    }
-
-    /// Report markdown-only changes in the working tree vs HEAD.
-    ///
-    /// Filters the git2 status output to `.md` / `.markdown` and skips any
-    /// path under a hidden directory. Planner uses this as the single source
-    /// of truth for local dirty detection (modifications, additions, and
-    /// deletions all come out of one call).
-    pub fn status_markdown(&self) -> Result<StatusSummary> {
-        let mut opts = StatusOptions::new();
-        opts.include_untracked(true).recurse_untracked_dirs(true);
-
-        let statuses = self
-            .repo
-            .statuses(Some(&mut opts))
-            .context("Failed to get repository status")?;
-
-        let mut out = StatusSummary::default();
-
-        for entry in statuses.iter() {
-            let Some(path) = entry.path() else { continue };
-            if !is_markdown_path(path) {
-                continue;
-            }
-            let s = entry.status();
-
-            if s.is_wt_deleted() || s.is_index_deleted() {
-                out.deleted.push(path.to_string());
-            } else if s.is_wt_new() || s.is_index_new() {
-                out.added.push(path.to_string());
-            } else if s.is_wt_modified() || s.is_index_modified() {
-                out.modified.push(path.to_string());
-            }
-        }
-
-        Ok(out)
     }
 
     /// Stage specific paths (equivalent to `git add <paths...>`).
@@ -228,6 +380,23 @@ impl GitRepo {
 
     /// Create a commit with the given message. Honors `commit.gpgsign`.
     pub fn commit(&self, message: &str) -> Result<String> {
+        let expected_head = self.capture_head_expectation()?;
+        self.commit_with_expected_head(message, &expected_head)
+    }
+
+    /// Create a commit only if HEAD remains on the configured branch for the
+    /// entire operation. This prevents a same-tip branch switch from publishing
+    /// a sync commit onto a different branch.
+    pub fn commit_on_branch(&self, message: &str, expected_branch: &str) -> Result<String> {
+        let expected_head = self.capture_head_on_branch(expected_branch)?;
+        self.commit_with_expected_head(message, &expected_head)
+    }
+
+    fn commit_with_expected_head(
+        &self,
+        message: &str,
+        expected_head: &HeadExpectation,
+    ) -> Result<String> {
         let mut index = self.repo.index().context("Failed to get index")?;
         let tree_oid = index.write_tree().context("Failed to write tree")?;
         let tree = self
@@ -241,33 +410,247 @@ impl GitRepo {
             .or_else(|_| Signature::now("CommitBook", "commitbook@localhost"))
             .context("Failed to create signature")?;
 
-        let parent_commit = self
-            .repo
-            .head()
-            .ok()
-            .and_then(|head| head.peel_to_commit().ok());
+        let parent_commit = expected_head
+            .oid
+            .map(|oid| self.repo.find_commit(oid))
+            .transpose()
+            .context("Failed to load expected HEAD commit")?;
 
         let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
 
-        let oid = self.commit_signed_or_plain(&sig, message, &tree, &parents)?;
+        let oid = self.commit_signed_or_plain(&sig, message, &tree, &parents, expected_head)?;
 
         // Return short hash
         Ok(oid.to_string()[..7].to_string())
     }
 
-    /// Internal: build a commit object, optionally sign it, and write it
-    /// to HEAD. Centralizes the signing decision so `commit` and
-    /// `create_merge_commit` share the same path. Fast-paths the unsigned
-    /// case to a regular `repo.commit` so the index/HEAD update mechanics
-    /// are unchanged.
+    /// Commit only the named working-tree paths without absorbing or
+    /// disturbing unrelated entries already staged in the repository index.
+    /// Returns `None` when those paths already match HEAD.
+    pub fn commit_selected_paths(&self, paths: &[&str], message: &str) -> Result<Option<String>> {
+        self.commit_selected_paths_inner(paths, message, None)
+    }
+
+    /// Commit selected paths only when HEAD names the configured branch.
+    /// The branch ref is locked before reading HEAD and remains locked until
+    /// the commit is published, so validation and publication are atomic.
+    pub fn commit_selected_paths_on_branch(
+        &self,
+        paths: &[&str],
+        message: &str,
+        expected_branch: &str,
+    ) -> Result<Option<String>> {
+        self.commit_selected_paths_inner(paths, message, Some(expected_branch))
+    }
+
+    fn commit_selected_paths_inner(
+        &self,
+        paths: &[&str],
+        message: &str,
+        expected_branch: Option<&str>,
+    ) -> Result<Option<String>> {
+        let paths = paths
+            .iter()
+            .map(|path| validate_selected_path(path))
+            .collect::<Result<Vec<_>>>()?;
+
+        let (expected_head, mut branch_transaction) = if let Some(expected_branch) = expected_branch
+        {
+            let current_branch = self.current_branch()?;
+            if current_branch != expected_branch {
+                bail!(
+                    "Cannot publish CommitBook metadata: checked out branch {:?} does not match configured branch {:?}. Check out the configured branch and retry.",
+                    current_branch,
+                    expected_branch
+                );
+            }
+            let branch_ref = format!("refs/heads/{expected_branch}");
+            let mut transaction = self
+                .repo
+                .transaction()
+                .context("Failed to start metadata ref transaction")?;
+            transaction
+                .lock_ref("HEAD")
+                .context("Failed to lock HEAD for metadata publication")?;
+            transaction
+                .lock_ref(&branch_ref)
+                .with_context(|| format!("Failed to lock configured branch {branch_ref}"))?;
+            let head = self
+                .repo
+                .find_reference("HEAD")
+                .context("Failed to revalidate HEAD for metadata publication")?;
+            if head.symbolic_target() != Some(branch_ref.as_str()) {
+                bail!(
+                    "Cannot publish CommitBook metadata because HEAD changed while locking the configured branch. Retry after checking out {:?}.",
+                    expected_branch
+                );
+            }
+            let oid = self.reference_target_or_unborn(&branch_ref)?;
+            (
+                HeadExpectation {
+                    symbolic_target: Some(branch_ref.clone()),
+                    oid,
+                },
+                Some((transaction, branch_ref)),
+            )
+        } else {
+            (self.capture_head_expectation()?, None)
+        };
+
+        let parent = expected_head
+            .oid
+            .map(|oid| self.repo.find_commit(oid))
+            .transpose()
+            .context("Failed to load expected HEAD commit")?;
+        let head_tree = parent
+            .as_ref()
+            .map(git2::Commit::tree)
+            .transpose()
+            .context("Failed to load expected HEAD tree")?;
+        let mut selected_index = git2::Index::new().context("Failed to create temporary index")?;
+        if let Some(tree) = &head_tree {
+            selected_index
+                .read_tree(tree)
+                .context("Failed to seed temporary index from HEAD")?;
+        }
+        for path in &paths {
+            self.update_index_path_from_worktree(&mut selected_index, path)?;
+        }
+
+        let tree_oid = selected_index
+            .write_tree_to(&self.repo)
+            .context("Failed to write selected-path tree")?;
+        let tree = self
+            .repo
+            .find_tree(tree_oid)
+            .context("Failed to load selected-path tree")?;
+        let diff = self
+            .repo
+            .diff_tree_to_tree(head_tree.as_ref(), Some(&tree), None)
+            .context("Failed to compare selected paths with HEAD")?;
+        if diff.deltas().count() == 0 {
+            self.align_index_paths_to_worktree(&paths)?;
+            return Ok(None);
+        }
+
+        let sig = self
+            .repo
+            .signature()
+            .or_else(|_| Signature::now("CommitBook", "commitbook@localhost"))
+            .context("Failed to create signature")?;
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        let oid = self.create_commit_object(&sig, message, &tree, &parents)?;
+        if let Some((mut transaction, branch_ref)) = branch_transaction.take() {
+            transaction
+                .set_target(
+                    &branch_ref,
+                    oid,
+                    Some(&sig),
+                    "commitbook: publish selected paths",
+                )
+                .with_context(|| format!("Failed to prepare metadata commit on {branch_ref}"))?;
+            transaction
+                .commit()
+                .with_context(|| format!("Failed to publish metadata commit on {branch_ref}"))?;
+        } else {
+            self.publish_commit_to_head(oid, &expected_head, &sig)?;
+        }
+
+        // The real index remains user-owned throughout tree construction. Now
+        // align just the committed paths with the new HEAD so they do not
+        // appear as staged deletions while unrelated staged entries survive.
+        self.align_index_paths_to_worktree(&paths)?;
+
+        Ok(Some(oid.to_string()[..7].to_string()))
+    }
+
+    fn align_index_paths_to_worktree(&self, paths: &[PathBuf]) -> Result<()> {
+        let mut real_index = self.repo.index().context("Failed to get index")?;
+        for path in paths {
+            self.update_index_path_from_worktree(&mut real_index, path)?;
+        }
+        real_index
+            .write()
+            .context("Failed to update repository index")
+    }
+
+    fn update_index_path_from_worktree(&self, index: &mut git2::Index, path: &Path) -> Result<()> {
+        let absolute = self.path.join(path);
+        let metadata = match std::fs::symlink_metadata(&absolute) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if index.get_path(path, 0).is_some() {
+                    index.remove_path(path).with_context(|| {
+                        format!("Failed to remove selected path {}", path.display())
+                    })?;
+                }
+                return Ok(());
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Failed to inspect {}", absolute.display()))
+            }
+        };
+
+        let (data, mode) = if metadata.file_type().is_symlink() {
+            let target = std::fs::read_link(&absolute)
+                .with_context(|| format!("Failed to read symlink {}", absolute.display()))?;
+            (target.as_os_str().as_encoded_bytes().to_vec(), 0o120000)
+        } else if metadata.is_file() {
+            let mode = selected_file_mode(&metadata);
+            (
+                std::fs::read(&absolute)
+                    .with_context(|| format!("Failed to read {}", absolute.display()))?,
+                mode,
+            )
+        } else {
+            bail!("Selected path is not a file: {}", path.display());
+        };
+
+        let oid = self.repo.blob(&data).context("Failed to write Git blob")?;
+        let entry = git2::IndexEntry {
+            ctime: git2::IndexTime::new(0, 0),
+            mtime: git2::IndexTime::new(0, 0),
+            dev: 0,
+            ino: 0,
+            mode,
+            uid: 0,
+            gid: 0,
+            file_size: data.len() as u32,
+            id: oid,
+            flags: 0,
+            flags_extended: 0,
+            path: path.as_os_str().as_encoded_bytes().to_vec(),
+        };
+        index
+            .add(&entry)
+            .with_context(|| format!("Failed to add selected path {}", path.display()))?;
+        Ok(())
+    }
+
+    /// Internal: build a commit object, optionally sign it, and publish it to
+    /// HEAD. Centralizes the signing decision used by regular and merge commits.
     fn commit_signed_or_plain(
         &self,
         sig: &Signature,
         message: &str,
         tree: &git2::Tree,
         parents: &[&git2::Commit],
+        expected_head: &HeadExpectation,
     ) -> Result<git2::Oid> {
-        // Unsigned fast path, preserves prior behavior exactly.
+        let oid = self.create_commit_object(sig, message, tree, parents)?;
+        self.publish_commit_to_head(oid, expected_head, sig)?;
+        Ok(oid)
+    }
+
+    fn create_commit_object(
+        &self,
+        sig: &Signature,
+        message: &str,
+        tree: &git2::Tree,
+        parents: &[&git2::Commit],
+    ) -> Result<git2::Oid> {
+        // Unsigned fast path.
         let signing_enabled = self
             .repo
             .config()
@@ -277,11 +660,11 @@ impl GitRepo {
         if !signing_enabled {
             return self
                 .repo
-                .commit(Some("HEAD"), sig, sig, message, tree, parents)
+                .commit(None, sig, sig, message, tree, parents)
                 .context("Failed to write commit");
         }
 
-        // Signed path: build buffer, sign, write signed commit, update HEAD.
+        // Signed path: build the buffer, sign it, and write the commit object.
         let unsigned_bytes = self
             .repo
             .commit_create_buffer(sig, sig, message, tree, parents)
@@ -304,37 +687,97 @@ impl GitRepo {
                 // a plain commit, better than failing the sync.
                 return self
                     .repo
-                    .commit(Some("HEAD"), sig, sig, message, tree, parents)
+                    .commit(None, sig, sig, message, tree, parents)
                     .context("Failed to write commit");
             }
         };
 
-        // commit_signed doesn't update HEAD; do it manually. Read the HEAD
-        // reference itself (not the peeled commit) so this also works on an
-        // unborn branch, where `repo.head()` fails but HEAD still symbolically
-        // points at `refs/heads/<branch>`.
-        let head = self
+        Ok(oid)
+    }
+
+    fn publish_commit_to_head(
+        &self,
+        oid: git2::Oid,
+        expected_head: &HeadExpectation,
+        reflog_signature: &Signature,
+    ) -> Result<()> {
+        // Deterministically exercise an external ref advance between commit
+        // object creation and publication. The compare-under-lock checks below
+        // must preserve the externally-published tip.
+        #[cfg(test)]
+        COMMIT_PUBLISH_ADVANCE_TO.with(|slot| {
+            if let Some(external_oid) = slot.take() {
+                if let Some(branch_ref) = &expected_head.symbolic_target {
+                    self.repo
+                        .reference(branch_ref, external_oid, true, "test: external ref advance")
+                        .unwrap();
+                } else {
+                    self.repo.set_head_detached(external_oid).unwrap();
+                }
+            }
+        });
+        #[cfg(test)]
+        COMMIT_PUBLISH_SWITCH_HEAD_TO.with(|slot| {
+            if let Some(reference) = slot.borrow_mut().take() {
+                self.repo.set_head(&reference).unwrap();
+            }
+        });
+
+        let mut transaction = self
+            .repo
+            .transaction()
+            .context("Failed to start commit ref transaction")?;
+        transaction
+            .lock_ref("HEAD")
+            .context("Failed to lock HEAD for commit publication")?;
+        if let Some(branch_ref) = &expected_head.symbolic_target {
+            transaction
+                .lock_ref(branch_ref)
+                .with_context(|| format!("Failed to lock {branch_ref} for commit publication"))?;
+        }
+
+        let locked_head = self
             .repo
             .find_reference("HEAD")
-            .context("Failed to read HEAD reference")?;
-        match head.symbolic_target().map(|s| s.to_string()) {
-            Some(branch_ref) => {
-                drop(head);
-                // Creates the branch ref when unborn, force-updates otherwise.
-                self.repo
-                    .reference(&branch_ref, oid, true, "commitbook: signed commit")
-                    .with_context(|| format!("Failed to point {branch_ref} at signed commit"))?;
-            }
-            None => {
-                // Detached HEAD: move HEAD directly onto the new commit.
-                drop(head);
-                self.repo
-                    .set_head_detached(oid)
-                    .context("Failed to update detached HEAD to signed commit")?;
+            .context("Failed to re-read locked HEAD")?;
+        if locked_head.symbolic_target() != expected_head.symbolic_target.as_deref() {
+            bail!("HEAD changed while publishing a commit; retry the operation");
+        }
+
+        let target_ref = expected_head.symbolic_target.as_deref().unwrap_or("HEAD");
+        match (expected_head.oid, self.repo.find_reference(target_ref)) {
+            (Some(expected), Ok(reference)) if reference.target() == Some(expected) => {}
+            (None, Err(error)) if error.code() == git2::ErrorCode::NotFound => {}
+            (Some(expected), Ok(reference)) => bail!(
+                "Ref {target_ref} advanced from {} to {}; refusing to overwrite external Git work",
+                expected,
+                reference
+                    .target()
+                    .map(|target| target.to_string())
+                    .unwrap_or_else(|| "a symbolic target".to_string())
+            ),
+            (Some(expected), Err(error)) => bail!(
+                "Ref {target_ref} no longer points to expected commit {expected}: {error}"
+            ),
+            (None, Ok(_)) => bail!(
+                "Ref {target_ref} was created while publishing the initial commit; refusing to overwrite external Git work"
+            ),
+            (None, Err(error)) => {
+                return Err(error).with_context(|| format!("Failed to inspect {target_ref}"))
             }
         }
 
-        Ok(oid)
+        transaction
+            .set_target(
+                target_ref,
+                oid,
+                Some(reflog_signature),
+                "commitbook: publish commit",
+            )
+            .with_context(|| format!("Failed to prepare commit publication on {target_ref}"))?;
+        transaction
+            .commit()
+            .with_context(|| format!("Failed to publish commit on {target_ref}"))
     }
 
     /// Push the given branch to the remote using the system credential helper.
@@ -354,7 +797,13 @@ impl GitRepo {
             .find_remote(remote_name)
             .with_context(|| format!("Remote '{}' not found", remote_name))?;
 
+        #[cfg(test)]
+        if let Some(error) = injected_push_failure() {
+            return Err(error.into());
+        }
+
         let mut callbacks = RemoteCallbacks::new();
+        let config = self.repo.config().context("Failed to read Git config")?;
         // Bound the callback: libgit2 re-invokes it on every rejection, so a
         // stateless provider that keeps returning bad credentials would loop
         // forever. Fail after 3 attempts instead.
@@ -368,7 +817,7 @@ impl GitRepo {
             }
             attempts.set(n + 1);
             creds
-                .provide(url, username_from_url, allowed)
+                .provide(&config, url, username_from_url, allowed)
                 .map_err(|e| git2::Error::from_str(&format!("credential provider failed: {e}")))
         });
         // Surface server-side rejections (branch protection, hook failures) as errors.
@@ -392,7 +841,7 @@ impl GitRepo {
         // Drop opts (and thus the callback clone) before taking the value.
         drop(opts);
         if let Some(err) = push_error.borrow_mut().take() {
-            bail!("Push rejected by remote: {}", err);
+            return Err(push_rejection_error(&err));
         }
         Ok(())
     }
@@ -413,9 +862,35 @@ impl GitRepo {
 
     /// Get the current branch name.
     pub fn current_branch(&self) -> Result<String> {
-        let head = self.repo.head().context("Failed to get HEAD")?;
-        let branch = head.shorthand().unwrap_or("main").to_string();
-        Ok(branch)
+        match self.repo.head() {
+            Ok(head) => {
+                if !head.is_branch() {
+                    bail!("HEAD is detached; check out a branch and retry");
+                }
+                head.shorthand()
+                    .map(str::to_string)
+                    .context("Current branch name is not valid UTF-8")
+            }
+            Err(error)
+                if matches!(
+                    error.code(),
+                    git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound
+                ) =>
+            {
+                let head = self
+                    .repo
+                    .find_reference("HEAD")
+                    .context("Failed to read unborn HEAD")?;
+                let target = head
+                    .symbolic_target()
+                    .context("Unborn HEAD is not symbolic")?;
+                target
+                    .strip_prefix("refs/heads/")
+                    .map(str::to_string)
+                    .context("Unborn HEAD does not point to a local branch")
+            }
+            Err(error) => Err(error).context("Failed to get HEAD"),
+        }
     }
 
     /// Get the repository path.
@@ -473,6 +948,7 @@ impl GitRepo {
             .with_context(|| format!("Remote '{}' not found", remote))?;
 
         let mut callbacks = RemoteCallbacks::new();
+        let config = self.repo.config().context("Failed to read Git config")?;
         // Bound the callback: libgit2 re-invokes it on every rejection, so a
         // stateless provider that keeps returning bad credentials would loop
         // forever. Fail after 3 attempts instead.
@@ -486,7 +962,7 @@ impl GitRepo {
             }
             attempts.set(n + 1);
             creds
-                .provide(url, username_from_url, allowed)
+                .provide(&config, url, username_from_url, allowed)
                 .map_err(|e| git2::Error::from_str(&format!("credential provider failed: {e}")))
         });
 
@@ -498,12 +974,7 @@ impl GitRepo {
             .with_context(|| format!("Failed to fetch {}/{}", remote, branch))
     }
 
-    /// Paths that a fast-forward to `target_oid` would need to update and that
-    /// also carry uncommitted local modifications. A non-empty result means the
-    /// fast-forward would clobber local edits, so it must be refused rather than
-    /// silently discarding them (libgit2's safe checkout would otherwise skip
-    /// them without surfacing an error).
-    fn ff_dirty_conflicts(&self, target_oid: git2::Oid) -> Result<Vec<String>> {
+    fn ff_changed_paths(&self, target_oid: git2::Oid) -> Result<Vec<PathBuf>> {
         let head_tree = self.repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         let target_tree = self
             .repo
@@ -517,12 +988,15 @@ impl GitRepo {
             .repo
             .diff_tree_to_tree(head_tree.as_ref(), Some(&target_tree), None)
             .context("Failed to diff HEAD against fast-forward target")?;
-        let mut changed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut changed = std::collections::BTreeSet::new();
         tree_diff
             .foreach(
                 &mut |delta, _| {
-                    if let Some(p) = delta.new_file().path().or_else(|| delta.old_file().path()) {
-                        changed.insert(p.to_string_lossy().into_owned());
+                    if let Some(path) = delta.old_file().path() {
+                        changed.insert(path.to_path_buf());
+                    }
+                    if let Some(path) = delta.new_file().path() {
+                        changed.insert(path.to_path_buf());
                     }
                     true
                 },
@@ -531,36 +1005,200 @@ impl GitRepo {
                 None,
             )
             .context("Failed to walk fast-forward diff")?;
+        Ok(changed.into_iter().collect())
+    }
+
+    /// Paths changed by the target that also carry any staged, unstaged, or
+    /// untracked local state. A non-empty result means checkout would clobber
+    /// user work and must be refused.
+    fn ff_dirty_conflicts(&self, changed: &[PathBuf]) -> Result<Vec<String>> {
         if changed.is_empty() {
             return Ok(Vec::new());
         }
-
-        // Of those, which have uncommitted working-tree or staged edits.
         let mut opts = git2::StatusOptions::new();
-        opts.include_untracked(false).include_ignored(false);
+        opts.include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .include_ignored(true)
+            .recurse_ignored_dirs(true)
+            .renames_head_to_index(true)
+            .renames_index_to_workdir(true);
         let statuses = self
             .repo
             .statuses(Some(&mut opts))
             .context("Failed to read working-tree status")?;
-        let dirty = git2::Status::WT_MODIFIED
-            | git2::Status::WT_DELETED
-            | git2::Status::WT_TYPECHANGE
-            | git2::Status::INDEX_MODIFIED
-            | git2::Status::INDEX_DELETED
-            | git2::Status::INDEX_TYPECHANGE;
-        let mut conflicts = Vec::new();
+        let mut conflicts = std::collections::BTreeSet::new();
         for entry in statuses.iter() {
-            if entry.status().intersects(dirty) {
-                if let Some(p) = entry.path() {
-                    if changed.contains(p) {
-                        conflicts.push(p.to_string());
+            if entry.status() == git2::Status::CURRENT {
+                continue;
+            }
+            let mut candidates = Vec::new();
+            if let Some(path) = entry.path() {
+                candidates.push(PathBuf::from(path));
+            }
+            for delta in [entry.head_to_index(), entry.index_to_workdir()]
+                .into_iter()
+                .flatten()
+            {
+                if let Some(path) = delta.old_file().path() {
+                    candidates.push(path.to_path_buf());
+                }
+                if let Some(path) = delta.new_file().path() {
+                    candidates.push(path.to_path_buf());
+                }
+            }
+            for path in candidates {
+                if changed.iter().any(|target| paths_overlap(target, &path)) {
+                    if let Some(path) = path.to_str() {
+                        conflicts.insert(path.to_string());
                     }
                 }
             }
         }
-        conflicts.sort();
-        conflicts.dedup();
-        Ok(conflicts)
+        Ok(conflicts.into_iter().collect())
+    }
+
+    /// Advance the current branch after a path-limited safe checkout. The
+    /// branch ref stays locked and unchanged until checkout succeeds. If ref
+    /// publication fails, the affected worktree/index paths are restored to
+    /// the original tree.
+    fn fast_forward_to(
+        &self,
+        target_oid: git2::Oid,
+        expected_head: &HeadExpectation,
+    ) -> Result<()> {
+        let head_name = expected_head
+            .symbolic_target
+            .as_deref()
+            .context("HEAD is detached")?;
+        let head_oid = expected_head.oid.context("HEAD is unborn")?;
+        let head_commit = self
+            .repo
+            .find_commit(head_oid)
+            .context("Failed to load expected HEAD commit")?;
+
+        #[cfg(test)]
+        FAST_FORWARD_EXTERNAL_ADVANCE_TO.with(|slot| {
+            if let Some(external_oid) = slot.take() {
+                self.repo
+                    .reference(
+                        head_name,
+                        external_oid,
+                        true,
+                        "test: external fast-forward race",
+                    )
+                    .unwrap();
+            }
+        });
+        #[cfg(test)]
+        FAST_FORWARD_SWITCH_HEAD_TO.with(|slot| {
+            if let Some(reference) = slot.borrow_mut().take() {
+                self.repo.set_head(&reference).unwrap();
+            }
+        });
+
+        let mut transaction = self
+            .repo
+            .transaction()
+            .context("Failed to start fast-forward ref transaction")?;
+        transaction
+            .lock_ref("HEAD")
+            .context("Failed to lock HEAD for fast-forward")?;
+        transaction
+            .lock_ref(head_name)
+            .with_context(|| format!("Failed to lock {head_name}"))?;
+        let locked_head = self
+            .repo
+            .find_reference("HEAD")
+            .context("Failed to re-read locked HEAD")?;
+        if locked_head.symbolic_target() != Some(head_name) {
+            bail!("HEAD changed while preparing fast-forward; retry sync");
+        }
+        let locked_branch = self
+            .repo
+            .find_reference(head_name)
+            .with_context(|| format!("Failed to re-read locked branch {head_name}"))?;
+        if locked_branch.target() != Some(head_commit.id()) {
+            bail!(
+                "Branch {head_name} advanced while preparing fast-forward; refusing to overwrite external Git work"
+            );
+        }
+        drop(locked_branch);
+        drop(locked_head);
+        if head_commit.id() != target_oid
+            && !self
+                .repo
+                .graph_descendant_of(target_oid, head_commit.id())
+                .context("Failed to revalidate fast-forward ancestry")?
+        {
+            bail!(
+                "Branch {head_name} is no longer an ancestor of the fetched target; refusing a sideways or backward ref update"
+            );
+        }
+
+        let changed = self.ff_changed_paths(target_oid)?;
+        let clobbered = self.ff_dirty_conflicts(&changed)?;
+        if !clobbered.is_empty() {
+            bail!(
+                "Fast-forward blocked by uncommitted local changes to: {}. Commit or stash them and re-run sync.",
+                clobbered.join(", ")
+            );
+        }
+
+        let target = self
+            .repo
+            .find_commit(target_oid)
+            .context("Failed to load fast-forward target commit")?;
+        let reflog_signature = self
+            .repo
+            .signature()
+            .or_else(|_| Signature::now("CommitBook", "commitbook@localhost"))
+            .context("Failed to create fast-forward reflog signature")?;
+        fail_fast_forward_at(FastForwardFailpoint::BeforeCheckout)?;
+        if !changed.is_empty() {
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.safe();
+            for path in &changed {
+                checkout.path(path);
+            }
+            self.repo
+                .checkout_tree(target.as_object(), Some(&mut checkout))
+                .context("Failed to check out fast-forward target")?;
+        }
+
+        let publish = (|| -> Result<()> {
+            transaction
+                .set_target(
+                    head_name,
+                    target_oid,
+                    Some(&reflog_signature),
+                    "commitbook: fast-forward",
+                )
+                .context("Failed to prepare fast-forward branch ref")?;
+            fail_fast_forward_at(FastForwardFailpoint::BeforeRefPublication)?;
+            transaction
+                .commit()
+                .context("Failed to publish fast-forward branch ref")?;
+            Ok(())
+        })();
+        if let Err(error) = publish {
+            if !changed.is_empty() {
+                let mut rollback = git2::build::CheckoutBuilder::new();
+                rollback.force();
+                for path in &changed {
+                    rollback.path(path);
+                }
+                if let Err(rollback_error) = self
+                    .repo
+                    .checkout_tree(head_commit.as_object(), Some(&mut rollback))
+                {
+                    bail!(
+                        "Failed to publish fast-forward ({error}); rollback also failed: {rollback_error}"
+                    );
+                }
+            }
+            return Err(error).context("Failed to publish fast-forward branch ref");
+        }
+        Ok(())
     }
 
     /// Attempt a fast-forward-only merge of the given ref into HEAD.
@@ -569,16 +1207,17 @@ impl GitRepo {
     /// `Ok(false)` if the merge would not be fast-forward. Other failures
     /// bubble up as errors.
     pub fn merge_ff_only(&self, refname: &str) -> Result<bool> {
+        let expected_head = self.capture_head_expectation()?;
         let target_oid = self
             .repo
             .revparse_single(refname)
             .with_context(|| format!("Failed to resolve ref '{}'", refname))?
             .id();
 
-        let head_ref = self.repo.head().context("Failed to get HEAD")?;
-        let head_oid = head_ref.target().context("HEAD has no target")?;
+        let head_oid = expected_head.oid.context("HEAD has no target")?;
 
         if head_oid == target_oid {
+            self.ensure_head_matches(&expected_head, "checking fast-forward state")?;
             return Ok(true); // Already at target.
         }
 
@@ -591,31 +1230,7 @@ impl GitRepo {
             return Ok(false);
         }
 
-        // Refuse to fast-forward if it would overwrite uncommitted local edits
-        // to a tracked file, rather than silently discarding them.
-        let clobbered = self.ff_dirty_conflicts(target_oid)?;
-        if !clobbered.is_empty() {
-            bail!(
-                "Fast-forward blocked by uncommitted local changes to: {}. \
-                 Commit or stash them and re-run sync.",
-                clobbered.join(", ")
-            );
-        }
-
-        let head_name = head_ref.name().context("HEAD is detached")?.to_string();
-        drop(head_ref);
-
-        self.repo
-            .reference(&head_name, target_oid, true, "commitbook: fast-forward")
-            .with_context(|| format!("Failed to update {}", head_name))?;
-        self.repo.set_head(&head_name)?;
-        self.repo
-            .checkout_head(Some(
-                git2::build::CheckoutBuilder::new()
-                    .safe()
-                    .recreate_missing(true),
-            ))
-            .context("Failed to check out fast-forwarded HEAD")?;
+        self.fast_forward_to(target_oid, &expected_head)?;
 
         Ok(true)
     }
@@ -756,14 +1371,28 @@ impl GitRepo {
         Ok(None)
     }
 
-    /// Are there any uncommitted markdown changes in the working tree?
-    pub fn has_dirty_markdown(&self) -> Result<bool> {
-        Ok(!self.status_markdown()?.is_empty())
+    /// Whether Git reports any staged or unstaged non-ignored change.
+    /// Hidden paths and non-Markdown files are intentionally included.
+    pub fn has_dirty_changes(&self) -> Result<bool> {
+        let mut opts = StatusOptions::new();
+        opts.include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .include_ignored(false);
+        let statuses = self
+            .repo
+            .statuses(Some(&mut opts))
+            .context("Failed to get repository status")?;
+        Ok(statuses
+            .iter()
+            .any(|entry| entry.status() != git2::Status::CURRENT))
     }
 
     /// List paths with unmerged conflict entries in the index.
     pub fn list_conflicted_paths(&self) -> Result<Vec<String>> {
-        let index = self.repo.index().context("Failed to get index")?;
+        let mut index = self.repo.index().context("Failed to get index")?;
+        index
+            .read(true)
+            .context("Failed to refresh index before listing conflicts")?;
         if !index.has_conflicts() {
             return Ok(Vec::new());
         }
@@ -803,6 +1432,7 @@ impl GitRepo {
     ///   the working tree, returns `Conflicts(paths)`. Caller resolves, stages,
     ///   then calls `finalize_merge_commit` to complete.
     pub fn merge_fetched(&self, remote: &str, branch: &str) -> Result<MergeOutcome> {
+        let expected_head = self.capture_head_on_branch(branch)?;
         let upstream_refname = format!("refs/remotes/{}/{}", remote, branch);
         let upstream_oid = self
             .repo
@@ -819,54 +1449,33 @@ impl GitRepo {
             .context("Failed to analyze merge")?;
 
         if analysis.is_up_to_date() {
+            self.ensure_head_matches(&expected_head, "finishing merge analysis")?;
             return Ok(MergeOutcome::Clean);
         }
 
         if analysis.is_fast_forward() {
-            // Refuse to fast-forward if it would overwrite uncommitted local
-            // edits to a tracked file, rather than silently discarding them.
-            let clobbered = self.ff_dirty_conflicts(upstream_oid)?;
-            if !clobbered.is_empty() {
-                bail!(
-                    "Fast-forward blocked by uncommitted local changes to: {}. \
-                     Commit or stash them and re-run sync.",
-                    clobbered.join(", ")
-                );
-            }
-
-            // Update HEAD ref + checkout the new tree. `safe` mode still avoids
-            // clobbering unrelated local modifications; `recreate_missing`
-            // creates files the fast-forward adds.
-            let head_ref = self.repo.head().context("Failed to get HEAD")?;
-            let head_name = head_ref.name().context("HEAD is detached")?.to_string();
-            drop(head_ref);
-            self.repo
-                .reference(&head_name, upstream_oid, true, "commitbook: fast-forward")
-                .with_context(|| format!("Failed to update {}", head_name))?;
-            self.repo.set_head(&head_name)?;
-            self.repo
-                .checkout_head(Some(
-                    git2::build::CheckoutBuilder::new()
-                        .safe()
-                        .recreate_missing(true),
-                ))
-                .context("Failed to check out fast-forwarded HEAD")?;
+            self.fast_forward_to(upstream_oid, &expected_head)?;
             return Ok(MergeOutcome::Clean);
         }
 
         if analysis.is_normal() {
             // True 3-way merge.
+            self.ensure_head_matches(&expected_head, "starting merge")?;
             self.repo
                 .merge(&[&upstream], None, None)
                 .context("Failed to perform merge")?;
 
             let conflicted = self.list_conflicted_paths()?;
             if !conflicted.is_empty() {
+                self.ensure_head_matches(&expected_head, "recording merge conflicts")?;
                 return Ok(MergeOutcome::Conflicts(conflicted));
             }
 
             // Clean merge, write tree and create merge commit.
-            self.create_merge_commit("Merge remote-tracking branch via CommitBook")?;
+            self.create_merge_commit_with_expected_head(
+                "Merge remote-tracking branch via CommitBook",
+                &expected_head,
+            )?;
             return Ok(MergeOutcome::Clean);
         }
 
@@ -883,13 +1492,38 @@ impl GitRepo {
     /// the resolved files. Creates the merge commit (HEAD + MERGE_HEAD as
     /// parents) and clears MERGE_HEAD.
     pub fn finalize_merge_commit(&self, message: Option<&str>) -> Result<()> {
-        let index = self.repo.index().context("Failed to get index")?;
+        let expected_head = self.capture_head_expectation()?;
+        self.finalize_merge_commit_with_expected_head(message, &expected_head)
+    }
+
+    /// Complete a merge only while HEAD remains on the configured branch.
+    pub fn finalize_merge_commit_on_branch(
+        &self,
+        message: Option<&str>,
+        expected_branch: &str,
+    ) -> Result<()> {
+        let expected_head = self.capture_head_on_branch(expected_branch)?;
+        self.finalize_merge_commit_with_expected_head(message, &expected_head)
+    }
+
+    fn finalize_merge_commit_with_expected_head(
+        &self,
+        message: Option<&str>,
+        expected_head: &HeadExpectation,
+    ) -> Result<()> {
+        if !self.merge_in_progress() {
+            bail!("Cannot finalize merge: no merge is in progress");
+        }
+        let mut index = self.repo.index().context("Failed to get index")?;
+        index
+            .read(true)
+            .context("Failed to refresh index before finalizing merge")?;
         if index.has_conflicts() {
             bail!("Cannot finalize merge: index still has conflicts");
         }
         drop(index);
         let msg = message.unwrap_or("Merge resolved via CommitBook");
-        self.create_merge_commit(msg)?;
+        self.create_merge_commit_with_expected_head(msg, expected_head)?;
         Ok(())
     }
 
@@ -916,8 +1550,15 @@ impl GitRepo {
     /// Internal: write the index tree and create a commit. If `MERGE_HEAD`
     /// exists, the commit has two parents (HEAD + MERGE_HEAD), and
     /// `MERGE_HEAD` is cleaned up afterwards. Honors `commit.gpgsign`.
-    fn create_merge_commit(&self, message: &str) -> Result<()> {
+    fn create_merge_commit_with_expected_head(
+        &self,
+        message: &str,
+        expected_head: &HeadExpectation,
+    ) -> Result<()> {
         let mut index = self.repo.index().context("Failed to get index")?;
+        index
+            .read(true)
+            .context("Failed to refresh index before merge commit")?;
         let tree_oid = index.write_tree().context("Failed to write tree")?;
         let tree = self
             .repo
@@ -928,7 +1569,13 @@ impl GitRepo {
             .signature()
             .or_else(|_| Signature::now("CommitBook", "commitbook@localhost"))
             .context("Failed to create signature")?;
-        let head_commit = self.repo.head()?.peel_to_commit()?;
+        let head_oid = expected_head
+            .oid
+            .context("Cannot create a merge commit from an unborn HEAD")?;
+        let head_commit = self
+            .repo
+            .find_commit(head_oid)
+            .context("Failed to load expected merge parent")?;
         let merge_head_commit = self
             .repo
             .find_reference("MERGE_HEAD")
@@ -940,7 +1587,7 @@ impl GitRepo {
             None => vec![&head_commit],
         };
 
-        self.commit_signed_or_plain(&sig, message, &tree, &parents)?;
+        self.commit_signed_or_plain(&sig, message, &tree, &parents, expected_head)?;
 
         // Clear MERGE_HEAD if it existed.
         let _ = self.repo.cleanup_state();
@@ -948,12 +1595,53 @@ impl GitRepo {
     }
 }
 
-fn is_markdown_path(p: &str) -> bool {
-    if p.split('/').any(|seg| seg.starts_with('.')) {
-        return false;
+fn validate_selected_path(path: &str) -> Result<PathBuf> {
+    let path = Path::new(path);
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        bail!("Selected commit path must be a normalized repository-relative path: {path:?}");
     }
-    let lower = p.to_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".markdown")
+    Ok(path.to_path_buf())
+}
+
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
+}
+
+#[cfg(unix)]
+fn selected_file_mode(metadata: &std::fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    if metadata.permissions().mode() & 0o111 != 0 {
+        0o100755
+    } else {
+        0o100644
+    }
+}
+
+#[cfg(not(unix))]
+fn selected_file_mode(_metadata: &std::fs::Metadata) -> u32 {
+    0o100644
+}
+
+fn push_rejection_error(message: &str) -> anyhow::Error {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("non-fast-forward")
+        || normalized.contains("non fast forward")
+        || normalized.contains("fetch first")
+    {
+        git2::Error::new(
+            git2::ErrorCode::NotFastForward,
+            git2::ErrorClass::Net,
+            format!("Push rejected by remote: {message}"),
+        )
+        .into()
+    } else {
+        anyhow::anyhow!("Push rejected by remote: {message}")
+    }
 }
 
 #[cfg(test)]

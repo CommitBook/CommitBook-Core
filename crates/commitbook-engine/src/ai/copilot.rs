@@ -4,16 +4,66 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
+use super::conflict::{
+    build_resolve_prompt, strip_outer_code_fence, ConflictResolution, ConflictResolver,
+};
 use super::{
     clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
 };
-use crate::git::ChangesSummary;
+use crate::git::{ChangesSummary, GitConflict};
 
 const COPILOT_TIMEOUT: Duration = Duration::from_secs(10);
 const COPILOT_RESOLVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub struct CopilotProvider;
+
+fn command(repo_path: &Path, prompt: &str) -> Command {
+    let mut command = Command::new("gh");
+    command
+        .args([
+            "copilot",
+            "--",
+            "-p",
+            prompt,
+            "--silent",
+            "--no-color",
+            "--no-custom-instructions",
+        ])
+        .current_dir(repo_path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    command
+}
+
+fn has_cli_diagnostics(output: &str) -> bool {
+    let lines: Vec<&str> = output.lines().map(str::trim).collect();
+    let usage_block = lines.iter().any(|line| {
+        line.starts_with("Total usage est:")
+            || line.starts_with("Total duration (API):")
+            || line.starts_with("Total duration (wall):")
+            || line.starts_with("Total code changes:")
+            || *line == "Usage by model:"
+    });
+    let tool_heading = lines
+        .iter()
+        .any(|line| line.starts_with("✓ ") || line.starts_with("✗ "));
+    let tool_detail = lines
+        .iter()
+        .any(|line| line.starts_with("$ ") || line.starts_with("↪ "));
+    usage_block || (tool_heading && tool_detail)
+}
+
+fn parse_response(output: &str) -> Result<String> {
+    if has_cli_diagnostics(output) {
+        bail!("GitHub Copilot response contained CLI diagnostics");
+    }
+
+    let response = strip_outer_code_fence(output);
+    if response.trim().is_empty() {
+        bail!("GitHub Copilot returned empty response");
+    }
+    Ok(response)
+}
 
 #[async_trait]
 impl CommitMessageProvider for CopilotProvider {
@@ -30,7 +80,7 @@ impl CommitMessageProvider for CopilotProvider {
             return false;
         }
         Command::new("gh")
-            .args(["copilot", "-v"])
+            .args(["copilot", "--", "-v"])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -46,11 +96,7 @@ impl CommitMessageProvider for CopilotProvider {
             truncate(&diff_text, 500)
         );
 
-        let child = Command::new("gh")
-            .args(["copilot", "-p", &prompt, "--no-color"])
-            .current_dir(repo_path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+        let child = command(repo_path, &prompt)
             .spawn()
             .context("Failed to run gh copilot")?;
 
@@ -62,10 +108,10 @@ impl CommitMessageProvider for CopilotProvider {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let message = extract_message(&stdout);
-
+        let response = parse_response(&stdout)?;
+        let message = clean_message(&response);
         if message.is_empty() {
-            bail!("GitHub Copilot returned empty response");
+            bail!("GitHub Copilot returned empty commit message");
         }
         if looks_like_diff_narration(&message) {
             bail!("GitHub Copilot returned diff narration, not a commit message");
@@ -90,7 +136,7 @@ impl ConflictResolver for CopilotProvider {
             return false;
         }
         Command::new("gh")
-            .args(["copilot", "-v"])
+            .args(["copilot", "--", "-v"])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -98,16 +144,11 @@ impl ConflictResolver for CopilotProvider {
 
     async fn resolve(
         &self,
-        file_path: &Path,
-        content_with_markers: &str,
+        conflict: &GitConflict,
         repo_path: &Path,
-    ) -> Result<String> {
-        let prompt = build_resolve_prompt(file_path, content_with_markers);
-        let child = Command::new("gh")
-            .args(["copilot", "-p", &prompt, "--no-color"])
-            .current_dir(repo_path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+    ) -> Result<ConflictResolution> {
+        let prompt = build_resolve_prompt(conflict)?;
+        let child = command(repo_path, &prompt)
             .spawn()
             .context("Failed to run gh copilot")?;
 
@@ -119,12 +160,15 @@ impl ConflictResolver for CopilotProvider {
             bail!("gh copilot failed: {}", stderr.trim());
         }
 
-        let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        let resolved = strip_outer_code_fence(&raw);
-        if resolved.trim().is_empty() {
-            bail!("Empty resolution from gh copilot");
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let resolved = parse_response(&raw)?;
+        if resolved.contains("<<<<<<<")
+            || resolved.contains("=======")
+            || resolved.contains(">>>>>>>")
+        {
+            bail!("GitHub Copilot left conflict markers in its response");
         }
-        Ok(resolved)
+        Ok(ConflictResolution::WriteContent(resolved))
     }
 }
 
@@ -135,112 +179,6 @@ pub fn is_authenticated() -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
-}
-
-/// Parse the output from gh copilot to extract the commit message.
-///
-/// The new `gh copilot -p` output may contain:
-/// - Tool invocation lines (✓, $, ↪)
-/// - Usage statistics (Total usage est:, Total duration:, Usage by model:)
-/// - The commit message as plain text or inside a fenced code block
-fn extract_message(output: &str) -> String {
-    // First, try to extract from a fenced code block (```...```)
-    if let Some(msg) = extract_from_code_block(output) {
-        return clean_message(&msg);
-    }
-
-    // Otherwise, filter out noise and find the commit message
-    let lines: Vec<&str> = output
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .collect();
-
-    for line in lines.iter().rev() {
-        let cleaned = line.trim_start_matches(['>', '#', '-', '*', ' ']);
-        if cleaned.is_empty() {
-            continue;
-        }
-        // Skip usage statistics from new copilot CLI
-        if is_copilot_noise(cleaned) {
-            continue;
-        }
-        // Skip meta-lines from copilot output
-        if cleaned.starts_with("Suggestion")
-            || cleaned.starts_with('?')
-            || cleaned.to_lowercase().contains("copilot")
-        {
-            continue;
-        }
-        // Strip "git commit -m " prefix if present
-        let cleaned = cleaned.strip_prefix("git commit -m ").unwrap_or(cleaned);
-        let cleaned = cleaned.trim_matches('"').trim_matches('\'');
-        if !cleaned.is_empty() {
-            return clean_message(cleaned);
-        }
-    }
-
-    if let Some(last) = lines.last() {
-        if !is_copilot_noise(last) {
-            return clean_message(last);
-        }
-    }
-
-    String::new()
-}
-
-/// Extract commit message from a fenced code block in the output.
-fn extract_from_code_block(output: &str) -> Option<String> {
-    let mut in_block = false;
-    let mut content = Vec::new();
-
-    for line in output.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("```") {
-            if in_block {
-                // End of block, return what we collected
-                let msg = content.join("\n").trim().to_string();
-                if !msg.is_empty() {
-                    return Some(msg);
-                }
-                return None;
-            }
-            in_block = true;
-            continue;
-        }
-        if in_block {
-            content.push(trimmed);
-        }
-    }
-    None
-}
-
-/// Returns true if the line is copilot CLI noise (tool output, stats, etc.)
-fn is_copilot_noise(line: &str) -> bool {
-    // Tool invocation lines
-    if line.starts_with("✓") || line.starts_with("✗") {
-        return true;
-    }
-    if line.starts_with("$ ") || line.starts_with("↪") {
-        return true;
-    }
-    // Usage statistics
-    if line.starts_with("Total usage")
-        || line.starts_with("Total duration")
-        || line.starts_with("Total code changes")
-        || line.starts_with("Usage by model")
-    {
-        return true;
-    }
-    // Model usage lines (e.g. "    claude-sonnet-4.5    26.3k input, ...")
-    if line.contains("input,") && line.contains("output,") && line.contains("cache") {
-        return true;
-    }
-    // Label lines like "**Commit message:**"
-    if line.contains("Commit message") && line.contains("**") {
-        return true;
-    }
-    false
 }
 
 #[cfg(test)]

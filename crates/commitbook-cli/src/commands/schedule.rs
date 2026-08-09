@@ -10,17 +10,16 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, expression: &str) -> Result<()> {
 
     // Resolve and validate. Try presets first, then natural-time shorthands
     // (`5m`, `1h`, `1d`), and finally fall through to strict cron validation.
-    let schedule = match expression {
-        "hourly" | "daily" | "every-30m" | "every-4h" => cron::resolve_schedule(expression),
-        _ => {
-            if let Some(cron_expr) = cron::parse_human_interval(expression) {
-                cron_expr
-            } else {
-                cron::validate_cron_expression(expression)?;
-                expression.to_string()
-            }
-        }
+    let preset = cron::resolve_schedule(expression);
+    let schedule = if preset != expression {
+        preset
+    } else if let Some(cron_expr) = cron::parse_human_interval(expression) {
+        cron_expr
+    } else {
+        cron::validate_cron_expression(expression)?;
+        expression.to_string()
     };
+    cron::validate_platform_schedule(&schedule)?;
 
     config.schedule = schedule.clone();
     config.save(repo_root)?;

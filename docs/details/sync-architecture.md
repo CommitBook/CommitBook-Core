@@ -11,26 +11,37 @@ No configuration option. No automatic fallback to a different algorithm. One pat
 ## Sync algorithm
 
 ```
-1. stage all dirty markdown
-2. if index has real changes vs HEAD: commit_files
-3. fetch <remote> <branch>
-4. analyze:  merge_analysis(FETCH_HEAD)
-5. dispatch on analysis:
+1. acquire the shared per-repository lock; prepare/migrate .CommitBook/local
+2. stage every dirty tracked or non-ignored Git change
+3. if index has real changes vs HEAD: create the local snapshot commit
+4. fetch <remote> <branch>
+5. analyze: merge_analysis(FETCH_HEAD)
+6. dispatch on analysis:
      UP_TO_DATE        -> nothing pulled
-     FAST_FORWARD      -> update HEAD ref, checkout, mark pulled
+     FAST_FORWARD      -> preflight collisions, safely checkout changed paths,
+                          then publish the branch ref
      NORMAL (3-way)    -> repo.merge(FETCH_HEAD)
                           if index has no conflicts:
                               write_tree, commit with two parents (merge commit)
                           else:
                               match SyncMode:
-                                  AiResolve -> resolver.resolve(path) for each conflicted path
-                                               re-stage, write_tree, commit
-                                  Manual    -> leave markers, return ConflictSummary list
-6. push
-   on non-fast-forward race: refetch + repeat from step 4 (one retry)
+                                  AiResolve -> resolver.resolve(GitConflict) for each text conflict
+                                               stage explicit content/deletion results,
+                                               write_tree, create one resolved merge commit
+                                  Manual    -> preserve merge state and return index-derived
+                                               ConflictSummary entries
+7. if git.auto_push: push
+   on non-fast-forward race: refetch + repeat from step 5 (one retry)
 ```
 
-The whole flow is sync-callable; the only async parts are the optional `ConflictResolver::resolve(...)` calls, which spawn AI-CLI subprocesses on desktop and HTTP requests on mobile.
+The whole flow is sync-callable. Desktop resolvers spawn the configured AI CLI.
+On mobile, the Rust engine invokes an asynchronous callback supplied by the
+embedding Swift/Kotlin app; that app may call its AI provider or backend over
+HTTPS from the phone. Mobile never calls a desktop app.
+
+All entry points that mutate a managed repository use the same RAII lock,
+including manual and scheduled sync, FFI sync, document saves, conflict
+resolution, and metadata publication.
 
 ## Why merge, not rebase
 
@@ -136,6 +147,11 @@ Apps decide per-sync. Typical patterns:
 - Mobile apps default to `AiResolve` for transparent background sync. Opt into `Manual` from a "review conflicts" UI.
 - Desktop CLI defaults to whatever `[conflict] resolver` says: `manual` → `Manual`; otherwise → `AiResolve`.
 
+`AiResolve` can complete a conflict-free mobile sync without a callback. If a
+text conflict occurs and no callback is registered, the engine preserves the
+merge and returns an actionable configuration error with the manual conflict
+summaries. Binary, symlink, and gitlink conflicts always remain manual.
+
 Apps' existing `ConflictListView` / `ConflictDetailView` activate when `Manual` mode returns conflict entries.
 
 ## When to revisit
@@ -172,8 +188,7 @@ Two devices touched the same CommitBook between syncs. No conflict (different se
 ### Conflicted flow with AiResolve mode
 
 ```
-* 7e8f9a0 (HEAD -> main, origin/main) AI-resolved conflict in Daily-Notes/2026-04-25.md
-*   3a4b5c6 Merge branch 'main' of github.com:user/notes (conflicts)
+*   7e8f9a0 (HEAD -> main, origin/main) Merge branch 'main' of github.com:user/notes
 |\
 | * d7e8f90 Edit Daily-Notes/2026-04-25.md from iPad
 * | a1b2c3d Edit Daily-Notes/2026-04-25.md via CommitBook
@@ -181,11 +196,17 @@ Two devices touched the same CommitBook between syncs. No conflict (different se
 * 9876abc Initial CommitBook setup
 ```
 
-The merge commit holds the conflict markers; the next commit holds the AI-resolved content. Two-commit pattern keeps the resolution auditable: `git log -p` shows what the resolver did.
+The resolver works from the ancestor/local/remote entries in the Git index.
+The resolved tree is written directly into a single two-parent merge commit;
+CommitBook never commits conflict markers as an intermediate history entry.
 
 ### Conflicted flow with Manual mode
 
-`sync_commitbook` returns immediately with `manual_conflicts: 1` and a `ConflictSummary` for the path. Working tree has the file with `<<<<<<<` / `=======` / `>>>>>>>` markers. The caller (app UI) takes over until `resolve_conflict` is invoked, which finishes the merge commit by staging the resolved content.
+`sync_commitbook` returns immediately with `manual_conflicts: 1` and an
+index-derived `ConflictSummary` for the path. Nullable sides accurately
+represent add/delete conflicts and binary/special entries are identified. The
+caller takes over until `resolve_conflict` stages the selected index side,
+explicit deletion, or validated text and finishes the one merge commit.
 
 ## Compatibility with existing repos
 
@@ -193,6 +214,7 @@ Notebooks already synced under v2-shellout-rebase have linear histories. After t
 
 ## Implementation pointers
 
-- `commitbook-engine/src/git/operations.rs`: replaces `pull_rebase_autostash` / `list_conflicted_paths` / `continue_rebase_or_stash` / `rebase_abort` with libgit2 equivalents. New return type: `enum MergeOutcome { Clean, Conflicts(Vec<ConflictedPath>) }`.
+- `commitbook-engine/src/git/operations.rs`: owns libgit2 fetch, safe fast-forward, merge, and push primitives.
+- `commitbook-engine/src/git/conflicts.rs`: reads structured ancestor/local/remote index entries and applies explicit resolutions.
 - `commitbook-engine/src/sync/scheduler.rs`: the `SyncMode` parameter threads from FFI calls down to the merge handler.
 - Both desktop and mobile share the same code path; no `#[cfg(target_os = ...)]` guards on this module.

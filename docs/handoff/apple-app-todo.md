@@ -35,6 +35,8 @@ The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `Workspace
   - `WorkspaceInput` → `CommitBookInput`. Trim fields: drop `remoteURL` (engine derives from `owner`+`repo`), `localRoot` (engine derives from `workspacesRoot` + slug). Keep `name`, `mode`, `provider`, `owner`, `repo` (renamed from `repoName`), `branch`.
   - `WorkspaceSummary` → `CommitBookSummary`. Add fields the engine returns: `owner: String`, `repo: String`, `docCount: Int`, `conflictCount: Int`. Note: `docCount`/`conflictCount` come back as `0` from `list_commitbooks`, populate them by calling `list_documents` / `list_conflicts` per book if the UI needs accurate counts.
   - Add new types: `DiscoveredCommitBook { owner, repo, defaultBranch, isPrivate, hasDotCommitbook, alreadyLocal }`, `RepoInfo { owner, name, defaultBranch, isPrivate }`, `SyncMode { case aiResolve, manual }`.
+  - Add `AiConflictRequest` (nullable ancestor/local/remote content plus conflict type and binary flag), `AiConflictResolutionAction { writeContent, deleteFile }`, `AiConflictResolution` (nullable content/error), and `ConflictResolutionContinuation`.
+  - Update `ConflictSummary`: ancestor/local/remote content is nullable and binary/special conflicts are flagged explicitly.
   - `SyncResultSummary`: add `committed: Bool`, `conflictsResolved: Int`, `manualConflicts: Int` (engine returns these now).
 
 - [ ] `Packages/CommitBookAppleCore/Sources/CommitBookAppleCore/CommitBookEngineProtocol.swift`:
@@ -50,17 +52,18 @@ The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `Workspace
 ## 4. Implement `RealEngine.swift` against the new FFI
 
 - [ ] Replace the body of every method in `RealEngine.swift` with a call into the UniFFI-generated `CommitBookEngineClient`. Most methods are thin pass-throughs.
-- [ ] `RealEngine.makeDefault()` should construct `CommitBookEngineClient(dbPath:, workspacesRoot:)` with paths under the app's `Application Support` directory:
+- [ ] `RealEngine.makeDefault()` should construct `CommitBookEngineClient(dbPath:, workspacesRoot:, conflictResolver:)` with paths under the app's `Application Support` directory:
   - `dbPath` → `<AppSupport>/CommitBook/db/`
   - `workspacesRoot` → `<AppSupport>/CommitBook/repos/`
   - Create both directories if missing.
+- [ ] Implement `ConflictResolverCallback` in the app. Its synchronous entry point receives structured conflict sides plus a continuation: start the app's async HTTPS request, return immediately, then call `continuation.complete(...)` with explicit content, deletion, or an error within 120 seconds. It does not call a CommitBook desktop app. Pass `nil` until an AI service is configured; conflict-free `aiResolve` syncs still work, while a conflict returns an actionable configuration error and remains available for manual review.
 - [ ] Replace the import: `import CommitBookCoreFFI` → `import CommitBookEngineFFI`.
 - [ ] Update the `#if canImport(CommitBookCoreFFI)` guard to `#if canImport(CommitBookEngineFFI)`.
 
 ## 5. Update `FFIMapper.swift` and `FFIErrorAdapter.swift`
 
 - [ ] `FFIMapper.swift`: rename `FFIWorkspaceInput`/`FFIWorkspaceSummary` typealiases. Update field names in mappers to match the new contract (`owner`, `repo`, `docCount`, `conflictCount` etc.).
-- [ ] Add mappers for `DiscoveredCommitBook`, `RepoInfo`, `SyncMode`.
+- [ ] Add mappers for `DiscoveredCommitBook`, `RepoInfo`, `SyncMode`, the callback request/response, and nullable conflict sides.
 - [ ] `FFIErrorAdapter.swift`: error variants are unchanged (`databaseError`, `transportError`, `mergeError`, `authError`, `notFound`, `invalidInput`), but each variant now has an associated `message: String`. Update extraction to use `message`.
 
 ## 6. Update `MockEngine.swift` to match the new protocol
@@ -83,8 +86,8 @@ The engine now exposes a `SyncMode { aiResolve, manual }` flag per sync. Decide 
   - Background sync (BGAppRefreshTaskRequest): `aiResolve` (no UI, transparent).
   - User-initiated sync from the toolbar: `aiResolve` with a "review conflicts" hint if `manualConflicts > 0` in the result.
   - Conflict review screen → "Sync (manual)" button calls with `manual`.
-- [ ] `ConflictListView.swift` already iterates `[ConflictSummary]`, should still work since the engine type matches.
-- [ ] `ConflictDetailView.swift`: ensure the resolution buttons map to the four resolution types: `take_local`, `take_remote`, `keep_both`, `manual_edit`.
+- [ ] Update `ConflictListView.swift` for nullable sides and binary/special conflict badges.
+- [ ] `ConflictDetailView.swift`: map buttons to `take_local`, `take_remote`, `keep_both`, and `manual_edit`; selecting a missing local/remote side stages deletion. Hide text-only actions for binary/special conflicts.
 
 ## 9. PAT entry flow
 

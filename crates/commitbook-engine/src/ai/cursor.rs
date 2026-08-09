@@ -4,8 +4,11 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
+use super::conflict::{
+    build_resolve_prompt, strip_outer_code_fence, ConflictResolution, ConflictResolver,
+};
 use super::wait_with_timeout;
+use crate::git::GitConflict;
 
 const CURSOR_RESOLVE_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -27,11 +30,10 @@ impl ConflictResolver for CursorProvider {
 
     async fn resolve(
         &self,
-        file_path: &Path,
-        content_with_markers: &str,
+        conflict: &GitConflict,
         repo_path: &Path,
-    ) -> Result<String> {
-        let prompt = build_resolve_prompt(file_path, content_with_markers);
+    ) -> Result<ConflictResolution> {
+        let prompt = build_resolve_prompt(conflict)?;
         let child = Command::new("cursor-agent")
             .args(["-p", &prompt])
             .current_dir(repo_path)
@@ -53,6 +55,6 @@ impl ConflictResolver for CursorProvider {
         if resolved.trim().is_empty() {
             bail!("Empty resolution from cursor-agent CLI");
         }
-        Ok(resolved)
+        Ok(ConflictResolution::WriteContent(resolved))
     }
 }

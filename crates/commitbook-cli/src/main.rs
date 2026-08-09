@@ -50,7 +50,7 @@ enum Commands {
 
     /// Check system health and dependencies
     Doctor {
-        /// Attempt to auto-repair common issues (plist binary path, stale lock,
+        /// Attempt to auto-repair common issues (scheduler installation and
         /// missing logs directory). Diagnostic-only without this flag.
         #[arg(long)]
         fix: bool,

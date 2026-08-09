@@ -1,6 +1,8 @@
 use anyhow::{bail, Context, Result};
+use git2::Repository;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 fn default_remote_name() -> String {
@@ -26,15 +28,6 @@ impl Default for GitSettings {
     }
 }
 
-/// File pattern settings for selective commits.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct FileSettings {
-    #[serde(default)]
-    pub include: Vec<String>,
-    #[serde(default)]
-    pub exclude: Vec<String>,
-}
-
 /// Logging settings for the repo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingSettings {
@@ -58,10 +51,10 @@ fn default_conflict_resolver() -> String {
 
 /// Conflict-resolution settings.
 ///
-/// `resolver` selects which AI CLI is invoked when `git pull --rebase
-/// --autostash` leaves conflict markers. Recognized values: `manual`,
-/// `claude`, `codex`, `copilot`, `gemini`, `cursor`. `manual` (the default)
-/// leaves the markers in place for the user to resolve.
+/// `resolver` selects which AI CLI is invoked when libgit2 reports structured
+/// merge conflicts. Recognized values: `manual`, `claude`, `codex`,
+/// `copilot`, `gemini`, `cursor`. `manual` (the default) preserves the
+/// conflicted index for the user to resolve.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConflictSettings {
     #[serde(default = "default_conflict_resolver")]
@@ -191,8 +184,6 @@ pub struct LocalConfig {
     #[serde(default)]
     pub git: GitSettings,
     #[serde(default)]
-    pub files: FileSettings,
-    #[serde(default)]
     pub logging: LoggingSettings,
     #[serde(default)]
     pub conflict: ConflictSettings,
@@ -212,7 +203,6 @@ impl LocalConfig {
             schedule: schedule.to_string(),
             created_at: crate::utils::datetime::now_iso(),
             git: GitSettings::default(),
-            files: FileSettings::default(),
             logging: LoggingSettings::default(),
             conflict: ConflictSettings::default(),
             commit: CommitSettings::default(),
@@ -246,9 +236,16 @@ impl LocalConfig {
         Self::local_dir(repo_path).join(".lock")
     }
 
+    /// Returns the committed ignore file protecting device-local state.
+    pub fn gitignore_path(repo_path: &Path) -> PathBuf {
+        Self::commitbook_dir(repo_path).join(".gitignore")
+    }
+
     /// Check if a repo has been set up with CommitBook.
     pub fn exists(repo_path: &Path) -> bool {
-        Self::config_path(repo_path).exists()
+        is_real_directory(&Self::commitbook_dir(repo_path))
+            && fs::symlink_metadata(Self::config_path(repo_path))
+                .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
     }
 
     /// Migrate config to the latest version. Returns true if migration occurred.
@@ -277,8 +274,20 @@ impl LocalConfig {
 
     /// Load local config from a repo.
     pub fn load(repo_path: &Path) -> Result<Self> {
+        Self::load_inner(repo_path, true)
+    }
+
+    /// Load and normalize local config in memory without rewriting it.
+    /// Discovery paths use this so read-only registry scans never race a
+    /// repository mutation that owns the repository lock.
+    pub fn load_read_only(repo_path: &Path) -> Result<Self> {
+        Self::load_inner(repo_path, false)
+    }
+
+    fn load_inner(repo_path: &Path, persist_repairs: bool) -> Result<Self> {
+        require_real_directory(&Self::commitbook_dir(repo_path))?;
         let path = Self::config_path(repo_path);
-        let content = fs::read_to_string(&path)
+        let content = read_regular_text(&path)
             .with_context(|| format!("Failed to read local config: {}", path.display()))?;
 
         let mut value: toml::Value = toml::from_str(&content)
@@ -289,6 +298,11 @@ impl LocalConfig {
                 path.display()
             )
         })?;
+        let remote_missing = table
+            .get("git")
+            .and_then(toml::Value::as_table)
+            .and_then(|git| git.get("remote"))
+            .is_none();
         let repaired = normalize_legacy_config_table(table);
         let normalized = toml::to_string(&value)
             .with_context(|| format!("Failed to normalize local config: {}", path.display()))?;
@@ -297,8 +311,14 @@ impl LocalConfig {
             .with_context(|| format!("Failed to parse local config: {}", path.display()))?;
         let migrated = config.migrate();
         config.validate_config_version(&path)?;
+        let remote_inferred = if remote_missing {
+            config.git.remote = infer_single_remote(repo_path)?;
+            true
+        } else {
+            false
+        };
 
-        if repaired || migrated {
+        if persist_repairs && (repaired || migrated || remote_inferred) {
             config.save(repo_path)?;
         }
 
@@ -307,16 +327,13 @@ impl LocalConfig {
 
     /// Save local config to the repo.
     pub fn save(&self, repo_path: &Path) -> Result<()> {
-        let dir = Self::commitbook_dir(repo_path);
-        fs::create_dir_all(&dir).with_context(|| {
-            format!("Failed to create .CommitBook directory: {}", dir.display())
-        })?;
+        crate::state::ensure_local_layout(repo_path)?;
 
         let path = Self::config_path(repo_path);
         let content =
             toml::to_string_pretty(self).with_context(|| "Failed to serialize local config")?;
 
-        fs::write(&path, content)
+        write_regular_text(&path, &content)
             .with_context(|| format!("Failed to write local config: {}", path.display()))?;
 
         Ok(())
@@ -324,67 +341,145 @@ impl LocalConfig {
 
     /// Initialize the .CommitBook directory structure.
     pub fn init(repo_path: &Path, schedule: &str) -> Result<Self> {
-        let cb_dir = Self::commitbook_dir(repo_path);
-        let local_dir = Self::local_dir(repo_path);
-        let logs_dir = Self::logs_dir(repo_path);
-
-        fs::create_dir_all(&cb_dir)
-            .with_context(|| format!("Failed to create .CommitBook: {}", cb_dir.display()))?;
-        fs::create_dir_all(&local_dir)
-            .with_context(|| format!("Failed to create local dir: {}", local_dir.display()))?;
-        fs::create_dir_all(&logs_dir)
-            .with_context(|| format!("Failed to create logs dir: {}", logs_dir.display()))?;
-
-        // Set directory permissions to 700 (owner only)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&cb_dir, fs::Permissions::from_mode(0o700));
-            let _ = fs::set_permissions(&local_dir, fs::Permissions::from_mode(0o700));
-        }
+        crate::state::prepare_local_state(repo_path)?;
 
         let config = Self::new(schedule);
         config.save(repo_path)?;
-
-        // Add logs and lock to .gitignore
-        Self::update_gitignore(repo_path)?;
+        Self::ensure_gitignore(repo_path)?;
 
         Ok(config)
     }
 
-    /// Ensure CommitBook entries are in .gitignore.
-    fn update_gitignore(repo_path: &Path) -> Result<()> {
-        let gitignore_path = repo_path.join(".gitignore");
-        let entries = [".CommitBook/local/"];
-
-        let content = if gitignore_path.exists() {
-            fs::read_to_string(&gitignore_path).with_context(|| "Failed to read .gitignore")?
-        } else {
-            String::new()
-        };
-
-        let mut new_content = content.clone();
-        let mut needs_update = false;
-
-        for entry in &entries {
-            if !new_content.lines().any(|line| line.trim() == *entry) {
-                if !needs_update {
-                    if !new_content.is_empty() && !new_content.ends_with('\n') {
-                        new_content.push('\n');
-                    }
-                    new_content.push_str("\n# CommitBook\n");
-                    needs_update = true;
-                }
-                new_content.push_str(&format!("{}\n", entry));
+    /// Ensure `.CommitBook/local/` is ignored by the committed nested ignore
+    /// file. The repository-root `.gitignore` is user-owned and never changed.
+    pub fn ensure_gitignore(repo_path: &Path) -> Result<()> {
+        crate::state::ensure_local_layout(repo_path)?;
+        let path = Self::gitignore_path(repo_path);
+        let content = match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                read_regular_text(&path).context("Failed to read .CommitBook/.gitignore")?
             }
+            Ok(_) => bail!(
+                ".CommitBook/.gitignore is not a regular no-follow file: {}",
+                path.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(error).context("Failed to inspect .CommitBook/.gitignore"),
+        };
+        let mut updated = content;
+        let mut changed = false;
+        let entry = "/local/";
+        if !updated.lines().any(|line| line.trim() == entry) {
+            if !updated.is_empty() && !updated.ends_with('\n') {
+                updated.push('\n');
+            }
+            updated.push_str(entry);
+            updated.push('\n');
+            changed = true;
         }
-
-        if needs_update {
-            fs::write(&gitignore_path, new_content)
-                .with_context(|| "Failed to update .gitignore")?;
+        if changed {
+            write_regular_text(&path, &updated)
+                .context("Failed to write .CommitBook/.gitignore")?;
         }
-
         Ok(())
+    }
+}
+
+fn is_real_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+}
+
+fn require_real_directory(path: &Path) -> Result<()> {
+    if is_real_directory(path) {
+        Ok(())
+    } else {
+        bail!(
+            "Path must be a real directory, not a symlink or special file: {}",
+            path.display()
+        )
+    }
+}
+
+fn read_regular_text(path: &Path) -> Result<String> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("Failed to inspect {}", path.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!("Path is not a regular no-follow file: {}", path.display());
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(path).with_context(|| {
+        format!(
+            "Failed to open {} without following symlinks",
+            path.display()
+        )
+    })?;
+    if !file.metadata()?.is_file() {
+        bail!("Opened path is not a regular file: {}", path.display());
+    }
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    Ok(content)
+}
+
+fn write_regular_text(path: &Path, content: &str) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+        Ok(_) => bail!("Refusing to replace non-regular path: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("Failed to inspect {}", path.display()))
+        }
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(path).with_context(|| {
+        format!(
+            "Failed to open {} without following symlinks",
+            path.display()
+        )
+    })?;
+    if !file.metadata()?.is_file() {
+        bail!("Opened path is not a regular file: {}", path.display());
+    }
+    file.write_all(content.as_bytes())
+        .with_context(|| format!("Failed to write {}", path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("Failed to sync {}", path.display()))?;
+    Ok(())
+}
+
+fn infer_single_remote(repo_path: &Path) -> Result<String> {
+    let repo = Repository::open(repo_path).with_context(|| {
+        format!(
+            "Local config is missing git.remote and {} is not a Git repository",
+            repo_path.display()
+        )
+    })?;
+    let remotes = repo.remotes().context("Failed to list Git remotes")?;
+    match remotes.len() {
+        1 => remotes
+            .get(0)
+            .map(str::to_string)
+            .ok_or_else(|| anyhow::anyhow!("The only configured Git remote has no name")),
+        0 => bail!(
+            "Local config is missing git.remote and the repository has no remotes; add one and retry"
+        ),
+        count => bail!(
+            "Local config is missing git.remote and the repository has {count} remotes; set git.remote in .CommitBook/config.toml"
+        ),
     }
 }
 

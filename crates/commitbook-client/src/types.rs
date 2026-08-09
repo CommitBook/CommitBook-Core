@@ -1,3 +1,5 @@
+use crate::errors::Result;
+
 /// Per-sync conflict-handling mode. Apps pick per call.
 #[derive(Debug, Clone, Copy)]
 pub enum SyncMode {
@@ -75,6 +77,77 @@ pub struct SyncResultSummary {
     pub errors: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiConflictResolutionAction {
+    WriteContent,
+    DeleteFile,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiConflictRequest {
+    pub commitbook_id: String,
+    pub path: String,
+    pub conflict_type: String,
+    pub binary: bool,
+    pub ancestor_content: Option<String>,
+    pub local_content: Option<String>,
+    pub remote_content: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiConflictResolution {
+    pub action: AiConflictResolutionAction,
+    pub content: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiConflictCallbackResult {
+    pub resolution: Option<AiConflictResolution>,
+    pub error_message: Option<String>,
+}
+
+/// Implemented by the embedding Swift/Kotlin application. `resolve` starts an
+/// asynchronous host request and returns; the continuation completes it.
+pub trait ConflictResolverCallback: Send + Sync {
+    fn resolve(
+        &self,
+        request: AiConflictRequest,
+        continuation: std::sync::Arc<ConflictResolutionContinuation>,
+    );
+}
+
+pub struct ConflictResolutionContinuation {
+    sender: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<AiConflictCallbackResult>>>,
+}
+
+impl ConflictResolutionContinuation {
+    pub(crate) fn new(sender: tokio::sync::oneshot::Sender<AiConflictCallbackResult>) -> Self {
+        Self {
+            sender: std::sync::Mutex::new(Some(sender)),
+        }
+    }
+
+    pub fn complete(&self, result: AiConflictCallbackResult) -> Result<()> {
+        let sender = self
+            .sender
+            .lock()
+            .map_err(|_| {
+                crate::errors::CommitBookError::database("Resolver continuation poisoned")
+            })?
+            .take()
+            .ok_or_else(|| {
+                crate::errors::CommitBookError::invalid_input(
+                    "Conflict resolver continuation was already completed",
+                )
+            })?;
+        sender.send(result).map_err(|_| {
+            crate::errors::CommitBookError::merge(
+                "Conflict resolver continuation expired before completion",
+            )
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ConflictSummary {
     pub id: String,
@@ -82,8 +155,10 @@ pub struct ConflictSummary {
     pub section_path: Option<String>,
     pub conflict_type: String,
     pub status: String,
-    pub local_content: String,
-    pub remote_content: String,
+    pub binary: bool,
+    pub ancestor_content: Option<String>,
+    pub local_content: Option<String>,
+    pub remote_content: Option<String>,
     pub opened_at: String,
 }
 

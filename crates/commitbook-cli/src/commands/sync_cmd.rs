@@ -5,14 +5,20 @@ use std::path::Path;
 use commitbook_engine::config::LocalConfig;
 use commitbook_engine::git::GitRepo;
 use commitbook_engine::logger::FileLogger;
-use commitbook_engine::sync::sync_repository;
+use commitbook_engine::state::{RepoLock, RepoLockContended};
+use commitbook_engine::sync::sync_repository_locked;
 
-/// Run a manual sync: commit dirty markdown, fetch, libgit2 3-way merge, then
-/// push (retrying once on a non-fast-forward race).
+/// Run a manual sync: commit dirty unignored changes, fetch, merge, then
+/// optionally push (retrying once on a non-fast-forward race).
 ///
 /// Returns an error if the sync surfaced any errors or unresolved manual
 /// conflicts so `commitbook sync && next-step` chains correctly.
 pub async fn run_sync(repo_root: &Path) -> Result<()> {
+    let lock = RepoLock::acquire(repo_root)?;
+    run_sync_locked(repo_root, &lock).await
+}
+
+async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
     let config = LocalConfig::load(repo_root)?;
     let logger = FileLogger::new(repo_root, config.logging.max_log_days)?;
     let repo = GitRepo::open(repo_root)?;
@@ -21,16 +27,16 @@ pub async fn run_sync(repo_root: &Path) -> Result<()> {
 
     // Generate the commit message upfront so the engine can use it for the
     // single commit it creates per cycle. Gate on the same predicate the engine
-    // commits on (dirty markdown) so we never spawn an AI CLI when the engine
+    // commits on (any dirty non-ignored Git change) so we never spawn an AI CLI when the engine
     // will not commit.
-    let commit_message = if repo.has_dirty_markdown().unwrap_or(false) {
+    let commit_message = if repo.has_dirty_changes().unwrap_or(false) {
         let summary = repo.changes_summary().unwrap_or_default();
         Some(generate_commit_message(repo_root, &summary, config.commit.ai_messages).await)
     } else {
         None
     };
 
-    let outcome = sync_repository(repo_root, &config, &logger, commit_message).await;
+    let outcome = sync_repository_locked(repo_root, &config, &logger, commit_message, lock).await;
 
     let exit_err: Option<anyhow::Error> = match outcome {
         Ok(o) => {
@@ -73,6 +79,7 @@ pub async fn run_sync(repo_root: &Path) -> Result<()> {
                 ))
             }
         }
+        Err(e) if e.downcast_ref::<RepoLockContended>().is_some() => Some(e),
         Err(e) => {
             let _ = logger.error(&format!("Sync failed: {e}"));
             println!("  {} Sync failed: {}", "ERROR".red().bold(), e);
@@ -93,20 +100,14 @@ pub async fn run_sync(repo_root: &Path) -> Result<()> {
 
 /// Run a scheduled sync cycle (hidden `commitbook run` command).
 pub async fn run_scheduled(repo_root: &Path) -> Result<()> {
-    use fs2::FileExt;
-
-    let lock_path = LocalConfig::lock_path(repo_root);
-    let lock_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&lock_path)?;
-
-    if lock_file.try_lock_exclusive().is_err() {
-        // Another cycle is running.
-        return Ok(());
-    }
-
+    let lock = match RepoLock::acquire(repo_root) {
+        Ok(lock) => lock,
+        Err(error) if error.downcast_ref::<RepoLockContended>().is_some() => {
+            log::info!("Scheduled sync skipped because another operation is running");
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
     let config = LocalConfig::load(repo_root)?;
     if !config.enabled {
         return Ok(());
@@ -116,16 +117,13 @@ pub async fn run_scheduled(repo_root: &Path) -> Result<()> {
     let _ = logger.info("Scheduled sync cycle started");
     log::info!("Starting scheduled sync cycle");
 
-    if let Err(e) = run_sync(repo_root).await {
+    if let Err(e) = run_sync_locked(repo_root, &lock).await {
         let _ = logger.error(&format!("Scheduled sync failed: {e}"));
         log::error!("Scheduled sync failed: {e}");
     }
 
     let _ = logger.info("Scheduled sync cycle complete");
     log::info!("Scheduled sync cycle complete");
-
-    let _ = lock_file.unlock();
-    let _ = std::fs::remove_file(&lock_path);
 
     Ok(())
 }

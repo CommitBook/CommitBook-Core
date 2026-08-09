@@ -1,8 +1,9 @@
 use super::*;
-use crate::ai::ConflictResolver;
+use crate::ai::{ConflictResolution, ConflictResolver};
 use crate::git::test_support::{
     clone_second_workdir, commit_and_push_from, setup_repo_with_bare_remote, RepoFixture,
 };
+use crate::git::GitConflict;
 use crate::logger::FileLogger;
 use crate::platform::SystemCredentials;
 use anyhow::Result;
@@ -48,14 +49,42 @@ impl ConflictResolver for MockResolver {
     }
     async fn resolve(
         &self,
-        _file_path: &Path,
-        _content_with_markers: &str,
+        _conflict: &GitConflict,
         _repo_path: &Path,
-    ) -> Result<String> {
+    ) -> Result<ConflictResolution> {
         if self.fail {
             anyhow::bail!("mock failure");
         }
-        Ok(self.output.clone())
+        Ok(ConflictResolution::WriteContent(self.output.clone()))
+    }
+}
+
+struct PartialFailureResolver;
+
+#[async_trait]
+impl ConflictResolver for PartialFailureResolver {
+    fn name(&self) -> &str {
+        "PartialFailureResolver"
+    }
+
+    fn key(&self) -> &str {
+        "partial-failure"
+    }
+
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    async fn resolve(
+        &self,
+        conflict: &GitConflict,
+        _repo_path: &Path,
+    ) -> Result<ConflictResolution> {
+        if conflict.path == "a.md" {
+            Ok(ConflictResolution::WriteContent("A RESOLVED\n".to_string()))
+        } else {
+            anyhow::bail!("intentional failure after one resolution")
+        }
     }
 }
 
@@ -66,6 +95,11 @@ fn setup_with_state() -> (RepoFixture, FileLogger) {
     let fx = setup_repo_with_bare_remote();
     let cb_dir = fx.repo_dir.path().join(".CommitBook");
     std::fs::create_dir_all(cb_dir.join("local").join("logs")).unwrap();
+    std::fs::write(
+        fx.repo_dir.path().join(".git/info/exclude"),
+        ".CommitBook/local/\n",
+    )
+    .unwrap();
     let logger = FileLogger::new(fx.repo_dir.path(), 30).unwrap();
     (fx, logger)
 }
@@ -79,8 +113,7 @@ async fn scenario_1_up_to_date_no_changes() {
     let (fx, logger) = setup_with_state();
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -101,8 +134,7 @@ async fn scenario_2_local_only_edit_commits_and_pushes() {
 
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -117,6 +149,113 @@ async fn scenario_2_local_only_edit_commits_and_pushes() {
 }
 
 #[tokio::test]
+async fn sync_commits_every_nonignored_git_change_and_pushes_exact_tree() {
+    let (fx, logger) = setup_with_state();
+
+    // Establish a tracked path so the cycle also has a deletion to stage.
+    std::fs::write(fx.repo_dir.path().join("delete.txt"), "remove me\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add deletion fixture").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+
+    std::fs::write(fx.repo_dir.path().join(".gitignore"), "ignored.txt\n").unwrap();
+    std::fs::write(fx.repo_dir.path().join("ignored.txt"), "private\n").unwrap();
+    std::fs::create_dir_all(fx.repo_dir.path().join(".hidden")).unwrap();
+    std::fs::write(fx.repo_dir.path().join(".hidden/data.bin"), b"hidden").unwrap();
+    std::fs::write(fx.repo_dir.path().join("data.json"), "{}\n").unwrap();
+    std::fs::write(fx.repo_dir.path().join("already-staged.txt"), "staged\n").unwrap();
+    fx.repo
+        .stage_paths(&["already-staged.txt".to_string()])
+        .unwrap();
+    std::fs::remove_file(fx.repo_dir.path().join("delete.txt")).unwrap();
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        Some("commit every Git change".to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert!(outcome.committed, "{outcome:?}");
+    assert_eq!(outcome.pushed, 1, "{outcome:?}");
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+
+    let remote = git2::Repository::open_bare(fx.remote_dir.path()).unwrap();
+    let tree = remote
+        .find_commit(
+            remote
+                .refname_to_id(&format!("refs/heads/{}", fx.branch))
+                .unwrap(),
+        )
+        .unwrap()
+        .tree()
+        .unwrap();
+    for path in [
+        ".gitignore",
+        ".hidden/data.bin",
+        "data.json",
+        "already-staged.txt",
+    ] {
+        assert!(tree.get_path(Path::new(path)).is_ok(), "missing {path}");
+    }
+    assert!(tree.get_path(Path::new("delete.txt")).is_err());
+    assert!(tree.get_path(Path::new("ignored.txt")).is_err());
+    assert!(fx.repo_dir.path().join("ignored.txt").exists());
+}
+
+#[tokio::test]
+async fn auto_push_false_commits_and_merges_without_publishing() {
+    let (fx, logger) = setup_with_state();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "remote-only.md", "remote\n");
+    let remote_before = git2::Repository::open_bare(fx.remote_dir.path())
+        .unwrap()
+        .refname_to_id(&format!("refs/heads/{}", fx.branch))
+        .unwrap();
+    std::fs::create_dir_all(fx.repo_dir.path().join(".hidden")).unwrap();
+    std::fs::write(fx.repo_dir.path().join(".hidden/data.txt"), "local\n").unwrap();
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, false),
+        None,
+        &SystemCredentials,
+        &logger,
+        Some("local only".to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert!(outcome.committed, "{outcome:?}");
+    assert!(outcome.pulled >= 1, "{outcome:?}");
+    assert_eq!(outcome.pushed, 0);
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert_eq!(
+        fx.repo
+            .show_file_at_ref("HEAD", ".hidden/data.txt")
+            .unwrap(),
+        "local\n"
+    );
+    assert_eq!(
+        fx.repo.show_file_at_ref("HEAD", "remote-only.md").unwrap(),
+        "remote\n"
+    );
+    let remote_after = git2::Repository::open_bare(fx.remote_dir.path())
+        .unwrap()
+        .refname_to_id(&format!("refs/heads/{}", fx.branch))
+        .unwrap();
+    assert_eq!(remote_before, remote_after);
+    let remote = git2::Repository::open_bare(fx.remote_dir.path()).unwrap();
+    let remote_tree = remote.find_commit(remote_after).unwrap().tree().unwrap();
+    assert!(remote_tree.get_path(Path::new("remote-only.md")).is_ok());
+    assert!(remote_tree.get_path(Path::new(".hidden/data.txt")).is_err());
+}
+
+#[tokio::test]
 async fn scenario_3_remote_only_changes_pulls() {
     let (fx, logger) = setup_with_state();
     let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
@@ -124,8 +263,7 @@ async fn scenario_3_remote_only_changes_pulls() {
 
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -153,8 +291,7 @@ async fn scenario_4_local_and_remote_different_files() {
 
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -204,8 +341,7 @@ async fn scenario_5_same_file_non_overlapping_lines() {
 
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -239,8 +375,7 @@ async fn scenario_6_same_lines_manual_mode_returns_manual_conflicts() {
 
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None, // manual mode
         &SystemCredentials,
         &logger,
@@ -275,8 +410,7 @@ async fn scenario_7_same_lines_ai_mock_resolves() {
     let resolver = MockResolver::ok("line A RESOLVED\n");
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         Some(&resolver),
         &SystemCredentials,
         &logger,
@@ -313,8 +447,7 @@ async fn scenario_8_failing_resolver_falls_back_to_manual() {
     let resolver = MockResolver::failing();
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         Some(&resolver),
         &SystemCredentials,
         &logger,
@@ -325,6 +458,46 @@ async fn scenario_8_failing_resolver_falls_back_to_manual() {
     assert_eq!(outcome.conflicts_resolved, 0);
     assert_eq!(outcome.manual_conflicts, 1);
     assert!(!outcome.errors.is_empty());
+}
+
+#[tokio::test]
+async fn partial_resolver_failure_reports_resolved_and_remaining_counts() {
+    let (fx, logger) = setup_with_state();
+    std::fs::write(fx.repo_dir.path().join("a.md"), "A BASE\n").unwrap();
+    std::fs::write(fx.repo_dir.path().join("b.md"), "B BASE\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add conflict fixtures").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    std::fs::write(other.path().join("a.md"), "A REMOTE\n").unwrap();
+    std::fs::write(other.path().join("b.md"), "B REMOTE\n").unwrap();
+    let other_repo = crate::git::GitRepo::open(other.path()).unwrap();
+    other_repo.stage_all().unwrap();
+    other_repo.commit("remote conflicts").unwrap();
+    other_repo.push("origin", &fx.branch).unwrap();
+
+    std::fs::write(fx.repo_dir.path().join("a.md"), "A LOCAL\n").unwrap();
+    std::fs::write(fx.repo_dir.path().join("b.md"), "B LOCAL\n").unwrap();
+    let resolver = PartialFailureResolver;
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        Some(&resolver),
+        &SystemCredentials,
+        &logger,
+        Some("local conflicts".to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.conflicts_resolved, 1, "{outcome:?}");
+    assert_eq!(outcome.manual_conflicts, 1, "{outcome:?}");
+    assert_eq!(fx.repo.list_conflicted_paths().unwrap(), ["b.md"]);
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_dir.path().join("a.md")).unwrap(),
+        "A RESOLVED\n"
+    );
 }
 
 #[tokio::test]
@@ -343,8 +516,7 @@ async fn scenario_9_unpushed_local_commits_rebase_onto_remote() {
 
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -367,8 +539,7 @@ async fn scenario_10_pull_failure_surfaces_error() {
     // Use a remote name that doesn't exist to force a pull failure.
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "nonexistent-remote",
-        &fx.branch,
+        &SyncOptions::new("nonexistent-remote", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -405,8 +576,7 @@ async fn leave_merge_in_progress(fx: &RepoFixture, logger: &FileLogger) {
 
     let first = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None, // manual mode
         &SystemCredentials,
         logger,
@@ -441,8 +611,7 @@ async fn resolver_returning_conflict_markers_falls_back_to_manual() {
         MockResolver::ok("<<<<<<< HEAD\nstill conflicted\n=======\nnope\n>>>>>>> other\n");
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         Some(&resolver),
         &SystemCredentials,
         &logger,
@@ -464,8 +633,7 @@ async fn scenario_11_merge_in_progress_unresolved_reports_manual() {
     // A second cycle recovers the in-progress merge; still unresolved.
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -482,6 +650,136 @@ async fn scenario_11_merge_in_progress_unresolved_reports_manual() {
 }
 
 #[tokio::test]
+async fn retry_with_resolver_completes_a_preserved_manual_merge() {
+    let (fx, logger) = setup_with_state();
+    leave_merge_in_progress(&fx, &logger).await;
+
+    let resolver = MockResolver::ok("line A RESOLVED ON RETRY\n");
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        Some(&resolver),
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.conflicts_resolved, 1, "{outcome:?}");
+    assert_eq!(outcome.manual_conflicts, 0, "{outcome:?}");
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert!(!fx.repo.merge_in_progress());
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_dir.path().join("shared.md")).unwrap(),
+        "line A RESOLVED ON RETRY\n"
+    );
+    let remote = git2::Repository::open_bare(fx.remote_dir.path()).unwrap();
+    let tree = remote
+        .find_reference(&format!("refs/heads/{}", fx.branch))
+        .unwrap()
+        .peel_to_tree()
+        .unwrap();
+    let entry = tree.get_path(Path::new("shared.md")).unwrap();
+    let blob = remote.find_blob(entry.id()).unwrap();
+    assert_eq!(blob.content(), b"line A RESOLVED ON RETRY\n");
+}
+
+#[tokio::test]
+async fn sync_refuses_a_checkout_different_from_the_configured_branch() {
+    let (fx, logger) = setup_with_state();
+    let configured_branch = fx.branch.clone();
+    let repo = git2::Repository::open(fx.repo_dir.path()).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("other", &head, false).unwrap();
+    repo.set_head("refs/heads/other").unwrap();
+    repo.checkout_head(None).unwrap();
+    drop(head);
+    drop(repo);
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+
+    let error = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &configured_branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("configured for"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+}
+
+#[test]
+fn push_retry_classification_only_accepts_non_fast_forward() {
+    let non_fast_forward = anyhow::Error::new(git2::Error::new(
+        git2::ErrorCode::NotFastForward,
+        git2::ErrorClass::Net,
+        "remote advanced",
+    ));
+    let auth = anyhow::Error::new(git2::Error::new(
+        git2::ErrorCode::Auth,
+        git2::ErrorClass::Net,
+        "bad credentials",
+    ));
+    let diagnostic_text = anyhow::anyhow!("non-fast-forward appears in unrelated diagnostics");
+
+    assert!(is_non_fast_forward_push(&non_fast_forward));
+    assert!(!is_non_fast_forward_push(&auth));
+    assert!(!is_non_fast_forward_push(&diagnostic_text));
+}
+
+#[tokio::test]
+async fn server_rejection_is_not_retried() {
+    let (fx, logger) = setup_with_state();
+    std::fs::write(fx.repo_dir.path().join("local.txt"), "local\n").unwrap();
+    crate::git::operations::set_push_failpoint(crate::git::operations::PushFailpoint::Auth);
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        Some("rejected push".to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.pushed, 0, "{outcome:?}");
+    assert_eq!(outcome.errors.len(), 1, "{outcome:?}");
+    assert_eq!(crate::git::operations::push_attempts(), 1);
+}
+
+#[tokio::test]
+async fn non_fast_forward_push_is_retried_once() {
+    let (fx, logger) = setup_with_state();
+    std::fs::write(fx.repo_dir.path().join("local.txt"), "local\n").unwrap();
+    crate::git::operations::set_push_failpoint(
+        crate::git::operations::PushFailpoint::NonFastForward,
+    );
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        Some("retry push".to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert_eq!(outcome.pushed, 1, "{outcome:?}");
+    assert_eq!(crate::git::operations::push_attempts(), 2);
+}
+
+#[tokio::test]
 async fn scenario_12_merge_in_progress_resolved_finalizes() {
     let (fx, logger) = setup_with_state();
     leave_merge_in_progress(&fx, &logger).await;
@@ -493,8 +791,7 @@ async fn scenario_12_merge_in_progress_resolved_finalizes() {
     // A second cycle finalizes the merge and pushes it.
     let outcome = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -517,8 +814,7 @@ async fn failed_cycle_records_last_error_without_advancing_last_sync_at() {
     std::fs::write(fx.repo_dir.path().join("note.md"), "# note\n").unwrap();
     let ok = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
@@ -547,8 +843,7 @@ async fn failed_cycle_records_last_error_without_advancing_last_sync_at() {
     let resolver = MockResolver::failing();
     let bad = sync_with_resolver(
         fx.repo_dir.path(),
-        "origin",
-        &fx.branch,
+        &SyncOptions::new("origin", &fx.branch, true),
         Some(&resolver),
         &SystemCredentials,
         &logger,
@@ -609,12 +904,16 @@ async fn first_sync_against_empty_remote_bootstraps_branch() {
 
     let cb_dir = repo_dir.path().join(".CommitBook");
     std::fs::create_dir_all(cb_dir.join("local").join("logs")).unwrap();
+    std::fs::write(
+        repo_dir.path().join(".git/info/exclude"),
+        ".CommitBook/local/\n",
+    )
+    .unwrap();
     let logger = FileLogger::new(repo_dir.path(), 30).unwrap();
 
     let outcome = sync_with_resolver(
         repo_dir.path(),
-        "origin",
-        &branch,
+        &SyncOptions::new("origin", &branch, true),
         None,
         &SystemCredentials,
         &logger,

@@ -42,8 +42,10 @@ fn test_parse_human_interval_rejects_unsupported() {
     // Out-of-range minutes / hours.
     assert!(parse_human_interval("0m").is_none());
     assert!(parse_human_interval("60m").is_none());
+    assert!(parse_human_interval("7m").is_none());
     assert!(parse_human_interval("0h").is_none());
     assert!(parse_human_interval("24h").is_none());
+    assert!(parse_human_interval("5h").is_none());
     // Multi-day windows aren't expressible as a single launchd interval.
     assert!(parse_human_interval("2d").is_none());
     // Garbage input.
@@ -86,14 +88,18 @@ fn test_validate_cron_valid() {
 fn test_validate_cron_invalid() {
     assert!(validate_cron_expression("* *").is_err());
     assert!(validate_cron_expression("not a cron").is_err());
+    assert!(validate_cron_expression("*/7 * * * *").is_err());
+    assert!(validate_cron_expression("0 */5 * * *").is_err());
+    assert!(validate_cron_expression("*/7 9 * * 1-5").is_err());
+    assert!(validate_cron_expression("15 */5 * * 1-5").is_err());
 }
 
 #[test]
 fn test_cron_to_interval() {
-    assert_eq!(cron_to_interval_seconds("*/5 * * * *"), 300);
-    assert_eq!(cron_to_interval_seconds("*/30 * * * *"), 1800);
-    assert_eq!(cron_to_interval_seconds("0 * * * *"), 3600);
-    assert_eq!(cron_to_interval_seconds("0 */4 * * *"), 14400);
+    assert_eq!(cron_to_interval_seconds("*/5 * * * *").unwrap(), 300);
+    assert_eq!(cron_to_interval_seconds("*/30 * * * *").unwrap(), 1800);
+    assert_eq!(cron_to_interval_seconds("0 * * * *").unwrap(), 3600);
+    assert_eq!(cron_to_interval_seconds("0 */4 * * *").unwrap(), 14400);
 }
 
 #[test]
@@ -147,16 +153,14 @@ fn test_validate_cron_range() {
 }
 
 #[test]
-fn test_cron_to_interval_default_fallback() {
-    // Non-standard expression should default to 3600
-    assert_eq!(cron_to_interval_seconds("0 9 * * *"), 3600);
-    // Malformed input defaults to 3600
-    assert_eq!(cron_to_interval_seconds("not valid"), 3600);
+fn test_cron_to_interval_rejects_non_interval_schedules() {
+    assert!(cron_to_interval_seconds("0 9 * * *").is_err());
+    assert!(cron_to_interval_seconds("not valid").is_err());
 }
 
 #[test]
 fn test_describe_schedule_dynamic() {
-    assert_eq!(describe_schedule("*/7 * * * *"), "Every 7 minutes");
+    assert_eq!(describe_schedule("*/7 * * * *"), "Cron: */7 * * * *");
     assert_eq!(describe_schedule("0 */3 * * *"), "Every 3 hours");
     assert_eq!(describe_schedule("bad"), "bad");
 }

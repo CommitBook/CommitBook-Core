@@ -76,8 +76,9 @@ fn test_initialize_updates_gitignore() {
 
     initialize(repo, "origin").unwrap();
 
-    let gitignore = std::fs::read_to_string(repo.join(".gitignore")).unwrap();
-    assert!(gitignore.contains(".CommitBook/local/"));
+    let gitignore = std::fs::read_to_string(repo.join(".CommitBook/.gitignore")).unwrap();
+    assert_eq!(gitignore, "/local/\n");
+    assert!(!repo.join(".gitignore").exists());
 }
 
 #[test]
@@ -131,13 +132,102 @@ fn test_gitignore_does_not_duplicate_entries() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path();
 
-    // Call update_gitignore twice.
-    update_gitignore(repo).unwrap();
-    update_gitignore(repo).unwrap();
+    std::fs::create_dir_all(repo.join(".CommitBook")).unwrap();
+    crate::config::LocalConfig::ensure_gitignore(repo).unwrap();
+    crate::config::LocalConfig::ensure_gitignore(repo).unwrap();
 
-    let content = std::fs::read_to_string(repo.join(".gitignore")).unwrap();
-    let count = content.matches(".CommitBook/local/").count();
+    let content = std::fs::read_to_string(repo.join(".CommitBook/.gitignore")).unwrap();
+    let count = content.matches("/local/").count();
     assert_eq!(count, 1);
+}
+
+#[test]
+fn test_prepare_local_state_migrates_legacy_files_and_logs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cb_dir = tmp.path().join(".CommitBook");
+    std::fs::create_dir_all(cb_dir.join("logs")).unwrap();
+    std::fs::write(cb_dir.join("auth.toml"), "token = \"secret\"\n").unwrap();
+    std::fs::write(cb_dir.join("state.toml"), "last_error = \"old\"\n").unwrap();
+    std::fs::write(cb_dir.join("logs/old.log"), "entry\n").unwrap();
+
+    prepare_local_state(tmp.path()).unwrap();
+
+    assert!(cb_dir.join("local/auth.toml").exists());
+    assert!(cb_dir.join("local/state.toml").exists());
+    assert!(cb_dir.join("local/logs/old.log").exists());
+    assert!(!cb_dir.join("logs").exists());
+    assert!(!cb_dir.join("auth.toml").exists());
+    assert!(!cb_dir.join("state.toml").exists());
+}
+
+#[test]
+fn test_prepare_local_state_quarantines_legacy_collision() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cb_dir = tmp.path().join(".CommitBook");
+    std::fs::create_dir_all(cb_dir.join("local")).unwrap();
+    std::fs::write(cb_dir.join("auth.toml"), "legacy").unwrap();
+    std::fs::write(cb_dir.join("local/auth.toml"), "current").unwrap();
+
+    prepare_local_state(tmp.path()).unwrap();
+
+    assert!(!cb_dir.join("auth.toml").exists());
+    assert_eq!(
+        std::fs::read_to_string(cb_dir.join("local/legacy/auth.toml")).unwrap(),
+        "legacy"
+    );
+    assert_eq!(
+        std::fs::read_to_string(cb_dir.join("local/auth.toml")).unwrap(),
+        "current"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_prepare_local_state_quarantines_symlinked_log_without_following_it() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    let legacy_logs = tmp.path().join(".CommitBook/logs");
+    std::fs::create_dir_all(&legacy_logs).unwrap();
+    symlink(outside.path(), legacy_logs.join("escape.log")).unwrap();
+
+    prepare_local_state(tmp.path()).unwrap();
+
+    assert!(!legacy_logs.exists());
+    assert!(!tmp
+        .path()
+        .join(".CommitBook/local/logs/escape.log")
+        .exists());
+    assert!(tmp
+        .path()
+        .join(".CommitBook/local/legacy/logs/escape.log")
+        .is_symlink());
+    assert!(std::fs::read(outside.path()).unwrap().is_empty());
+}
+
+#[test]
+fn test_prepare_local_state_quarantines_colliding_log_uniquely() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cb_dir = tmp.path().join(".CommitBook");
+    std::fs::create_dir_all(cb_dir.join("logs")).unwrap();
+    std::fs::create_dir_all(cb_dir.join("local/logs")).unwrap();
+    std::fs::create_dir_all(cb_dir.join("local/legacy/logs")).unwrap();
+    std::fs::write(cb_dir.join("logs/old.log"), "legacy").unwrap();
+    std::fs::write(cb_dir.join("local/logs/old.log"), "current").unwrap();
+    std::fs::write(cb_dir.join("local/legacy/logs/old.log"), "older").unwrap();
+
+    prepare_local_state(tmp.path()).unwrap();
+
+    assert!(!cb_dir.join("logs").exists());
+    assert_eq!(
+        std::fs::read_to_string(cb_dir.join("local/logs/old.log")).unwrap(),
+        "current"
+    );
+    assert_eq!(
+        std::fs::read_to_string(cb_dir.join("local/legacy/logs/old.log.1")).unwrap(),
+        "legacy"
+    );
 }
 
 #[test]

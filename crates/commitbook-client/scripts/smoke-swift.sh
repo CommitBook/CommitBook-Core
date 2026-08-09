@@ -47,7 +47,9 @@ cat > "$WORK/main.swift" <<'SWIFT'
 import Foundation
 
 let tmp = NSTemporaryDirectory() + "cb-smoke-\(UUID().uuidString)"
-let client = try! CommitBookEngineClient(dbPath: "unused", workspacesRoot: tmp)
+let client = try! CommitBookEngineClient(dbPath: "unused",
+                                         workspacesRoot: tmp,
+                                         conflictResolver: nil)
 
 // Synchronous method: proves the FFI boundary works at all.
 let books = try! client.listCommitbooks()

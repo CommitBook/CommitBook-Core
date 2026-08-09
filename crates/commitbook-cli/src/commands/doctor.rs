@@ -272,9 +272,6 @@ fn run_fixes(_cb_dir: &Path, repo_root: &Path) -> u32 {
     if fix_logs_dir(repo_root) {
         fixed += 1;
     }
-    if fix_stale_lock(repo_root) {
-        fixed += 1;
-    }
     if fix_plist_binary_path(repo_root) {
         fixed += 1;
     }
@@ -305,49 +302,6 @@ fn fix_logs_dir(repo_root: &Path) -> bool {
     }
 }
 
-/// Delete `.lock` if it's older than an hour AND nobody currently holds it.
-/// A live scheduler run would hold the lock; we don't want to clobber that.
-fn fix_stale_lock(repo_root: &Path) -> bool {
-    let lock_path = LocalConfig::lock_path(repo_root);
-    let Ok(metadata) = std::fs::metadata(&lock_path) else {
-        return false;
-    };
-
-    let stale = metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .map(|d| d > std::time::Duration::from_secs(3600))
-        .unwrap_or(false);
-    if !stale {
-        return false;
-    }
-
-    // Probe the lock, if anyone holds it, leave it alone.
-    use fs2::FileExt;
-    let still_held = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-        .map(|f| f.try_lock_exclusive().is_err())
-        .unwrap_or(false);
-    if still_held {
-        return false;
-    }
-
-    print!("    Removing stale .lock... ");
-    match std::fs::remove_file(&lock_path) {
-        Ok(()) => {
-            println!("{}", "OK".green().bold());
-            true
-        }
-        Err(e) => {
-            println!("{} {}", "FAILED".red().bold(), e);
-            false
-        }
-    }
-}
-
 /// If a launchd plist exists for this repo and points at a stale binary path
 /// (e.g., a workspace that no longer exists, or a target/debug from a
 /// different checkout), reinstall it pointing at the binary actually running
@@ -363,22 +317,37 @@ fn fix_plist_binary_path(repo_root: &Path) -> bool {
         return false;
     };
 
-    // Read the plist; if it doesn't exist or is unreadable, nothing to fix.
-    let plist_path = commitbook_engine::cron::macos::plist_path(repo_root);
-
-    let Ok(contents) = std::fs::read_to_string(&plist_path) else {
-        return false;
-    };
-    if contents.contains(&current_exe.to_string_lossy().to_string()) {
+    let legacy_path = commitbook_engine::cron::macos::legacy_plist_path(repo_root);
+    let legacy_exists = legacy_path.exists();
+    let legacy_loaded = commitbook_engine::cron::macos::is_legacy_loaded(repo_root);
+    let binary_is_current = commitbook_engine::cron::macos::existing_plist_path(repo_root)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .is_some_and(|contents| contents.contains(&current_exe.to_string_lossy().to_string()));
+    if !legacy_exists && !legacy_loaded && binary_is_current {
         return false;
     }
 
-    // Only reinstall if the scheduler is loaded, otherwise it's a no-op anyway.
+    // A dormant legacy plist is stale state: `commitbook stop` removes both
+    // labels, and doctor must not unexpectedly start a stopped scheduler.
+    // Remove that file directly when neither label is loaded.
     if !cron::is_loaded(repo_root) {
+        if legacy_exists {
+            print!("    Removing legacy scheduler plist... ");
+            return match std::fs::remove_file(&legacy_path) {
+                Ok(()) => {
+                    println!("{}", "OK".green().bold());
+                    true
+                }
+                Err(e) => {
+                    println!("{} {}", "FAILED".red().bold(), e);
+                    false
+                }
+            };
+        }
         return false;
     }
 
-    print!("    Reinstalling scheduler with current binary path... ");
+    print!("    Reinstalling scheduler with current label and binary path... ");
     let config = match LocalConfig::load(repo_root) {
         Ok(c) => c,
         Err(e) => {

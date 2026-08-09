@@ -40,7 +40,7 @@ export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
 build_target() {
     local target="$1"
     echo ">> Building $target"
-    cargo build --release --target "$target" -p "$CRATE"
+    cargo build --release --target "$target" -p "$CRATE" --lib
 }
 
 # 1. Build all five slices.
@@ -50,9 +50,16 @@ build_target x86_64-apple-ios
 build_target aarch64-apple-darwin
 build_target x86_64-apple-darwin
 
-# 2. Generate Swift bindings from the compiled library's metadata.
+# 2. Build the host bindgen once, then generate Swift bindings from the
+#    compiled library's metadata. Cross-target slice builds above deliberately
+#    use --lib so they do not build an unusable bindgen executable per target.
+echo ">> Building host UniFFI bindgen"
+HOST_TARGET="$(rustc -vV | awk '/^host: / { print $2 }')"
+[ -n "$HOST_TARGET" ] || { echo "error: could not determine Rust host target" >&2; exit 1; }
+cargo build --release --target "$HOST_TARGET" --bin uniffi-bindgen -p "$CRATE"
+
 echo ">> Generating Swift bindings"
-cargo run --release --target aarch64-apple-darwin --bin uniffi-bindgen -p "$CRATE" -- \
+"$REPO_ROOT/target/$HOST_TARGET/release/uniffi-bindgen" \
     generate \
     --library "target/aarch64-apple-darwin/release/lib${LIB_NAME}.a" \
     --language swift \

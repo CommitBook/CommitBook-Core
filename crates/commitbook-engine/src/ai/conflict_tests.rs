@@ -67,12 +67,22 @@ fn strip_outer_code_fence_keeps_note_opening_with_fence_then_prose() {
 }
 
 #[test]
-fn build_resolve_prompt_includes_path_and_content() {
-    let path = std::path::PathBuf::from("notes/intro.md");
-    let content = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> origin/main\n";
-    let prompt = build_resolve_prompt(&path, content);
+fn build_resolve_prompt_includes_path_and_structured_sides() {
+    let side = |content: &str| crate::git::ConflictSide {
+        oid: git2::Oid::zero(),
+        mode: 0o100644,
+        content: content.as_bytes().to_vec(),
+    };
+    let conflict = crate::git::GitConflict {
+        path: "notes/intro.md".to_string(),
+        ancestor: Some(side("base")),
+        local: Some(side("local")),
+        remote: Some(side("remote")),
+    };
+    let prompt = build_resolve_prompt(&conflict).unwrap();
     assert!(prompt.contains("notes/intro.md"));
-    assert!(prompt.contains("<<<<<<<"));
-    assert!(prompt.contains("======="));
-    assert!(prompt.contains(">>>>>>>"));
+    assert!(prompt.contains("ANCESTOR:\nbase"));
+    assert!(prompt.contains("LOCAL:\nlocal"));
+    assert!(prompt.contains("REMOTE:\nremote"));
+    assert!(!prompt.contains("<<<<<<<"));
 }

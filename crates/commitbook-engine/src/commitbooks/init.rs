@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::Path;
 
 use crate::config::{CommitBookSettings, LocalConfig};
@@ -7,8 +7,8 @@ use crate::config::{CommitBookSettings, LocalConfig};
 /// with metadata identifying it as a CommitBook.
 ///
 /// Writes `.CommitBook/config.toml` with the `[commitbook]` section
-/// populated, ensures `.CommitBook/local/` exists, and adds it to the
-/// repo's `.gitignore`. Does NOT commit, caller decides commit timing
+/// populated, ensures `.CommitBook/local/` exists, and protects it with
+/// `.CommitBook/.gitignore`. Does NOT commit, caller decides commit timing
 /// (typically: stage + commit + push immediately after, so the
 /// `.CommitBook/` marker shows up on the remote).
 ///
@@ -24,20 +24,9 @@ pub fn init_dot_commitbook(
     provider: &str,
     mode: &str,
 ) -> Result<()> {
-    let cb_dir = repo_root.join(".CommitBook");
-    let local = cb_dir.join("local");
-    std::fs::create_dir_all(local.join("logs"))
-        .with_context(|| format!("Failed to create {}", local.join("logs").display()))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&cb_dir, std::fs::Permissions::from_mode(0o700));
-        let _ = std::fs::set_permissions(&local, std::fs::Permissions::from_mode(0o700));
-    }
-
-    let config_path = cb_dir.join("config.toml");
-    let mut config = if config_path.exists() {
+    crate::state::prepare_local_state(repo_root)?;
+    let existing_config = LocalConfig::exists(repo_root);
+    let mut config = if existing_config {
         LocalConfig::load(repo_root)?
     } else {
         let mut c = LocalConfig::new("0 * * * *");
@@ -54,36 +43,11 @@ pub fn init_dot_commitbook(
             mode: mode.to_string(),
         });
     }
-    config.git.branch = branch.to_string();
+    // Existing repositories keep their configured sync branch. The caller's
+    // branch only seeds a brand-new config.
     config.save(repo_root)?;
 
-    update_gitignore(repo_root)?;
+    LocalConfig::ensure_gitignore(repo_root)?;
 
-    Ok(())
-}
-
-fn update_gitignore(repo_root: &Path) -> Result<()> {
-    let gitignore_path = repo_root.join(".gitignore");
-    let entry = ".CommitBook/local/";
-    let content = if gitignore_path.exists() {
-        std::fs::read_to_string(&gitignore_path).context("Failed to read .gitignore")?
-    } else {
-        String::new()
-    };
-
-    if content.lines().any(|l| l.trim() == entry) {
-        return Ok(());
-    }
-
-    let mut new_content = content;
-    if !new_content.is_empty() && !new_content.ends_with('\n') {
-        new_content.push('\n');
-    }
-    if !new_content.contains("# CommitBook") {
-        new_content.push_str("\n# CommitBook\n");
-    }
-    new_content.push_str(entry);
-    new_content.push('\n');
-    std::fs::write(&gitignore_path, new_content).context("Failed to write .gitignore")?;
     Ok(())
 }

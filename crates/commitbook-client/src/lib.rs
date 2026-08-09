@@ -9,6 +9,7 @@ mod commitbooks_ops;
 mod conflicts;
 mod documents;
 mod errors;
+mod paths;
 mod runtime;
 mod sync_ops;
 mod types;
