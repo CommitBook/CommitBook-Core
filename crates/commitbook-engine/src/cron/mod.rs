@@ -201,6 +201,7 @@ pub fn uninstall(repo_path: &Path, scheduler_id: Option<&str>) -> Result<()> {
 
     #[cfg(target_os = "linux")]
     {
+        let _ = scheduler_id;
         linux::uninstall(repo_path)
     }
 
