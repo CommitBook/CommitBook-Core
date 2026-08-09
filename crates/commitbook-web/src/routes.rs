@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use askama::Template;
 
-use commitbook_core::ai::ProviderChain;
-use commitbook_core::config::local::LocalConfig;
-use commitbook_core::cron;
-use commitbook_core::git::GitRepo;
-use commitbook_core::logger::FileLogger;
+use commitbook_engine::ai::ProviderChain;
+use commitbook_engine::config::local::LocalConfig;
+use commitbook_engine::cron;
+use commitbook_engine::git::GitRepo;
+use commitbook_engine::logger::FileLogger;
 
 use crate::models::*;
 
@@ -94,13 +94,7 @@ fn load_status(repo_path: &Path) -> StatusResponse {
             c.git.branch.clone(),
             None::<String>, // last_commit moved to state.toml
         ),
-        None => (
-            String::new(),
-            "Unknown".into(),
-            true,
-            "main".into(),
-            None,
-        ),
+        None => (String::new(), "Unknown".into(), true, "main".into(), None),
     };
 
     let (current_branch, changes_total, changes_summary) =
@@ -196,12 +190,18 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse 
         changes_summary: status.changes_summary,
         providers,
     };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
+    Html(
+        tpl.render()
+            .unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))),
+    )
 }
 
 pub async fn logs_page(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let tpl = LogsTemplate {};
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
+    Html(
+        tpl.render()
+            .unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))),
+    )
 }
 
 pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -216,7 +216,10 @@ pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoRespons
         branch,
         auto_push,
     };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
+    Html(
+        tpl.render()
+            .unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -234,19 +237,28 @@ pub async fn htmx_status(State(state): State<Arc<AppState>>) -> impl IntoRespons
         changes_total: status.changes_total,
         changes_summary: status.changes_summary,
     };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
+    Html(
+        tpl.render()
+            .unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))),
+    )
 }
 
 pub async fn htmx_providers(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let providers = load_providers();
     let tpl = ProvidersPartial { providers };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
+    Html(
+        tpl.render()
+            .unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))),
+    )
 }
 
 pub async fn htmx_logs(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let entries = load_log_entries(&state.repo_path, 50, 0);
     let tpl = LogsPartial { entries };
-    Html(tpl.render().unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))))
+    Html(
+        tpl.render()
+            .unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -301,9 +313,9 @@ pub async fn api_config(
     })();
 
     match result {
-        Ok(()) => Html(
-            r#"<div class="flash flash-success">Configuration saved.</div>"#.to_string(),
-        ),
+        Ok(()) => {
+            Html(r#"<div class="flash flash-success">Configuration saved.</div>"#.to_string())
+        }
         Err(e) => {
             let msg = escape_html(&e.to_string());
             Html(format!(
@@ -319,9 +331,7 @@ pub async fn api_start(State(state): State<Arc<AppState>>) -> Json<ActionRespons
         let config = LocalConfig::load(&state.repo_path)?;
         let commitbook_bin = which::which("commitbook").unwrap_or_else(|_| {
             let bin = std::env::current_exe().expect("cannot determine current exe");
-            bin.parent()
-                .map(|p| p.join("commitbook"))
-                .unwrap_or(bin)
+            bin.parent().map(|p| p.join("commitbook")).unwrap_or(bin)
         });
         cron::install(&state.repo_path, &config.schedule, &commitbook_bin)
     })();

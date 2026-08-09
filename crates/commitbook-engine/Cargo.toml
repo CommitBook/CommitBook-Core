@@ -1,0 +1,36 @@
+[package]
+name = "commitbook-engine"
+description = "Shared engine for CommitBook, config, git, AI, scheduling, logging"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = []
+# Bundle OpenSSL for targets without a usable system OpenSSL (iOS, Android).
+# Desktop builds omit this and use the system library.
+vendored-tls = ["git2/vendored-openssl"]
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+git2 = "0.19"
+hex = "0.4"
+log = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+
+# Desktop-only deps. iOS/Android builds skip these; their consumers
+# (cron/*, ai/{claude,copilot,codex,gemini,cursor}.rs, git/signing.rs) are
+# cfg-gated off mobile.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+dirs = "5.0"
+which = "7"
+# Used by git/signing.rs to materialize literal SSH signing keys, and by the
+# test fixtures. Desktop-only: mobile signing returns early without it.
+tempfile = "3"

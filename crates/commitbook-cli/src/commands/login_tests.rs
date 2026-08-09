@@ -26,7 +26,12 @@ fn test_detect_provider_github() {
         .output()
         .unwrap();
     std::process::Command::new("git")
-        .args(["remote", "add", "origin", "https://github.com/user/repo.git"])
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/user/repo.git",
+        ])
         .current_dir(tmp.path())
         .output()
         .unwrap();
@@ -42,7 +47,12 @@ fn test_detect_provider_gitlab() {
         .output()
         .unwrap();
     std::process::Command::new("git")
-        .args(["remote", "add", "origin", "https://gitlab.com/user/repo.git"])
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://gitlab.com/user/repo.git",
+        ])
         .current_dir(tmp.path())
         .output()
         .unwrap();
@@ -58,7 +68,12 @@ fn test_detect_provider_codeberg() {
         .output()
         .unwrap();
     std::process::Command::new("git")
-        .args(["remote", "add", "origin", "https://codeberg.org/user/repo.git"])
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://codeberg.org/user/repo.git",
+        ])
         .current_dir(tmp.path())
         .output()
         .unwrap();

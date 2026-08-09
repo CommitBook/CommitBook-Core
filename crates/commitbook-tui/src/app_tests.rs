@@ -98,9 +98,21 @@ fn test_handle_key_scroll() {
         branch: "main".into(),
         last_commit: None,
         log_lines: vec![
-            LogEntry { timestamp: "t1".into(), level: "INFO".into(), message: "m1".into() },
-            LogEntry { timestamp: "t2".into(), level: "INFO".into(), message: "m2".into() },
-            LogEntry { timestamp: "t3".into(), level: "INFO".into(), message: "m3".into() },
+            LogEntry {
+                timestamp: "t1".into(),
+                level: "INFO".into(),
+                message: "m1".into(),
+            },
+            LogEntry {
+                timestamp: "t2".into(),
+                level: "INFO".into(),
+                message: "m2".into(),
+            },
+            LogEntry {
+                timestamp: "t3".into(),
+                level: "INFO".into(),
+                message: "m3".into(),
+            },
         ],
         log_scroll: 0,
         providers: Vec::new(),

@@ -1,0 +1,135 @@
+namespace commitbook {};
+
+[Error]
+enum CommitBookError {
+    "DatabaseError",
+    "TransportError",
+    "MergeError",
+    "AuthError",
+    "NotFound",
+    "InvalidInput",
+};
+
+enum SyncMode {
+    "AiResolve",
+    "Manual",
+};
+
+dictionary CommitBookInput {
+    string name;
+    string mode;
+    string provider;
+    string owner;
+    string repo;
+    string branch;
+};
+
+dictionary CommitBookSummary {
+    string id;
+    string owner;
+    string repo;
+    string name;
+    string mode;
+    string provider;
+    string branch;
+    boolean auto_sync;
+    u32 doc_count;
+    u32 conflict_count;
+};
+
+dictionary DiscoveredCommitBook {
+    string owner;
+    string repo;
+    string default_branch;
+    boolean is_private;
+    boolean has_dot_commitbook;
+    boolean already_local;
+};
+
+dictionary DocumentSummary {
+    string path;
+    boolean dirty;
+    boolean has_conflicts;
+    string checksum;
+};
+
+dictionary DocumentContent {
+    string path;
+    string content;
+    string? revision;
+};
+
+dictionary SyncResultSummary {
+    boolean committed;
+    u32 pulled;
+    u32 pushed;
+    u32 conflicts_resolved;
+    u32 manual_conflicts;
+    sequence<string> errors;
+};
+
+dictionary ConflictSummary {
+    string id;
+    string path;
+    string? section_path;
+    string conflict_type;
+    string status;
+    string local_content;
+    string remote_content;
+    string opened_at;
+};
+
+dictionary ResolveConflictInput {
+    string commitbook_id;
+    string conflict_id;
+    string resolution_type;
+    string? manual_content;
+};
+
+dictionary RepoInfo {
+    string owner;
+    string name;
+    string default_branch;
+    boolean is_private;
+};
+
+interface CommitBookEngineClient {
+    [Throws=CommitBookError]
+    constructor(string db_path, string workspaces_root);
+
+    [Throws=CommitBookError, Async]
+    sequence<RepoInfo> validate_pat(string token);
+
+    [Throws=CommitBookError, Async]
+    sequence<DiscoveredCommitBook> discover_commitbooks(string token);
+
+    [Throws=CommitBookError, Async]
+    CommitBookSummary init_commitbook(CommitBookInput input, string token);
+
+    [Throws=CommitBookError]
+    sequence<CommitBookSummary> list_commitbooks();
+
+    [Throws=CommitBookError]
+    CommitBookSummary get_commitbook(string commitbook_id);
+
+    [Throws=CommitBookError]
+    void delete_commitbook(string commitbook_id);
+
+    [Throws=CommitBookError]
+    sequence<DocumentSummary> list_documents(string commitbook_id);
+
+    [Throws=CommitBookError]
+    DocumentContent read_document(string commitbook_id, string path);
+
+    [Throws=CommitBookError]
+    void save_document(string commitbook_id, string path, string content);
+
+    [Throws=CommitBookError, Async]
+    SyncResultSummary sync_commitbook(string commitbook_id, SyncMode mode, string token);
+
+    [Throws=CommitBookError]
+    sequence<ConflictSummary> list_conflicts(string commitbook_id);
+
+    [Throws=CommitBookError]
+    void resolve_conflict(ResolveConflictInput input);
+};

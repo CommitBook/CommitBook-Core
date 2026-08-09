@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use std::path::PathBuf;
 
-/// CommitBook TUI — Terminal dashboard for monitoring CommitBook.
+/// CommitBook TUI, Terminal dashboard for monitoring CommitBook.
 #[derive(Parser)]
 #[command(name = "commitbook-tui", version, about)]
 struct Cli {
@@ -22,9 +22,10 @@ fn main() -> Result<()> {
     };
 
     // Verify the repo has CommitBook initialized
-    if !commitbook_core::config::local::LocalConfig::exists(&repo_path) {
+    if !commitbook_engine::config::local::LocalConfig::exists(&repo_path) {
         bail!(
-            "CommitBook not initialized in {}. Run `commitbook sync` first.",
+            "{} ({})",
+            commitbook_engine::state::NOT_INITIALIZED_MESSAGE,
             repo_path.display()
         );
     }
@@ -59,7 +60,7 @@ fn main() -> Result<()> {
 
     let result = app::run(&mut terminal, &repo_path);
 
-    // Restore terminal (happy path — guard handles failure/panic paths)
+    // Restore terminal (happy path, guard handles failure/panic paths)
     crossterm::terminal::disable_raw_mode().ok();
     crossterm::execute!(
         terminal.backend_mut(),

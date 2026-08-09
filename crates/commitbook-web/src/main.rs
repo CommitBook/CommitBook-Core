@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use routes::AppState;
 
-/// CommitBook Web — Browser dashboard for monitoring CommitBook.
+/// CommitBook Web, Browser dashboard for monitoring CommitBook.
 #[derive(Parser)]
 #[command(name = "commitbook-web", version, about)]
 struct Cli {
@@ -32,9 +32,10 @@ async fn main() -> Result<()> {
     };
     let port = cli.port;
 
-    if !commitbook_core::config::local::LocalConfig::exists(&repo_path) {
+    if !commitbook_engine::config::local::LocalConfig::exists(&repo_path) {
         bail!(
-            "CommitBook not initialized in {}. Run `commitbook sync` first.",
+            "{} ({})",
+            commitbook_engine::state::NOT_INITIALIZED_MESSAGE,
             repo_path.display()
         );
     }
@@ -66,9 +67,7 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("Failed to bind to {}", addr))?;
 
-    axum::serve(listener, app)
-        .await
-        .context("Server error")?;
+    axum::serve(listener, app).await.context("Server error")?;
 
     Ok(())
 }

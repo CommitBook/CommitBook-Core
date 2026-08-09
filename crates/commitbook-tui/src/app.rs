@@ -5,10 +5,10 @@ use ratatui::Terminal;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use commitbook_core::config::local::LocalConfig;
-use commitbook_core::cron;
-use commitbook_core::git::{ChangesSummary, GitRepo};
-use commitbook_core::logger::FileLogger;
+use commitbook_engine::config::local::LocalConfig;
+use commitbook_engine::cron;
+use commitbook_engine::git::{ChangesSummary, GitRepo};
+use commitbook_engine::logger::FileLogger;
 
 const TICK_RATE: Duration = Duration::from_secs(5);
 const POLL_RATE: Duration = Duration::from_millis(250);
@@ -131,7 +131,7 @@ impl App {
         }
 
         // Check provider availability
-        let chain = commitbook_core::ai::ProviderChain::new();
+        let chain = commitbook_engine::ai::ProviderChain::new();
         let default_keys = vec![
             "gh-copilot".to_string(),
             "claude-cli".to_string(),
@@ -148,15 +148,16 @@ impl App {
             KeyCode::BackTab => self.active_panel = self.active_panel.prev(),
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Char('s') => self.toggle_scheduler(),
-            KeyCode::Up | KeyCode::Char('k') => {
-                if self.active_panel == Panel::Logs && self.log_scroll > 0 {
-                    self.log_scroll -= 1;
-                }
+            KeyCode::Up | KeyCode::Char('k')
+                if self.active_panel == Panel::Logs && self.log_scroll > 0 =>
+            {
+                self.log_scroll -= 1;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if self.active_panel == Panel::Logs && self.log_scroll < self.log_lines.len().saturating_sub(1) {
-                    self.log_scroll += 1;
-                }
+            KeyCode::Down | KeyCode::Char('j')
+                if self.active_panel == Panel::Logs
+                    && self.log_scroll < self.log_lines.len().saturating_sub(1) =>
+            {
+                self.log_scroll += 1;
             }
             _ => {}
         }
@@ -166,17 +167,16 @@ impl App {
         if self.running {
             let _ = cron::uninstall(&self.repo_path, None);
         } else {
-            let commitbook_bin = which::which("commitbook")
-                .or_else(|_| std::env::current_exe().map(|bin|
-                    bin.parent().map(|p| p.join("commitbook")).unwrap_or(bin)
-                ));
+            let commitbook_bin = which::which("commitbook").or_else(|_| {
+                std::env::current_exe()
+                    .map(|bin| bin.parent().map(|p| p.join("commitbook")).unwrap_or(bin))
+            });
             if let Ok(bin) = commitbook_bin {
                 let _ = cron::install(&self.repo_path, &self.schedule, &bin);
             }
         }
         self.refresh();
     }
-
 }
 
 pub fn run(

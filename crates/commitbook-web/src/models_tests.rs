@@ -64,8 +64,7 @@ fn test_logs_query_with_values() {
 
 #[test]
 fn test_config_update_partial() {
-    let update: ConfigUpdate =
-        serde_json::from_str(r#"{"schedule": "*/5 * * * *"}"#).unwrap();
+    let update: ConfigUpdate = serde_json::from_str(r#"{"schedule": "*/5 * * * *"}"#).unwrap();
     assert_eq!(update.schedule.as_deref(), Some("*/5 * * * *"));
     assert!(update.auto_push.is_none());
     assert!(update.branch.is_none());

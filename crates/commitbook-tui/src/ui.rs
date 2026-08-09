@@ -42,7 +42,9 @@ pub fn draw(f: &mut Frame, app: &App) {
 
 fn panel_block(title: &str, active: bool) -> Block<'_> {
     let style = if active {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -68,19 +70,17 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let changes_text = if app.changes.is_empty() {
         "No pending changes".to_string()
     } else {
-        format!("{} pending ({})", app.changes.total(), app.changes.to_summary_text())
+        format!(
+            "{} pending ({})",
+            app.changes.total(),
+            app.changes.to_summary_text()
+        )
     };
 
-    let last_commit_text = app
-        .last_commit
-        .as_deref()
-        .unwrap_or("never");
+    let last_commit_text = app.last_commit.as_deref().unwrap_or("never");
 
     let lines = vec![
-        Line::from(vec![
-            Span::raw("  State:    "),
-            state_indicator,
-        ]),
+        Line::from(vec![Span::raw("  State:    "), state_indicator]),
         Line::from(format!("  Enabled:  {}", enabled_text)),
         Line::from(format!("  Schedule: {}", app.schedule_desc)),
         Line::from(format!("  Branch:   {}", app.current_branch)),
@@ -195,19 +195,43 @@ fn draw_providers(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_footer(f: &mut Frame, _app: &App, area: Rect) {
     let keys = Line::from(vec![
-        Span::styled(" Tab", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " Tab",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":panel  "),
-        Span::styled("q", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "q",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":quit  "),
-        Span::styled("s", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "s",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":start/stop  "),
-        Span::styled("r", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "r",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":refresh  "),
-        Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "↑↓",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":scroll logs"),
     ]);
 
-    let paragraph = Paragraph::new(keys)
-        .style(Style::default().fg(Color::White));
+    let paragraph = Paragraph::new(keys).style(Style::default().fg(Color::White));
     f.render_widget(paragraph, area);
 }

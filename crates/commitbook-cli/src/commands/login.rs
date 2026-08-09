@@ -3,7 +3,7 @@ use colored::Colorize;
 use std::io::{self, Write};
 use std::path::Path;
 
-use commitbook_core::state::auth::{AuthConfig, AuthEntry};
+use commitbook_engine::state::auth::{AuthConfig, AuthEntry};
 
 pub async fn run(
     cb_dir: &Path,
@@ -49,7 +49,11 @@ pub async fn run(
     );
     println!(
         "  {}",
-        "Token stored in .CommitBook/auth.toml (gitignored).".dimmed()
+        "Token stored in .CommitBook/local/auth.toml (gitignored).".dimmed()
+    );
+    println!(
+        "  {}",
+        "Desktop git sync uses your normal Git credentials; this token is only for token-backed transports.".dimmed()
     );
 
     Ok(())

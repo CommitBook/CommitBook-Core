@@ -1,33 +1,21 @@
-use super::*;
-use commitbook_core::state::auth::{AuthConfig, AuthEntry};
+use super::commit_provider_keys;
 
 #[test]
-fn test_create_transport_no_auth() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cb_dir = tmp.path().join(".CommitBook");
-    std::fs::create_dir_all(&cb_dir).unwrap();
-    let config = LocalConfig::new("0 * * * *");
-
-    let result = create_transport(&cb_dir, tmp.path(), &config);
-    assert!(result.is_ok());
+fn test_provider_keys_ai_enabled_uses_full_chain() {
+    let keys = commit_provider_keys(true);
+    assert_eq!(
+        keys,
+        vec![
+            "gh-copilot".to_string(),
+            "claude-cli".to_string(),
+            "codex-cli".to_string(),
+            "fallback".to_string(),
+        ]
+    );
 }
 
 #[test]
-fn test_create_transport_with_pat_falls_back_to_local() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cb_dir = tmp.path().join(".CommitBook");
-    std::fs::create_dir_all(&cb_dir).unwrap();
-
-    // Write auth with a token — transport should succeed, falling back to local.
-    let auth = AuthConfig {
-        auth: AuthEntry {
-            provider: Some("github".to_string()),
-            token: Some("ghp_test".to_string()),
-        },
-    };
-    auth.save(&cb_dir).unwrap();
-
-    let config = LocalConfig::new("0 * * * *");
-    let result = create_transport(&cb_dir, tmp.path(), &config);
-    assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
+fn test_provider_keys_ai_disabled_uses_fallback_only() {
+    let keys = commit_provider_keys(false);
+    assert_eq!(keys, vec!["fallback".to_string()]);
 }

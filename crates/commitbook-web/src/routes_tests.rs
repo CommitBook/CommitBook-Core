@@ -18,7 +18,7 @@ fn git_init(path: &Path) {
 fn setup_test_app() -> (tempfile::TempDir, Router) {
     let tmp = tempfile::tempdir().unwrap();
     git_init(tmp.path());
-    commitbook_core::config::local::LocalConfig::init(tmp.path(), "0 * * * *").unwrap();
+    commitbook_engine::config::local::LocalConfig::init(tmp.path(), "0 * * * *").unwrap();
 
     let state = Arc::new(AppState {
         repo_path: tmp.path().to_path_buf(),
@@ -44,12 +44,7 @@ fn setup_test_app() -> (tempfile::TempDir, Router) {
 
 async fn get_json<T: serde::de::DeserializeOwned>(app: Router, uri: &str) -> (StatusCode, T) {
     let response = app
-        .oneshot(
-            Request::builder()
-                .uri(uri)
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
         .await
         .unwrap();
 
@@ -109,7 +104,7 @@ async fn test_api_logs_respects_limit() {
     let (tmp, app) = setup_test_app();
 
     // Write log entries
-    let logs_dir = tmp.path().join(".CommitBook").join("logs");
+    let logs_dir = tmp.path().join(".CommitBook").join("local").join("logs");
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let log_file = logs_dir.join(format!("{}.log", today));
     let mut entries = String::new();
@@ -131,13 +126,16 @@ async fn test_api_logs_respects_limit() {
 async fn test_api_logs_filters_by_level() {
     let (tmp, app) = setup_test_app();
 
-    let logs_dir = tmp.path().join(".CommitBook").join("logs");
+    let logs_dir = tmp.path().join(".CommitBook").join("local").join("logs");
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let log_file = logs_dir.join(format!("{}.log", today));
     let entries = concat!(
-        r#"{"ts":"2026-04-09 10:00:00","level":"INFO","msg":"info msg"}"#, "\n",
-        r#"{"ts":"2026-04-09 10:01:00","level":"ERROR","msg":"error msg"}"#, "\n",
-        r#"{"ts":"2026-04-09 10:02:00","level":"INFO","msg":"info msg 2"}"#, "\n",
+        r#"{"ts":"2026-04-09 10:00:00","level":"INFO","msg":"info msg"}"#,
+        "\n",
+        r#"{"ts":"2026-04-09 10:01:00","level":"ERROR","msg":"error msg"}"#,
+        "\n",
+        r#"{"ts":"2026-04-09 10:02:00","level":"INFO","msg":"info msg 2"}"#,
+        "\n",
     );
     std::fs::write(&log_file, entries).unwrap();
 
@@ -156,7 +154,7 @@ async fn test_api_config_updates_schedule() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let config = commitbook_core::config::local::LocalConfig::load(tmp.path()).unwrap();
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
     assert_eq!(config.schedule, "*/5 * * * *");
 }
 
@@ -175,15 +173,10 @@ async fn test_api_config_rejects_invalid_cron() {
 #[tokio::test]
 async fn test_api_config_partial_update() {
     let (tmp, app) = setup_test_app();
-    let (status, _) = post_json(
-        app,
-        "/api/config",
-        serde_json::json!({"auto_push": false}),
-    )
-    .await;
+    let (status, _) = post_json(app, "/api/config", serde_json::json!({"auto_push": false})).await;
     assert_eq!(status, StatusCode::OK);
 
-    let config = commitbook_core::config::local::LocalConfig::load(tmp.path()).unwrap();
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
     assert!(!config.git.auto_push);
     assert_eq!(config.schedule, "0 * * * *"); // unchanged
 }
@@ -218,7 +211,10 @@ async fn test_api_stop_returns_action_response() {
 
 #[test]
 fn test_escape_html_special_chars() {
-    assert_eq!(escape_html("<script>alert('xss')</script>"), "&lt;script&gt;alert('xss')&lt;/script&gt;");
+    assert_eq!(
+        escape_html("<script>alert('xss')</script>"),
+        "&lt;script&gt;alert('xss')&lt;/script&gt;"
+    );
     assert_eq!(escape_html("a&b"), "a&amp;b");
     assert_eq!(escape_html(r#"he said "hi""#), "he said &quot;hi&quot;");
     assert_eq!(escape_html("no special chars"), "no special chars");
@@ -233,15 +229,22 @@ async fn test_api_config_error_is_escaped() {
         serde_json::json!({"schedule": "<script>alert(1)</script>"}),
     )
     .await;
-    assert!(body.contains("&lt;script&gt;"), "error should be HTML-escaped, got: {}", body);
-    assert!(!body.contains("<script>"), "raw <script> should not appear in response");
+    assert!(
+        body.contains("&lt;script&gt;"),
+        "error should be HTML-escaped, got: {}",
+        body
+    );
+    assert!(
+        !body.contains("<script>"),
+        "raw <script> should not appear in response"
+    );
 }
 
 #[tokio::test]
 async fn test_api_logs_filter_then_paginate() {
     let (tmp, app) = setup_test_app();
 
-    let logs_dir = tmp.path().join(".CommitBook").join("logs");
+    let logs_dir = tmp.path().join(".CommitBook").join("local").join("logs");
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let log_file = logs_dir.join(format!("{}.log", today));
     let mut entries = String::new();
@@ -255,7 +258,7 @@ async fn test_api_logs_filter_then_paginate() {
     }
     std::fs::write(&log_file, entries).unwrap();
 
-    // 3 ERROR entries total; request limit=2 — should get exactly 2
+    // 3 ERROR entries total; request limit=2, should get exactly 2
     let (_, body): (_, LogsResponse) = get_json(app, "/api/logs?level=ERROR&limit=2").await;
     assert_eq!(body.entries.len(), 2);
     assert!(body.entries.iter().all(|e| e.level == "ERROR"));
@@ -266,12 +269,7 @@ async fn test_api_logs_filter_then_paginate() {
 async fn test_dashboard_returns_html() {
     let (_tmp, app) = setup_test_app();
     let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
