@@ -1,0 +1,21 @@
+Cargo.toml
+  s_073f371c7076e0::t_926557e48be452 12
+Cargo.lock
+  s_073f371c7076e0::t_61ac376c9e8f86 494,514,536,558,573
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "aba45c51de0d3c8d067b6e2e89d263d803743423",
+  "prompts": {},
+  "sessions": {
+    "s_073f371c7076e0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe7ec-b317-78c2-9f68-916393942c1f",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
