@@ -1,0 +1,24 @@
+crates/commitbook-cli/src/commands/doctor.rs
+  s_f12a6b918ec42a::t_12489c80d59fb3 355-360
+docs/README.md
+  s_f12a6b918ec42a::t_b36b2d0c6ec1a0 11,71,94,136,186-188
+  s_f12a6b918ec42a::t_072c148ac93af9 8-9,72-73,79-82,96,98,100-105,113-115,118,134,152,163-164,228-229,235,242,271
+Cargo.lock
+  s_f12a6b918ec42a::t_cb056da6e32100 81,83,1712,1714
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "038e8d14246333ed3fd645451495225cbe893d37",
+  "prompts": {},
+  "sessions": {
+    "s_f12a6b918ec42a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe1c3-d407-7250-bbbb-ee927ab9748d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
