@@ -1,0 +1,19 @@
+crates/commitbook-engine/src/cron/mod.rs
+  s_f12a6b918ec42a::t_a952624c895e7a 204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "35d37285b6a622a302aa75de079374a67d74dad4",
+  "prompts": {},
+  "sessions": {
+    "s_f12a6b918ec42a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe1c3-d407-7250-bbbb-ee927ab9748d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
