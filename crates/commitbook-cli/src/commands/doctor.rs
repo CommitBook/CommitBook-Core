@@ -352,19 +352,19 @@ fn fix_stale_lock(repo_root: &Path) -> bool {
 /// (e.g., a workspace that no longer exists, or a target/debug from a
 /// different checkout), reinstall it pointing at the binary actually running
 /// `commitbook doctor` right now.
+#[cfg(not(target_os = "macos"))]
+fn fix_plist_binary_path(_repo_root: &Path) -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
 fn fix_plist_binary_path(repo_root: &Path) -> bool {
     let Ok(current_exe) = std::env::current_exe() else {
         return false;
     };
 
     // Read the plist; if it doesn't exist or is unreadable, nothing to fix.
-    #[cfg(target_os = "macos")]
     let plist_path = commitbook_engine::cron::macos::plist_path(repo_root);
-    #[cfg(not(target_os = "macos"))]
-    let plist_path: std::path::PathBuf = {
-        let _ = repo_root;
-        return false;
-    };
 
     let Ok(contents) = std::fs::read_to_string(&plist_path) else {
         return false;
