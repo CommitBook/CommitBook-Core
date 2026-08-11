@@ -933,6 +933,9 @@ impl GitRepo {
             .diff_tree_to_workdir_with_index(head_tree.as_ref(), None)
             .context("Failed to compute diff")?;
         let stats = diff.stats().context("Failed to get diff stats")?;
+        if stats.files_changed() == 0 {
+            return Ok(String::new());
+        }
         let buf = stats
             .to_buf(git2::DiffStatsFormat::FULL, 80)
             .context("Failed to format diff stats")?;

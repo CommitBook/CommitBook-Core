@@ -12,31 +12,31 @@ crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]
 commitbook-engine = { path = "../commitbook-engine", features = ["vendored-tls"] }
-anyhow = "1.0"
-async-trait = "0.1"
-chrono = "0.4"
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+chrono = "0.4.45"
 # Static SDK artifacts must not inherit a host pkg-config libgit2; otherwise
 # the native symbols are absent from the XCFramework/AAR archive.
 git2 = { version = "0.21.0", default-features = false, features = ["https", "ssh", "vendored-libgit2"] }
-hex = "0.4"
-libc = "0.2"
-sha2 = "0.10"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
-uniffi = { version = "0.31", features = ["tokio", "cli"] }
+hex = "0.4.3"
+libc = "0.2.189"
+sha2 = "0.11.0"
+reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync"] }
+uniffi = { version = "0.32.0", features = ["tokio", "cli"] }
 
 [dev-dependencies]
 # pollster drives a future to completion on a plain thread with no ambient
 # tokio runtime, reproducing how UniFFI's UDL scaffolding polls [Async]
 # methods. Used by client_tests.rs to guard the shared-runtime wiring.
-pollster = "0.4"
-tempfile = "3"
+pollster = "1.0.1"
+tempfile = "3.27.0"
 
 [build-dependencies]
-uniffi = { version = "0.31", features = ["build"] }
+uniffi = { version = "0.32.0", features = ["build"] }
 
 [[bin]]
 name = "uniffi-bindgen"

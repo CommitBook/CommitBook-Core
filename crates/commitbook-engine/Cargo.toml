@@ -8,31 +8,31 @@ authors.workspace = true
 
 [features]
 default = []
-# Bundle OpenSSL for targets without a usable system OpenSSL (iOS, Android).
-# Desktop builds omit this and use the system library.
-vendored-tls = ["git2/vendored-openssl"]
+# Bundle libgit2 and OpenSSL for self-contained mobile/static-library builds.
+# Desktop binaries omit this and use the system libraries.
+vendored-tls = ["git2/vendored-libgit2", "git2/vendored-openssl"]
 
 [dependencies]
-anyhow = "1.0"
-async-trait = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
-fs2 = "0.4"
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+chrono = { version = "0.4.45", features = ["serde"] }
+fs2 = "0.4.3"
 git2 = { version = "0.21.0", default-features = false, features = ["https", "ssh"] }
-hex = "0.4"
-libc = "0.2"
-log = "0.4"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-sha2 = "0.10"
-tokio = { version = "1", features = ["full"] }
-toml = "0.8"
+hex = "0.4.3"
+libc = "0.2.189"
+log = "0.4.33"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+tokio = { version = "1.53.1", features = ["full"] }
+toml = "1.1.4"
 
 # Desktop-only deps. iOS/Android builds skip these; their consumers
 # (cron/*, ai/{claude,copilot,codex,gemini,cursor}.rs, git/signing.rs) are
 # cfg-gated off mobile.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
-dirs = "5.0"
-which = "7"
+dirs = "6.0.0"
+which = "8.0.5"
 # Used by git/signing.rs to materialize literal SSH signing keys, and by the
 # test fixtures. Desktop-only: mobile signing returns early without it.
-tempfile = "3"
+tempfile = "3.27.0"
