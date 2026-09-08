@@ -58,3 +58,16 @@ fn test_copilot_command_uses_argument_boundary_and_silent_mode() {
         ]
     );
 }
+
+#[test]
+fn test_resolve_path_accepts_text_that_looks_like_cli_diagnostics() {
+    // A resolved note is a complete user document; a line that happens to
+    // match the usage footer must not be mistaken for CLI noise. Only the
+    // commit-message path filters diagnostics.
+    let note = "# Benchmarks\n\nTotal duration (API): 12s on the new box\n";
+    assert!(parse_response(note).is_err());
+    match finalize_resolved_text(note, "GitHub Copilot").unwrap() {
+        ConflictResolution::WriteContent(content) => assert_eq!(content, note.trim()),
+        other => panic!("unexpected resolution: {other:?}"),
+    }
+}

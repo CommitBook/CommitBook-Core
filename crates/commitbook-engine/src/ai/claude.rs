@@ -5,7 +5,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::conflict::{
-    build_resolve_prompt, strip_outer_code_fence, ConflictResolution, ConflictResolver,
+    build_resolve_prompt, finalize_resolved_text, ConflictResolution, ConflictResolver,
 };
 use super::{
     clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
@@ -98,14 +98,11 @@ impl ConflictResolver for ClaudeProvider {
         let prompt = build_resolve_prompt(conflict)?;
         let repo_path = repo_path.to_path_buf();
         let output = tokio::task::spawn_blocking(move || {
-            let child = Command::new("claude")
-                .args(["-p", &prompt])
-                .current_dir(&repo_path)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .context("Failed to start claude CLI")?;
-            wait_with_timeout(child, CLAUDE_RESOLVE_TIMEOUT).context("claude CLI timed out")
+            super::run_with_prompt(
+                Command::new("claude").arg("-p").current_dir(&repo_path),
+                &prompt,
+                CLAUDE_RESOLVE_TIMEOUT,
+            )
         })
         .await
         .context("spawn_blocking panicked")??;
@@ -116,11 +113,7 @@ impl ConflictResolver for ClaudeProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        let resolved = strip_outer_code_fence(&raw);
-        if resolved.trim().is_empty() {
-            bail!("Empty resolution from claude CLI");
-        }
-        Ok(ConflictResolution::WriteContent(resolved))
+        finalize_resolved_text(&raw, "claude CLI")
     }
 }
 

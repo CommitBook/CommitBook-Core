@@ -66,6 +66,22 @@ fn parse_response(output: &str) -> Result<String> {
     Ok(response)
 }
 
+/// Conflict resolution sends the prompt on stdin, so `-p` is omitted: it
+/// would override piped input.
+fn resolve_command(repo_path: &Path) -> Command {
+    let mut command = Command::new("gh");
+    command
+        .args([
+            "copilot",
+            "--",
+            "--silent",
+            "--no-color",
+            "--no-custom-instructions",
+        ])
+        .current_dir(repo_path);
+    command
+}
+
 #[async_trait]
 impl CommitMessageProvider for CopilotProvider {
     fn name(&self) -> &str {
@@ -149,12 +165,16 @@ impl ConflictResolver for CopilotProvider {
         repo_path: &Path,
     ) -> Result<ConflictResolution> {
         let prompt = build_resolve_prompt(conflict)?;
-        let child = command(repo_path, &prompt)
-            .spawn()
-            .context("Failed to run gh copilot")?;
-
-        let output =
-            wait_with_timeout(child, COPILOT_RESOLVE_TIMEOUT).context("gh copilot timed out")?;
+        let repo_path = repo_path.to_path_buf();
+        let output = tokio::task::spawn_blocking(move || {
+            super::run_with_prompt(
+                &mut resolve_command(&repo_path),
+                &prompt,
+                COPILOT_RESOLVE_TIMEOUT,
+            )
+        })
+        .await
+        .context("spawn_blocking panicked")??;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -162,8 +182,7 @@ impl ConflictResolver for CopilotProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout);
-        let resolved = parse_response(&raw)?;
-        finalize_resolved_text(&resolved, "GitHub Copilot")
+        finalize_resolved_text(&raw, "GitHub Copilot")
     }
 }
 

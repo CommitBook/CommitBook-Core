@@ -1,6 +1,5 @@
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
-use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -9,7 +8,7 @@ use super::conflict::{
     build_resolve_prompt, finalize_resolved_text, ConflictResolution, ConflictResolver,
 };
 use super::{
-    clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
+    clean_message, looks_like_diff_narration, run_with_prompt, truncate, CommitMessageProvider,
 };
 use crate::git::{ChangesSummary, GitConflict};
 
@@ -42,31 +41,11 @@ fn command(repo_path: &Path, output_path: &Path) -> Command {
 fn run(prompt: &str, repo_path: &Path, timeout: Duration) -> Result<String> {
     let output_file =
         tempfile::NamedTempFile::new().context("Failed to create Codex output file")?;
-    let mut child = command(repo_path, output_file.path())
-        .spawn()
-        .context("Failed to start codex CLI")?;
-
-    // Write the prompt from a separate thread so a prompt larger than the OS
-    // pipe buffer can never block this thread before `wait_with_timeout`
-    // starts draining stdout/stderr and enforcing the timeout. If the child
-    // exits or is killed, the closed pipe unblocks the writer.
-    let mut stdin = child.stdin.take().context("codex CLI stdin missing")?;
-    let prompt_bytes = prompt.as_bytes().to_vec();
-    let writer = std::thread::spawn(move || {
-        let result = stdin.write_all(&prompt_bytes);
-        drop(stdin);
-        result
-    });
-
-    let output = wait_with_timeout(child, timeout).context("codex CLI timed out")?;
-    let write_result = writer
-        .join()
-        .unwrap_or_else(|_| Err(std::io::Error::other("prompt writer thread panicked")));
+    let output = run_with_prompt(&mut command(repo_path, output_file.path()), prompt, timeout)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("codex CLI failed: {}", stderr.trim());
     }
-    write_result.context("Failed to write prompt to codex CLI")?;
 
     std::fs::read_to_string(output_file.path())
         .context("Failed to read the final response from codex CLI")
@@ -131,7 +110,11 @@ impl ConflictResolver for CodexProvider {
         repo_path: &Path,
     ) -> Result<ConflictResolution> {
         let prompt = build_resolve_prompt(conflict)?;
-        let raw = run(&prompt, repo_path, CODEX_RESOLVE_TIMEOUT)?;
+        let repo_path = repo_path.to_path_buf();
+        let raw =
+            tokio::task::spawn_blocking(move || run(&prompt, &repo_path, CODEX_RESOLVE_TIMEOUT))
+                .await
+                .context("spawn_blocking panicked")??;
         finalize_resolved_text(&raw, "codex CLI")
     }
 }
