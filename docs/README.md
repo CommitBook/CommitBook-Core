@@ -268,6 +268,13 @@ Download from [GitHub Releases](https://github.com/CommitBook/CommitBook-Core/re
 - macOS (Apple Silicon / Intel)
 - Linux (x86_64 / aarch64)
 
+### Upgrading
+
+Run `commitbook stop` before replacing the binary, then `commitbook start`
+afterwards. Releases before 0.6.0 delete the repository lock file when they
+finish, so a scheduler from an older release running alongside a newer one can
+let two syncs mutate the same repository at the same time.
+
 ## Requirements
 
 - **Git** (any recent version)

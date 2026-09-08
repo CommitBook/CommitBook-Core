@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use fs2::FileExt;
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -63,11 +62,9 @@ impl RepoLock {
             legacy,
         };
         crate::state::migrate_legacy_state(&repo_root)?;
-        if lock.legacy.is_some() {
-            std::fs::remove_file(&legacy_path).with_context(|| {
-                format!("Failed to remove legacy lock: {}", legacy_path.display())
-            })?;
-        }
+        // Retain the pathname: unlinking a held lock permits a second inode
+        // to be locked concurrently. Old schedulers must be stopped before
+        // upgrading because those binaries may themselves unlink this file.
         Ok(lock)
     }
 
@@ -121,7 +118,7 @@ fn open_and_lock(path: &Path, repo_root: &Path) -> Result<File> {
             path.display()
         );
     }
-    match file.try_lock_exclusive() {
+    match fs2::FileExt::try_lock_exclusive(&file) {
         Ok(()) => Ok(file),
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Err(RepoLockContended {
             path: repo_root.to_path_buf(),
@@ -135,9 +132,9 @@ fn open_and_lock(path: &Path, repo_root: &Path) -> Result<File> {
 impl Drop for RepoLock {
     fn drop(&mut self) {
         if let Some(legacy) = &self.legacy {
-            let _ = legacy.unlock();
+            let _ = fs2::FileExt::unlock(legacy);
         }
-        let _ = self.primary.unlock();
+        let _ = fs2::FileExt::unlock(&self.primary);
     }
 }
 

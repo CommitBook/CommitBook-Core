@@ -81,22 +81,22 @@ fn coordinates_with_legacy_lock() {
         .write(true)
         .open(&legacy_path)
         .unwrap();
-    legacy.try_lock_exclusive().unwrap();
+    fs2::FileExt::try_lock_exclusive(&legacy).unwrap();
 
     let error = RepoLock::acquire(tmp.path()).unwrap_err();
     assert!(error.downcast_ref::<RepoLockContended>().is_some());
     assert!(legacy_auth.exists());
     assert!(!tmp.path().join(".CommitBook/local/auth.toml").exists());
-    legacy.unlock().unwrap();
+    fs2::FileExt::unlock(&legacy).unwrap();
     drop(legacy);
 
     let migrated = RepoLock::acquire(tmp.path()).unwrap();
-    assert!(!legacy_path.exists());
+    assert!(legacy_path.exists());
     assert!(LocalConfig::lock_path(tmp.path()).exists());
     assert!(!legacy_auth.exists());
     assert!(tmp.path().join(".CommitBook/local/auth.toml").exists());
     drop(migrated);
-    assert!(!legacy_path.exists());
+    assert!(legacy_path.exists());
 }
 
 #[test]
@@ -137,4 +137,18 @@ fn rejects_symlinked_primary_lock_without_touching_target() {
     let error = RepoLock::acquire(tmp.path()).unwrap_err().to_string();
     assert!(error.contains("not a regular file"));
     assert!(std::fs::read(outside.path()).unwrap().is_empty());
+}
+
+#[test]
+fn fresh_repository_creates_only_the_primary_lock_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let legacy_path = LocalConfig::commitbook_dir(tmp.path()).join(".lock");
+
+    let lock = RepoLock::acquire(tmp.path()).unwrap();
+    assert!(LocalConfig::lock_path(tmp.path()).exists());
+    assert!(!legacy_path.exists());
+    drop(lock);
+
+    assert!(LocalConfig::lock_path(tmp.path()).exists());
+    assert!(!legacy_path.exists());
 }
