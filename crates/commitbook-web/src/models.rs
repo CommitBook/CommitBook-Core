@@ -40,6 +40,7 @@ pub struct LogsQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigUpdate {
+    pub ai_messages: Option<bool>,
     pub schedule: Option<String>,
     pub auto_push: Option<bool>,
     pub branch: Option<String>,

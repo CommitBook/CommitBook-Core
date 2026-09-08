@@ -151,7 +151,25 @@ async fn generate_commit_message(
     summary: &commitbook_engine::git::ChangesSummary,
     ai_messages: bool,
 ) -> String {
-    let chain = commitbook_engine::ai::ProviderChain::new();
+    generate_commit_message_with_chain(
+        repo_root,
+        summary,
+        ai_messages,
+        commitbook_engine::ai::ProviderChain::new,
+    )
+    .await
+}
+
+async fn generate_commit_message_with_chain(
+    repo_root: &Path,
+    summary: &commitbook_engine::git::ChangesSummary,
+    ai_messages: bool,
+    make_chain: impl FnOnce() -> commitbook_engine::ai::ProviderChain,
+) -> String {
+    if !ai_messages {
+        return commitbook_engine::ai::fallback::generate_timestamp_message(summary);
+    }
+    let chain = make_chain();
     let keys = commit_provider_keys(ai_messages);
     let (msg, _provider) = chain.generate(summary, &keys, repo_root).await;
     msg

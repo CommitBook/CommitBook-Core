@@ -133,3 +133,19 @@ fn test_handle_key_scroll() {
     app.handle_key(KeyCode::Up, KeyModifiers::NONE);
     assert_eq!(app.log_scroll, 0);
 }
+
+#[test]
+fn refresh_clears_provider_status_when_disabled_or_config_invalid() {
+    let tmp = tempfile::tempdir().unwrap();
+    LocalConfig::init(tmp.path(), "hourly").unwrap();
+    let mut app = App::new(tmp.path());
+    assert!(app.providers.is_empty());
+    for invalid_config in [false, true] {
+        app.providers = vec![("codex-cli".into(), "Codex".into(), true)];
+        if invalid_config {
+            std::fs::write(LocalConfig::config_path(tmp.path()), "invalid = [").unwrap();
+        }
+        app.refresh();
+        assert!(app.providers.is_empty());
+    }
+}

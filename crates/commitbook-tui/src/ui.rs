@@ -162,7 +162,7 @@ fn draw_providers(f: &mut Frame, app: &App, area: Rect) {
     let block = panel_block(" Providers ", active);
 
     if app.providers.is_empty() {
-        let paragraph = Paragraph::new("  No providers configured")
+        let paragraph = Paragraph::new("  AI commit messages disabled")
             .style(Style::default().fg(Color::DarkGray))
             .block(block);
         f.render_widget(paragraph, area);

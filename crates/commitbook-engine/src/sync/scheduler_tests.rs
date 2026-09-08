@@ -143,6 +143,16 @@ async fn scenario_2_local_only_edit_commits_and_pushes() {
     .await
     .unwrap();
     assert!(outcome.committed);
+    let repo = git2::Repository::open(fx.repo_dir.path()).unwrap();
+    assert_eq!(
+        repo.head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .message()
+            .unwrap(),
+        "Test commit"
+    );
     assert_eq!(outcome.pushed, 1);
     assert_eq!(outcome.pulled, 0);
     assert!(outcome.errors.is_empty(), "{outcome:?}");
@@ -938,4 +948,31 @@ async fn first_sync_against_empty_remote_bootstraps_branch() {
             .is_ok(),
         "push should have created refs/heads/{branch} on the remote"
     );
+}
+
+#[tokio::test]
+async fn default_commit_message_uses_writing_timestamp() {
+    let (fx, logger) = setup_with_state();
+    std::fs::write(fx.repo_dir.path().join("note.md"), "# note\n").unwrap();
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(outcome.committed);
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    let repo = git2::Repository::open(fx.repo_dir.path()).unwrap();
+    let commit = repo.head().unwrap().peel_to_commit().unwrap();
+    let message = commit.message().unwrap();
+    assert_eq!(message.len(), "Writing YYYY-MM-DD HH:MM:SS".len());
+    chrono::NaiveDateTime::parse_from_str(
+        message.strip_prefix("Writing ").unwrap(),
+        "%Y-%m-%d %H:%M:%S",
+    )
+    .unwrap();
 }

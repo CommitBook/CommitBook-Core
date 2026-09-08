@@ -131,7 +131,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
     print!("  AI providers... ");
     let ai_messages = LocalConfig::load(repo_root)
         .map(|c| c.commit.ai_messages)
-        .unwrap_or(true);
+        .unwrap_or(false);
     if !ai_messages {
         println!("{}", "disabled".dimmed());
         println!(

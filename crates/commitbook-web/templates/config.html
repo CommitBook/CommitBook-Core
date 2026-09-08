@@ -33,6 +33,14 @@
                 <option value="false" {% if !auto_push %}selected{% endif %}>No</option>
             </select>
         </div>
+        <div class="form-row">
+            <label for="ai_messages">AI commit messages</label>
+            <select name="ai_messages" id="ai_messages" aria-describedby="ai-messages-help">
+                <option value="false" {% if !ai_messages %}selected{% endif %}>No</option>
+                <option value="true" {% if ai_messages %}selected{% endif %}>Yes</option>
+            </select>
+        </div>
+        <p id="ai-messages-help">No uses local timestamp text: Writing YYYY-MM-DD HH:MM:SS. Yes tries installed AI providers, with timestamp text as a fallback.</p>
         <div class="actions">
             <button type="submit">Save</button>
         </div>

@@ -291,20 +291,20 @@ created_at = "2026-04-07T00:00:00Z"
 }
 
 #[test]
-fn test_commit_ai_messages_defaults_true() {
-    assert!(CommitSettings::default().ai_messages);
-    assert!(LocalConfig::new("hourly").commit.ai_messages);
+fn test_commit_ai_messages_defaults_false() {
+    assert!(!CommitSettings::default().ai_messages);
+    assert!(!LocalConfig::new("hourly").commit.ai_messages);
 }
 
 #[test]
-fn test_load_without_commit_section_defaults_true() {
+fn test_load_without_commit_section_defaults_false() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path();
     init_repo_with_remote(repo, "origin");
     let dir = repo.join(".CommitBook");
     fs::create_dir_all(&dir).unwrap();
 
-    // Config predating the [commit] section: ai_messages must default to true.
+    // Config predating the [commit] section: ai_messages must default to false.
     let toml_content = r#"
 config_version = "1"
 enabled = true
@@ -314,7 +314,7 @@ created_at = "2026-04-07T00:00:00Z"
     fs::write(dir.join("config.toml"), toml_content).unwrap();
 
     let loaded = LocalConfig::load(repo).unwrap();
-    assert!(loaded.commit.ai_messages);
+    assert!(!loaded.commit.ai_messages);
 }
 
 #[test]
@@ -442,4 +442,32 @@ fn test_gitignore_io_rejects_symlink_without_touching_target() {
         fs::read_to_string(outside.path()).unwrap(),
         "outside sentinel\n"
     );
+}
+
+#[test]
+fn test_commit_setting_missing_field_and_explicit_values_round_trip() {
+    for (section, expected) in [
+        ("[commit]", false),
+        ("[commit]\nai_messages = false", false),
+        ("[commit]\nai_messages = true", true),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_remote(tmp.path(), "origin");
+        let config = LocalConfig::init(tmp.path(), "hourly").unwrap();
+        assert!(!config.commit.ai_messages);
+        let path = LocalConfig::config_path(tmp.path());
+        let content = fs::read_to_string(&path).unwrap();
+        fs::write(
+            &path,
+            content.replace("[commit]\nai_messages = false", section),
+        )
+        .unwrap();
+        let loaded = LocalConfig::load(tmp.path()).unwrap();
+        assert_eq!(loaded.commit.ai_messages, expected, "{section}");
+        loaded.save(tmp.path()).unwrap();
+        assert_eq!(
+            LocalConfig::load(tmp.path()).unwrap().commit.ai_messages,
+            expected
+        );
+    }
 }

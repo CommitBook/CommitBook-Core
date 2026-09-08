@@ -205,10 +205,7 @@ pub async fn sync_with_resolver_locked(
             repo.stage_all()?;
             if repo.has_real_staged_changes()? {
                 let msg = commit_message.clone().unwrap_or_else(|| {
-                    format!(
-                        "Update via CommitBook ({})",
-                        crate::utils::datetime::now_iso()
-                    )
+                    crate::ai::fallback::generate_timestamp_message(&Default::default())
                 });
                 repo.commit_on_branch(&msg, &options.branch)?;
                 outcome.committed = true;

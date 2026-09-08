@@ -70,14 +70,14 @@ impl Default for ConflictSettings {
 }
 
 fn default_ai_messages() -> bool {
-    true
+    false
 }
 
 /// Commit-message settings.
 ///
-/// `ai_messages = true` (the default) tries the AI provider chain (Copilot,
-/// then Claude, then Codex) and falls back to a deterministic timestamp
-/// message. `false` skips all AI CLIs and always uses the timestamp message.
+/// `ai_messages = false` (the default) uses local `Writing <datetime>` text
+/// without invoking AI CLIs. Opting in with `true` tries Copilot, Claude,
+/// then Codex, falling back to the same timestamp message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitSettings {
     #[serde(default = "default_ai_messages")]

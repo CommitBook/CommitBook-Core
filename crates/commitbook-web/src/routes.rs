@@ -1,5 +1,6 @@
-use axum::extract::{Query, State};
+use axum::extract::{FromRequest, Query, Request, State};
 use axum::response::{Html, IntoResponse};
+use axum::Form;
 use axum::Json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,6 +43,7 @@ struct LogsTemplate {}
 #[derive(Template)]
 #[template(path = "config.html")]
 struct ConfigTemplate {
+    ai_messages: bool,
     schedule: String,
     branch: String,
     auto_push: bool,
@@ -122,7 +124,13 @@ fn load_status(repo_path: &Path) -> StatusResponse {
     }
 }
 
-fn load_providers() -> Vec<ProviderInfo> {
+fn load_providers(repo_path: &Path) -> Vec<ProviderInfo> {
+    let ai_messages = LocalConfig::load(repo_path)
+        .map(|config| config.commit.ai_messages)
+        .unwrap_or(false);
+    if !ai_messages {
+        return Vec::new();
+    }
     let chain = ProviderChain::new();
     let default_keys = vec![
         "gh-copilot".to_string(),
@@ -178,7 +186,7 @@ fn load_log_entries_filtered(
 
 pub async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let status = load_status(&state.repo_path);
-    let providers = load_providers();
+    let providers = load_providers(&state.repo_path);
 
     let tpl = DashboardTemplate {
         running: status.running,
@@ -206,12 +214,18 @@ pub async fn logs_page(State(_state): State<Arc<AppState>>) -> impl IntoResponse
 
 pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let config = LocalConfig::load(&state.repo_path).ok();
-    let (schedule, branch, auto_push) = match config {
-        Some(c) => (c.schedule, c.git.branch, c.git.auto_push),
-        None => ("0 * * * *".into(), "main".into(), true),
+    let (schedule, branch, auto_push, ai_messages) = match config {
+        Some(c) => (
+            c.schedule,
+            c.git.branch,
+            c.git.auto_push,
+            c.commit.ai_messages,
+        ),
+        None => ("0 * * * *".into(), "main".into(), true, false),
     };
 
     let tpl = ConfigTemplate {
+        ai_messages,
         schedule,
         branch,
         auto_push,
@@ -243,8 +257,8 @@ pub async fn htmx_status(State(state): State<Arc<AppState>>) -> impl IntoRespons
     )
 }
 
-pub async fn htmx_providers(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    let providers = load_providers();
+pub async fn htmx_providers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let providers = load_providers(&state.repo_path);
     let tpl = ProvidersPartial { providers };
     Html(
         tpl.render()
@@ -292,14 +306,38 @@ pub async fn api_logs(
 
 pub async fn api_config(
     State(state): State<Arc<AppState>>,
-    Json(update): Json<ConfigUpdate>,
-) -> impl IntoResponse {
+    request: Request,
+) -> axum::response::Response {
+    let is_form = request
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| {
+            value
+                .trim()
+                .eq_ignore_ascii_case("application/x-www-form-urlencoded")
+        });
+    let update = if is_form {
+        match Form::<ConfigUpdate>::from_request(request, &state).await {
+            Ok(Form(update)) => update,
+            Err(error) => return error.into_response(),
+        }
+    } else {
+        match Json::<ConfigUpdate>::from_request(request, &state).await {
+            Ok(Json(update)) => update,
+            Err(error) => return error.into_response(),
+        }
+    };
     let result = (|| -> anyhow::Result<()> {
         let mut config = LocalConfig::load(&state.repo_path)?;
 
         if let Some(schedule) = &update.schedule {
             cron::validate_platform_schedule(schedule)?;
             config.schedule = schedule.clone();
+        }
+        if let Some(ai_messages) = update.ai_messages {
+            config.commit.ai_messages = ai_messages;
         }
         if let Some(auto_push) = update.auto_push {
             config.git.auto_push = auto_push;
@@ -324,6 +362,7 @@ pub async fn api_config(
             ))
         }
     }
+    .into_response()
 }
 
 pub async fn api_start(State(state): State<Arc<AppState>>) -> Json<ActionResponse> {
@@ -361,8 +400,8 @@ pub async fn api_stop(State(state): State<Arc<AppState>>) -> Json<ActionResponse
     }
 }
 
-pub async fn api_providers() -> Json<Vec<ProviderInfo>> {
-    Json(load_providers())
+pub async fn api_providers(State(state): State<Arc<AppState>>) -> Json<Vec<ProviderInfo>> {
+    Json(load_providers(&state.repo_path))
 }
 
 #[cfg(test)]

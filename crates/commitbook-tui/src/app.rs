@@ -103,8 +103,11 @@ impl App {
     }
 
     pub fn refresh(&mut self) {
+        // Fail closed on config errors, including after AI was previously enabled.
+        let mut ai_messages = false;
         // Load local config
         if let Ok(config) = LocalConfig::load(&self.repo_path) {
+            ai_messages = config.commit.ai_messages;
             self.schedule = config.schedule.clone();
             self.schedule_desc = cron::describe_schedule(&config.schedule);
             self.auto_push = config.git.auto_push;
@@ -130,7 +133,11 @@ impl App {
             }
         }
 
-        // Check provider availability
+        self.providers.clear();
+        if !ai_messages {
+            return;
+        }
+        // Check provider availability only after opt-in.
         let chain = commitbook_engine::ai::ProviderChain::new();
         let default_keys = vec![
             "gh-copilot".to_string(),

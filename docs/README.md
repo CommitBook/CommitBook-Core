@@ -116,7 +116,23 @@ engine never contacts a CommitBook desktop app.
 
 ## AI Commit Messages
 
-CommitBook generates commit messages using a provider chain. Each provider is tried in order.
+By default, automatic commits use local timestamp text: `Writing 2026-04-07 14:30:02`.
+No AI CLI is invoked for commit messages or provider status checks while AI messages are disabled.
+
+To opt in, select **AI commit messages → Yes** on the web Config page, or edit
+`.CommitBook/config.toml`:
+
+```toml
+[commit]
+ai_messages = true # Default: false
+```
+
+New repositories and configs missing this setting default to `false`. Existing
+explicit `true` or `false` values are preserved. Set it back to `false` to use
+only timestamp text. This setting is independent of AI conflict resolution.
+
+When enabled, desktop sync tries each provider in order. Mobile sync continues
+to use timestamp messages.
 
 | Priority | Provider | Invocation | Status |
 |---|---|---|---|
@@ -125,9 +141,9 @@ CommitBook generates commit messages using a provider chain. Each provider is tr
 | 3 | Codex CLI | `codex exec --ephemeral --sandbox read-only --color never --output-last-message <file> -` | Used when installed |
 | 4 | Timestamp fallback | Generated locally | Always available |
 
-Example fallback message: `Writing 2026-04-07 14:30:02 (1 modified)`
+If every AI provider is unavailable or fails, the same local timestamp message is used.
 
-Run `commitbook doctor` to see which providers are available on your system.
+Run `commitbook doctor` to see provider availability after enabling AI messages.
 
 ## Configuration
 

@@ -182,12 +182,11 @@ async fn test_api_config_partial_update() {
 }
 
 #[tokio::test]
-async fn test_api_providers_returns_list() {
+async fn test_api_providers_disabled_by_default() {
     let (_tmp, app) = setup_test_app();
     let (status, body): (_, Vec<ProviderInfo>) = get_json(app, "/api/providers").await;
     assert_eq!(status, StatusCode::OK);
-    // Should return at least one provider entry (even if unavailable)
-    assert!(!body.is_empty());
+    assert!(body.is_empty());
 }
 
 #[tokio::test]
@@ -273,4 +272,141 @@ async fn test_dashboard_returns_html() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+async fn get_html(app: Router, uri: &str) -> String {
+    let response = app
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn config_ai_messages_json_and_form_save_and_reload() {
+    for content_type in ["application/json", "application/x-www-form-urlencoded"] {
+        let (tmp, app) = setup_test_app();
+        let initial = get_html(app.clone(), "/config").await;
+        assert!(initial.contains("AI commit messages"));
+        assert!(initial.contains(r#"value="false" selected>No"#));
+        for enabled in [true, false] {
+            let body = if content_type == "application/json" {
+                serde_json::json!({"ai_messages": enabled, "auto_push": false}).to_string()
+            } else {
+                format!("ai_messages={enabled}&auto_push=false&schedule=0+*+*+*+*&branch=main")
+            };
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/config")
+                        .header("content-type", content_type)
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let response_body = response.into_body().collect().await.unwrap().to_bytes();
+            assert!(String::from_utf8_lossy(&response_body).contains("Configuration saved."));
+            let config = LocalConfig::load(tmp.path()).unwrap();
+            assert_eq!(config.commit.ai_messages, enabled);
+            assert!(!config.git.auto_push);
+            let page = get_html(app.clone(), "/config").await;
+            assert!(page.contains(&format!(
+                r#"value="{enabled}" selected>{}"#,
+                if enabled { "Yes" } else { "No" }
+            )));
+        }
+    }
+}
+
+#[tokio::test]
+async fn config_partial_updates_preserve_ai_opt_in() {
+    let (tmp, app) = setup_test_app();
+    post_json(
+        app.clone(),
+        "/api/config",
+        serde_json::json!({"ai_messages": true}),
+    )
+    .await;
+    post_json(
+        app.clone(),
+        "/api/config",
+        serde_json::json!({"auto_push": false}),
+    )
+    .await;
+    assert!(LocalConfig::load(tmp.path()).unwrap().commit.ai_messages);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/config")
+                .header(
+                    "content-type",
+                    "application/x-www-form-urlencoded; charset=UTF-8",
+                )
+                .body(Body::from("auto_push=true"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let config = LocalConfig::load(tmp.path()).unwrap();
+    assert!(config.commit.ai_messages);
+    assert!(config.git.auto_push);
+}
+
+#[tokio::test]
+async fn config_rejects_invalid_ai_values_without_saving() {
+    for (content_type, body) in [
+        ("application/json", r#"{"ai_messages":"yes"}"#),
+        ("application/x-www-form-urlencoded", "ai_messages=yes"),
+    ] {
+        let (tmp, app) = setup_test_app();
+        let before = std::fs::read(LocalConfig::config_path(tmp.path())).unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/config")
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(response.status().is_client_error());
+        assert_eq!(
+            std::fs::read(LocalConfig::config_path(tmp.path())).unwrap(),
+            before
+        );
+    }
+}
+
+#[tokio::test]
+async fn provider_status_disabled_on_default_or_invalid_config() {
+    let (tmp, app) = setup_test_app();
+    for invalid_config in [false, true] {
+        if invalid_config {
+            std::fs::write(LocalConfig::config_path(tmp.path()), "invalid = [").unwrap();
+        }
+        for uri in ["/", "/htmx/providers"] {
+            let page = get_html(app.clone(), uri).await;
+            assert!(page.contains("AI commit messages disabled"));
+        }
+        let (_, providers): (_, Vec<ProviderInfo>) = get_json(app.clone(), "/api/providers").await;
+        assert!(providers.is_empty());
+    }
 }
