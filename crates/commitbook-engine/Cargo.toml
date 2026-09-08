@@ -27,6 +27,7 @@ serde_json = "1.0.151"
 sha2 = "0.11.0"
 tokio = { version = "1.53.1", features = ["full"] }
 toml = "1.1.5"
+tempfile = "3.27.0"
 
 # Desktop-only deps. iOS/Android builds skip these; their consumers
 # (cron/*, ai/{claude,copilot,codex,gemini,cursor}.rs, git/signing.rs) are
@@ -34,6 +35,3 @@ toml = "1.1.5"
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 dirs = "7.0.0"
 which = "8.0.6"
-# Used by git/signing.rs to materialize literal SSH signing keys, and by the
-# test fixtures. Desktop-only: mobile signing returns early without it.
-tempfile = "3.27.0"

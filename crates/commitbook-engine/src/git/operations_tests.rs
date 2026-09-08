@@ -1096,3 +1096,254 @@ fn test_last_commit_touching_skips_merge_equal_to_parent() {
         Some(edit_sha)
     );
 }
+
+// --- Fast-forward rollback hardening ---
+
+fn git_in(workdir: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(workdir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn index_oid(repo_root: &Path, path: &str) -> Option<git2::Oid> {
+    git2::Repository::open(repo_root)
+        .unwrap()
+        .index()
+        .unwrap()
+        .get_path(Path::new(path), 0)
+        .map(|entry| entry.id)
+}
+
+#[test]
+fn test_fast_forward_treats_wildcard_filename_literally() {
+    let fx = setup_repo_with_bare_remote();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "*.md", "literal star\n");
+    fs::write(fx.repo_dir.path().join("init.md"), "local edit\n").unwrap();
+
+    fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("*.md")).unwrap(),
+        "literal star\n"
+    );
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("init.md")).unwrap(),
+        "local edit\n"
+    );
+}
+
+#[test]
+fn test_fast_forward_wildcard_rollback_leaves_unrelated_dirty_file() {
+    let fx = setup_repo_with_bare_remote();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "*.md", "literal star\n");
+    fs::write(fx.repo_dir.path().join("init.md"), "local edit\n").unwrap();
+    set_fast_forward_failpoint(FastForwardFailpoint::BeforeRefPublication);
+
+    let error = fx.repo.merge_from_remote("origin", &fx.branch).unwrap_err();
+
+    assert!(format!("{error:#}").contains("BeforeRefPublication"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert!(!fx.repo_dir.path().join("*.md").exists());
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("init.md")).unwrap(),
+        "local edit\n"
+    );
+}
+
+#[test]
+fn test_fast_forward_rollback_restores_modified_file_and_unrelated_index() {
+    let fx = setup_repo_with_bare_remote();
+    fs::write(fx.repo_dir.path().join("dirty.txt"), "base\n").unwrap();
+    fx.repo.stage_paths(&["dirty.txt".to_string()]).unwrap();
+    fx.repo.commit("add dirty.txt").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "init.md", "# remote v2\n");
+
+    fs::write(fx.repo_dir.path().join("staged.txt"), "staged\n").unwrap();
+    fx.repo.stage_paths(&["staged.txt".to_string()]).unwrap();
+    let staged_oid = index_oid(fx.repo_dir.path(), "staged.txt").unwrap();
+    fs::write(fx.repo_dir.path().join("dirty.txt"), "unstaged edit\n").unwrap();
+    set_fast_forward_failpoint(FastForwardFailpoint::BeforeRefPublication);
+
+    let error = fx.repo.merge_from_remote("origin", &fx.branch).unwrap_err();
+
+    assert!(format!("{error:#}").contains("BeforeRefPublication"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("init.md")).unwrap(),
+        "# init\n"
+    );
+    assert_eq!(
+        index_oid(fx.repo_dir.path(), "staged.txt"),
+        Some(staged_oid)
+    );
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("dirty.txt")).unwrap(),
+        "unstaged edit\n"
+    );
+    let status = git2::Repository::open(fx.repo_dir.path())
+        .unwrap()
+        .status_file(Path::new("init.md"))
+        .unwrap();
+    assert_eq!(status, git2::Status::CURRENT);
+}
+
+#[test]
+fn test_fast_forward_rollback_restores_deleted_path() {
+    let fx = setup_repo_with_bare_remote();
+    fs::write(fx.repo_dir.path().join("gone.txt"), "keep me\n").unwrap();
+    fx.repo.stage_paths(&["gone.txt".to_string()]).unwrap();
+    fx.repo.commit("add gone.txt").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    git_in(other.path(), &["rm", "-q", "gone.txt"]);
+    git_in(other.path(), &["commit", "-q", "-m", "delete gone.txt"]);
+    git_in(other.path(), &["push", "-q", "origin", &fx.branch]);
+    set_fast_forward_failpoint(FastForwardFailpoint::BeforeRefPublication);
+
+    let error = fx.repo.merge_from_remote("origin", &fx.branch).unwrap_err();
+
+    assert!(format!("{error:#}").contains("BeforeRefPublication"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("gone.txt")).unwrap(),
+        "keep me\n"
+    );
+    assert!(index_oid(fx.repo_dir.path(), "gone.txt").is_some());
+    assert!(!fx.repo.has_dirty_changes().unwrap());
+}
+
+// --- Selected-path commits honor Git filters and modes ---
+
+#[test]
+fn test_commit_selected_paths_applies_clean_filter_from_gitattributes() {
+    let fx = setup_repo_with_base(&[(".gitattributes", "*.md text eol=lf\n")]);
+    fs::write(fx.repo_root.join("note.md"), "line one\r\nline two\r\n").unwrap();
+
+    let committed = fx
+        .repo()
+        .commit_selected_paths(&["note.md"], "Add note")
+        .unwrap();
+
+    assert!(committed.is_some());
+    assert_eq!(
+        fx.repo().show_file_at_ref("HEAD", "note.md").unwrap(),
+        "line one\nline two\n"
+    );
+    let status = git2::Repository::open(&fx.repo_root)
+        .unwrap()
+        .status_file(Path::new("note.md"))
+        .unwrap();
+    assert_eq!(status, git2::Status::CURRENT);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_commit_selected_paths_preserves_executable_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = setup_repo_with_base(&[("README.md", "base\n")]);
+    let script = fx.repo_root.join("run.sh");
+    fs::write(&script, "#!/bin/sh\necho hi\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    fx.repo()
+        .commit_selected_paths(&["run.sh"], "Add script")
+        .unwrap()
+        .expect("commit created");
+
+    let repo = git2::Repository::open(&fx.repo_root).unwrap();
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    assert_eq!(
+        tree.get_path(Path::new("run.sh")).unwrap().filemode(),
+        0o100755
+    );
+    assert_eq!(
+        repo.status_file(Path::new("run.sh")).unwrap(),
+        git2::Status::CURRENT
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_commit_selected_paths_commits_symlink_with_raw_target() {
+    let fx = setup_repo_with_base(&[("target.md", "base\n")]);
+    std::os::unix::fs::symlink("target.md", fx.repo_root.join("link.md")).unwrap();
+
+    fx.repo()
+        .commit_selected_paths(&["link.md"], "Add link")
+        .unwrap()
+        .expect("commit created");
+
+    let repo = git2::Repository::open(&fx.repo_root).unwrap();
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    let entry = tree.get_path(Path::new("link.md")).unwrap();
+    assert_eq!(entry.filemode(), 0o120000);
+    assert_eq!(repo.find_blob(entry.id()).unwrap().content(), b"target.md");
+    assert_eq!(
+        repo.status_file(Path::new("link.md")).unwrap(),
+        git2::Status::CURRENT
+    );
+}
+
+// --- push_commit_with ---
+
+#[test]
+fn test_push_commit_with_publishes_given_oid_not_branch_tip() {
+    let fx = setup_repo_with_bare_remote();
+    fs::write(fx.repo_dir.path().join("a.md"), "a\n").unwrap();
+    fx.repo.stage_paths(&["a.md".to_string()]).unwrap();
+    let _ = fx.repo.commit("a").unwrap();
+    let oid_a = fx.repo.rev_parse("HEAD").unwrap();
+    fs::write(fx.repo_dir.path().join("b.md"), "b\n").unwrap();
+    fx.repo.stage_paths(&["b.md".to_string()]).unwrap();
+    fx.repo.commit("b").unwrap();
+    let oid_b = fx.repo.rev_parse("HEAD").unwrap();
+    assert_ne!(oid_a, oid_b);
+
+    fx.repo
+        .push_commit_with("origin", &fx.branch, &oid_a, &SystemCredentials)
+        .unwrap();
+
+    let remote_tip = git2::Repository::open_bare(fx.remote_dir.path())
+        .unwrap()
+        .refname_to_id(&format!("refs/heads/{}", fx.branch))
+        .unwrap();
+    assert_eq!(remote_tip.to_string(), oid_a);
+}
+
+#[test]
+fn test_push_commit_with_rejects_non_commit_oid() {
+    let fx = setup_repo_with_bare_remote();
+    let tree_oid = git2::Repository::open(fx.repo_dir.path())
+        .unwrap()
+        .head()
+        .unwrap()
+        .peel_to_tree()
+        .unwrap()
+        .id()
+        .to_string();
+    let attempts = push_attempts();
+
+    assert!(fx
+        .repo
+        .push_commit_with("origin", &fx.branch, &tree_oid, &SystemCredentials)
+        .is_err());
+    assert!(fx
+        .repo
+        .push_commit_with("origin", &fx.branch, "not-an-oid", &SystemCredentials)
+        .is_err());
+    assert_eq!(push_attempts(), attempts);
+}

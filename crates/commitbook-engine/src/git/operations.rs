@@ -542,7 +542,7 @@ impl GitRepo {
             .diff_tree_to_tree(head_tree.as_ref(), Some(&tree), None)
             .context("Failed to compare selected paths with HEAD")?;
         if diff.deltas().count() == 0 {
-            self.align_index_paths_to_worktree(&paths)?;
+            self.align_index_paths(&paths, &selected_index)?;
             return Ok(None);
         }
 
@@ -572,15 +572,20 @@ impl GitRepo {
         // The real index remains user-owned throughout tree construction. Now
         // align just the committed paths with the new HEAD so they do not
         // appear as staged deletions while unrelated staged entries survive.
-        self.align_index_paths_to_worktree(&paths)?;
+        self.align_index_paths(&paths, &selected_index)?;
 
         Ok(Some(oid.to_string()[..7].to_string()))
     }
 
-    fn align_index_paths_to_worktree(&self, paths: &[PathBuf]) -> Result<()> {
+    fn align_index_paths(&self, paths: &[PathBuf], selected: &git2::Index) -> Result<()> {
         let mut real_index = self.repo.index().context("Failed to get index")?;
+        real_index.read(true)?;
         for path in paths {
-            self.update_index_path_from_worktree(&mut real_index, path)?;
+            if let Some(entry) = selected.get_path(path, 0) {
+                real_index.add(&entry)?;
+            } else if real_index.get_path(path, 0).is_some() {
+                real_index.remove_path(path)?;
+            }
         }
         real_index
             .write()
@@ -620,7 +625,14 @@ impl GitRepo {
             bail!("Selected path is not a file: {}", path.display());
         };
 
-        let oid = self.repo.blob(&data).context("Failed to write Git blob")?;
+        let oid = if mode == 0o120000 {
+            self.repo.blob(&data)?
+        } else {
+            use std::io::Write;
+            let mut writer = self.repo.blob_writer(Some(path))?;
+            writer.write_all(&data)?;
+            writer.commit()?
+        };
         let entry = git2::IndexEntry {
             ctime: git2::IndexTime::new(0, 0),
             mtime: git2::IndexTime::new(0, 0),
@@ -809,6 +821,28 @@ impl GitRepo {
         branch: &str,
         creds: &dyn CredentialProvider,
     ) -> Result<()> {
+        self.push_source_with(remote_name, branch, &format!("refs/heads/{branch}"), creds)
+    }
+
+    pub fn push_commit_with(
+        &self,
+        remote_name: &str,
+        branch: &str,
+        oid: &str,
+        creds: &dyn CredentialProvider,
+    ) -> Result<()> {
+        let oid = git2::Oid::from_str(oid)?;
+        self.repo.find_commit(oid)?;
+        self.push_source_with(remote_name, branch, &oid.to_string(), creds)
+    }
+
+    fn push_source_with(
+        &self,
+        remote_name: &str,
+        branch: &str,
+        source: &str,
+        creds: &dyn CredentialProvider,
+    ) -> Result<()> {
         let mut remote = self
             .repo
             .find_remote(remote_name)
@@ -850,7 +884,7 @@ impl GitRepo {
         let mut opts = PushOptions::new();
         opts.remote_callbacks(callbacks);
 
-        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+        let refspec = format!("{source}:refs/heads/{branch}");
         remote
             .push(&[refspec.as_str()], Some(&mut opts))
             .with_context(|| format!("Failed to push {}/{}", remote_name, branch))?;
@@ -1185,18 +1219,24 @@ impl GitRepo {
             .or_else(|_| Signature::now("CommitBook", "commitbook@localhost"))
             .context("Failed to create fast-forward reflog signature")?;
         fail_fast_forward_at(FastForwardFailpoint::BeforeCheckout)?;
-        if !changed.is_empty() {
-            let mut checkout = git2::build::CheckoutBuilder::new();
-            checkout.safe();
-            for path in &changed {
-                checkout.path(path);
-            }
-            self.repo
-                .checkout_tree(target.as_object(), Some(&mut checkout))
-                .context("Failed to check out fast-forward target")?;
-        }
-
+        let snapshots = changed
+            .iter()
+            .map(|path| WorktreeSnapshot::capture(&self.path.join(path)))
+            .collect::<Result<Vec<_>>>()?;
+        let index_path = self.repo.path().join("index");
+        let original_index = std::fs::read(&index_path).context("Failed to snapshot index")?;
         let publish = (|| -> Result<()> {
+            if !changed.is_empty() {
+                let mut checkout = git2::build::CheckoutBuilder::new();
+                checkout.safe().disable_pathspec_match(true);
+                for path in &changed {
+                    checkout.path(path);
+                }
+                self.repo
+                    .checkout_tree(target.as_object(), Some(&mut checkout))
+                    .context("Failed to check out fast-forward target")?;
+            }
+
             transaction
                 .set_target(
                     head_name,
@@ -1212,22 +1252,19 @@ impl GitRepo {
             Ok(())
         })();
         if let Err(error) = publish {
-            if !changed.is_empty() {
-                let mut rollback = git2::build::CheckoutBuilder::new();
-                rollback.force();
-                for path in &changed {
-                    rollback.path(path);
-                }
-                if let Err(rollback_error) = self
-                    .repo
-                    .checkout_tree(head_commit.as_object(), Some(&mut rollback))
-                {
-                    bail!(
-                        "Failed to publish fast-forward ({error}); rollback also failed: {rollback_error}"
-                    );
+            let mut failures = Vec::new();
+            for (path, snapshot) in changed.iter().zip(&snapshots) {
+                if let Err(restore_error) = snapshot.restore(&self.path.join(path)) {
+                    failures.push(format!("{}: {restore_error:#}", path.display()));
                 }
             }
-            return Err(error).context("Failed to publish fast-forward branch ref");
+            if let Err(restore_error) = restore_index(&index_path, &original_index) {
+                failures.push(format!("index: {restore_error:#}"));
+            }
+            if !failures.is_empty() {
+                bail!("Fast-forward failed ({error:#}); recovery incomplete for {}; repair these paths before retrying sync", failures.join(", "));
+            }
+            return Err(error).context("Fast-forward failed; original worktree and index restored");
         }
         Ok(())
     }
@@ -1633,6 +1670,81 @@ impl GitRepo {
         let _ = self.repo.cleanup_state();
         Ok(())
     }
+}
+
+enum WorktreeSnapshot {
+    Missing,
+    File(Vec<u8>, std::fs::Permissions),
+    Symlink(PathBuf),
+    Directory,
+}
+
+impl WorktreeSnapshot {
+    fn capture(path: &Path) -> Result<Self> {
+        match std::fs::symlink_metadata(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::Missing),
+            Err(error) => Err(error.into()),
+            Ok(meta) if meta.file_type().is_symlink() => {
+                Ok(Self::Symlink(std::fs::read_link(path)?))
+            }
+            Ok(meta) if meta.is_file() => Ok(Self::File(std::fs::read(path)?, meta.permissions())),
+            Ok(meta) if meta.is_dir() => Ok(Self::Directory),
+            Ok(_) => bail!("Cannot snapshot special file {}", path.display()),
+        }
+    }
+
+    fn restore(&self, path: &Path) -> Result<()> {
+        // Avoid rewriting untouched files, particularly when checkout failed
+        // because a parent directory is unwritable.
+        let current = Self::capture(path)?;
+        match (self, &current) {
+            (Self::Missing, Self::Missing) | (Self::Directory, Self::Directory) => return Ok(()),
+            (Self::File(bytes, perms), Self::File(now, now_perms))
+                if bytes == now && perms == now_perms =>
+            {
+                return Ok(())
+            }
+            (Self::Symlink(target), Self::Symlink(now)) if target == now => return Ok(()),
+            _ => {}
+        }
+        match current {
+            Self::Missing => {}
+            Self::Directory => std::fs::remove_dir(path)?, // never recursively delete user content
+            _ => std::fs::remove_file(path)?,
+        }
+        match self {
+            Self::Missing => {}
+            Self::Directory => std::fs::create_dir_all(path)?,
+            Self::File(bytes, perms) => {
+                std::fs::create_dir_all(path.parent().context("Missing parent")?)?;
+                std::fs::write(path, bytes)?;
+                std::fs::set_permissions(path, perms.clone())?;
+            }
+            Self::Symlink(target) => {
+                #[cfg(unix)]
+                {
+                    std::fs::create_dir_all(path.parent().context("Missing parent")?)?;
+                    std::os::unix::fs::symlink(target, path)?;
+                }
+                #[cfg(not(unix))]
+                bail!(
+                    "Cannot restore symlink {} -> {}",
+                    path.display(),
+                    target.display()
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+fn restore_index(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let mut file = tempfile::NamedTempFile::new_in(path.parent().context("Missing index parent")?)?;
+    file.write_all(bytes)?;
+    file.as_file().sync_all()?;
+    file.persist(path)?;
+    Ok(())
 }
 
 fn validate_selected_path(path: &str) -> Result<PathBuf> {
