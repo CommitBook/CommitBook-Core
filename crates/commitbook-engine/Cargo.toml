@@ -3,6 +3,7 @@ name = "commitbook-engine"
 description = "Shared engine for CommitBook, config, git, AI, scheduling, logging"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 

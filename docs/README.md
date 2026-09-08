@@ -271,7 +271,7 @@ Download from [GitHub Releases](https://github.com/CommitBook/CommitBook-Core/re
 ## Requirements
 
 - **Git** (any recent version)
-- **Rust** 1.88+ (for building the full workspace from source)
+- **Rust** 1.91+ (for building the full workspace from source)
 - **macOS** or **Linux**
 - **AI CLIs** (optional): `gh` with Copilot extension, `claude`, or `codex`
 
