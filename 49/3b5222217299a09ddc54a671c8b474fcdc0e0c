@@ -1,0 +1,25 @@
+.github/workflows/release.yml
+  s_e5b915a62e65cf::t_fa829eefde3666 78
+.github/workflows/xcframework.yml
+  s_e5b915a62e65cf::t_fa829eefde3666 54
+crates/commitbook-client/Cargo.toml
+  s_e5b915a62e65cf::t_fa829eefde3666 25
+Cargo.lock
+  s_e5b915a62e65cf::t_c21cb40eef0faa 273-278,1326,2455,2457,2459,3038
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "493b5222217299a09ddc54a671c8b474fcdc0e0c",
+  "prompts": {},
+  "sessions": {
+    "s_e5b915a62e65cf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "12ab56f8-8aab-4e8e-9f7f-b79ea30fb654",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
