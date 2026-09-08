@@ -1,0 +1,33 @@
+crates/commitbook-engine/src/ai/conflict_tests.rs
+  s_6401f048986949::t_7b0cb5a6c669be 92
+  s_6401f048986949::t_c6671b8f5dca2a 94
+  s_6401f048986949::t_afc1457ce6c6df 89-91,93,95-119
+crates/commitbook-engine/src/ai/codex.rs
+  s_6401f048986949::t_840e4147a03c88 135
+  s_6401f048986949::t_c5e500fe7e33aa 49-59,69
+  s_6401f048986949::t_34404041063060 9
+  s_6401f048986949::t_c6671b8f5dca2a 62-64
+crates/commitbook-engine/src/ai/conflict.rs
+  s_6401f048986949::t_84c1d528412e98 118-134
+.claude/CLAUDE.md
+  s_6401f048986949::t_a055148e48a09f 35,42,55
+crates/commitbook-engine/src/ai/copilot.rs
+  s_6401f048986949::t_ca50de1a536967 8-9
+  s_6401f048986949::t_d7ed2f69a67885 166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "ecfe82f646d3e251e2fea76c651ee0d9a678017e",
+  "prompts": {},
+  "sessions": {
+    "s_6401f048986949": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "61ffd7af-19af-45db-8254-f16ec692f31d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
