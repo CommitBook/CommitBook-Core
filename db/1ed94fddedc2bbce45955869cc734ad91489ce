@@ -1,0 +1,31 @@
+install.sh
+  s_6580300584afdd::t_fb4055d50640c7 15
+  s_6580300584afdd::t_48552afd3ba83a 12-13,24,26,32-39
+  s_6580300584afdd::t_7af718d1d6aeea 4,7-11,14,16-23,25,27-31,40-41,83-84,89-95,99
+README.md
+  s_6580300584afdd::t_b9925fb3dd46c3 1-14,16-52
+  s_6580300584afdd::t_82c407adfa3057 15
+docs/README.md
+  s_6580300584afdd::t_ccf1605c2da0ef 257-266,277,281-293
+  s_6580300584afdd::t_0ee647a1c75326 17
+  s_6580300584afdd::t_319dfa41e431c0 294
+.github/workflows/release.yml
+  s_6580300584afdd::t_c81e7bfddf326c 4-6,17-21,23,47,83-89,94-99,103,106-109
+  s_6580300584afdd::t_d314bb7c60ed98 22,104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "db1ed94fddedc2bbce45955869cc734ad91489ce",
+  "prompts": {},
+  "sessions": {
+    "s_6580300584afdd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4f084286-cbcd-47bf-b7e8-25cc92efc4c7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
