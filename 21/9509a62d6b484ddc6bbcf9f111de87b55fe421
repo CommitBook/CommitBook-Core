@@ -1,0 +1,57 @@
+crates/commitbook-engine/src/ai/cursor.rs
+  s_e84d0cbad7bace::t_bab7440d4ebf46 8,58
+  s_2b4c936519cf74::t_8cccb73d96c4e1 16-24,45-50,61-64
+crates/commitbook-engine/src/ai/mod.rs
+  s_e84d0cbad7bace::t_95a09a71f171b7 240,246-248,253-263,272-274,278,282,286-288,325-326
+  s_e84d0cbad7bace::t_4ad8762504ab65 241-245,249-252,264-271,275-277,279-281,283-285,299,301-306,311,320-324
+  s_2b4c936519cf74::t_f28ae917fd89c7 316-318
+  s_2b4c936519cf74::t_8cccb73d96c4e1 237-239,289-298,300,307-310,312-315,319
+crates/commitbook-engine/src/ai/copilot.rs
+  s_e84d0cbad7bace::t_95a09a71f171b7 185
+  s_2b4c936519cf74::t_8cccb73d96c4e1 69-84,168-177
+crates/commitbook-engine/src/ai/claude.rs
+  s_e84d0cbad7bace::t_4ad8762504ab65 101-105
+  s_e84d0cbad7bace::t_6ceec551dd7748 8,116
+crates/commitbook-engine/src/ai/gemini.rs
+  s_e84d0cbad7bace::t_fefe442f6f291c 8,61
+  s_2b4c936519cf74::t_8cccb73d96c4e1 13-16,20-27,48-53,64-67
+crates/commitbook-engine/src/ai/mod_tests.rs
+  s_2b4c936519cf74::t_d0d87577a023b4 279-280,290-295
+  s_2b4c936519cf74::t_85d73662a4bce5 254-278,281-289,296-324
+crates/commitbook-engine/src/ai/copilot_tests.rs
+  s_2b4c936519cf74::t_85d73662a4bce5 61-73
+crates/commitbook-engine/src/ai/cursor_tests.rs
+  s_2b4c936519cf74::t_8cccb73d96c4e1 1-26
+crates/commitbook-engine/src/ai/gemini_tests.rs
+  s_2b4c936519cf74::t_b22c3bf324b532 9-12
+  s_2b4c936519cf74::t_8cccb73d96c4e1 1-8,13-22
+crates/commitbook-engine/src/ai/codex.rs
+  s_e84d0cbad7bace::t_4ad8762504ab65 11
+  s_e84d0cbad7bace::t_95a09a71f171b7 44
+  s_2b4c936519cf74::t_8cccb73d96c4e1 113
+  s_2b4c936519cf74::t_b22c3bf324b532 114-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "219509a62d6b484ddc6bbcf9f111de87b55fe421",
+  "prompts": {},
+  "sessions": {
+    "s_2b4c936519cf74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08290058-99ae-418c-9638-98a65d963606",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_e84d0cbad7bace": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fee3a-6e7f-74e0-898b-6673d578ea3d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
