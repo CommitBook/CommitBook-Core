@@ -1,0 +1,36 @@
+crates/commitbook-engine/Cargo.toml
+  s_e84d0cbad7bace::t_698afa4addc951 30
+crates/commitbook-engine/src/git/operations_tests.rs
+  s_2b4c936519cf74::t_d0d87577a023b4 1188-1191
+  s_2b4c936519cf74::t_86f7c726747567 1099-1187,1192-1349
+crates/commitbook-engine/src/git/operations.rs
+  s_e84d0cbad7bace::t_7f3fba1b6d1e0c 1226-1228,1255-1258,1261-1267,1675-1686,1690-1701,1707-1710,1712-1715,1717-1721,1723-1729,1735-1748
+  s_e84d0cbad7bace::t_698afa4addc951 824-826,834-838,887
+  s_e84d0cbad7bace::t_97371e5ff79c98 545,575,580,582,584-588,628-635
+  s_e84d0cbad7bace::t_4ad8762504ab65 827-832,839-844,1222-1225,1229-1237,1687-1689,1702-1706,1711,1716,1722,1730-1734
+  s_e84d0cbad7bace::t_f5b31134673bda 823,833,1749
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "1e2ea7087dd98e4f50c14fba931cc0dd3d406e2e",
+  "prompts": {},
+  "sessions": {
+    "s_2b4c936519cf74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08290058-99ae-418c-9638-98a65d963606",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_e84d0cbad7bace": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fee3a-6e7f-74e0-898b-6673d578ea3d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
