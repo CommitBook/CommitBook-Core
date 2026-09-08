@@ -1,0 +1,58 @@
+crates/commitbook-engine/src/sync/scheduler.rs
+  s_43f96f3633569f::t_96559d0f500203 208
+crates/commitbook-engine/src/config/local_tests.rs
+  s_43f96f3633569f::t_12fae93eb2539c 460-471
+  s_43f96f3633569f::t_f1f43f9e70bda8 294-296,300,307,317,446-459,472-473
+crates/commitbook-tui/src/app.rs
+  s_43f96f3633569f::t_96559d0f500203 106-107,110,136-140
+docs/README.md
+  s_43f96f3633569f::t_96559d0f500203 119-135,144,146
+crates/commitbook-web/templates/config.html
+  s_43f96f3633569f::t_96559d0f500203 36-43
+crates/commitbook-web/src/models.rs
+  s_43f96f3633569f::t_96559d0f500203 43
+crates/commitbook-cli/src/commands/sync_cmd.rs
+  s_43f96f3633569f::t_96559d0f500203 154-172
+crates/commitbook-cli/src/commands/doctor.rs
+  s_43f96f3633569f::t_96559d0f500203 134
+crates/commitbook-engine/src/config/local.rs
+  s_43f96f3633569f::t_96559d0f500203 73,78-80
+crates/commitbook-web/src/routes.rs
+  s_43f96f3633569f::t_96559d0f500203 1,46,127-133,189,217,224,260-261,309-315,321-331,339-341,365,403-404
+  s_43f96f3633569f::t_12fae93eb2539c 3,218-223,228,316-320
+crates/commitbook-engine/src/ai/fallback.rs
+  s_43f96f3633569f::t_96559d0f500203 31-32
+crates/commitbook-web/src/routes_tests.rs
+  s_43f96f3633569f::t_12fae93eb2539c 278,280-281,283-394
+  s_43f96f3633569f::t_c31a204db4c7ae 185,189,276-277,279,282,395-412
+crates/commitbook-engine/src/sync/scheduler_tests.rs
+  s_43f96f3633569f::t_550dc6bf076f1e 148-153
+  s_43f96f3633569f::t_12fae93eb2539c 147,155
+  s_43f96f3633569f::t_c240047abc449b 146,154,952-978
+crates/commitbook-tui/src/ui.rs
+  s_43f96f3633569f::t_96559d0f500203 165
+crates/commitbook-web/templates/partials/providers.html
+  s_43f96f3633569f::t_96559d0f500203 2-4
+crates/commitbook-cli/src/commands/sync_cmd_tests.rs
+  s_43f96f3633569f::t_5636b8345a9b5b 22-41
+crates/commitbook-engine/src/ai/fallback_tests.rs
+  s_43f96f3633569f::t_835bb99b54cb4d 4-22
+crates/commitbook-tui/src/app_tests.rs
+  s_43f96f3633569f::t_34ae7ea5e9e48e 136-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "139a2d90abb3fbb23212c9357b0a96b002bbfc49",
+  "prompts": {},
+  "sessions": {
+    "s_43f96f3633569f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a082b8-e202-7410-ac3c-bd766a01e220",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
