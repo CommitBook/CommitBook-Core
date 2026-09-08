@@ -1,0 +1,35 @@
+docs/README.md
+  s_2b4c936519cf74::t_b6d7ce2cbb1712 271-277
+crates/commitbook-engine/src/state/lock.rs
+  s_e84d0cbad7bace::t_97371e5ff79c98 65-67
+  s_2b4c936519cf74::t_3056c1eeefbc47 121,135,137
+crates/commitbook-engine/src/state/lock_tests.rs
+  s_2b4c936519cf74::t_85d73662a4bce5 90,141-153
+  s_e84d0cbad7bace::t_97371e5ff79c98 94,99
+  s_2b4c936519cf74::t_f8847734324c31 84
+  s_2b4c936519cf74::t_233b63af3994da 154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "c96bb6d99242852a5f65bd607598cb833fef938d",
+  "prompts": {},
+  "sessions": {
+    "s_2b4c936519cf74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08290058-99ae-418c-9638-98a65d963606",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_e84d0cbad7bace": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fee3a-6e7f-74e0-898b-6673d578ea3d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
