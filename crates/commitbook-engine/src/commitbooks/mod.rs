@@ -11,6 +11,7 @@
 
 pub mod init;
 pub mod preferences;
+pub mod publication;
 pub mod registry;
 pub mod slug;
 

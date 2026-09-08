@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use commitbook_engine::commitbooks::publication::PublicationError;
 use commitbook_engine::commitbooks::{init_dot_commitbook, slug_for};
 use commitbook_engine::config::LocalConfig;
 use commitbook_engine::git::GitRepo;
@@ -43,8 +44,7 @@ pub fn init_local_commitbook(
         // different CommitBook even in a freshly-created local clone. Do not
         // publish or return an ID that disagrees with the requested GitHub
         // repository.
-        validate_existing_identity(&clone_path, input)?;
-        let (remote, _branch) = configure_fresh_clone_target(&clone_path, &input.branch)?;
+        let (remote, _branch) = prepare_fresh_clone(&clone_path, input)?;
         ensure_commitbook_initialized(&clone_path, input, &remote, &creds)?;
     }
 
@@ -349,20 +349,36 @@ fn ensure_commitbook_initialized(
             .save(clone_path)
             .map_err(|e| CommitBookError::database(format!("Save remote: {e}")))?;
     }
-    let metadata_paths = [".CommitBook/config.toml", ".CommitBook/.gitignore"];
-    repo.commit_selected_paths_on_branch(
-        &metadata_paths,
-        "Initialize CommitBook",
+    commitbook_engine::commitbooks::publication::publish_metadata(
+        &repo,
+        &config.git.remote,
         &config.git.branch,
+        "Initialize CommitBook",
+        config.git.auto_push,
+        creds,
     )
-    .map_err(|e| CommitBookError::database(format!("Commit metadata: {e}")))?;
-    repo.push_with(&config.git.remote, &config.git.branch, creds)
-        .map_err(|e| {
-            CommitBookError::transport(format!(
-                "Metadata was committed locally, but push failed: {e}. The local metadata commit remains intact; run sync to reconcile a non-fast-forward remote, or fix the remote, authentication, or connectivity and retry initialization"
-            ))
-        })?;
+    .map_err(|error| match error {
+        PublicationError::Push(_) => CommitBookError::transport(format!(
+            "Metadata was committed locally, but push failed: {error}. The local metadata commit remains intact; run sync to reconcile a non-fast-forward remote, or fix the remote, authentication, or connectivity and retry initialization"
+        )),
+        PublicationError::Commit(_) => {
+            CommitBookError::database(format!("Commit metadata: {error}"))
+        }
+        PublicationError::State(_) => {
+            CommitBookError::database(format!("Record metadata publication: {error}"))
+        }
+    })?;
     Ok(())
+}
+
+/// Validate identity, switch the clone to the configured target, then validate
+/// again: the configured branch may carry `[commitbook]` metadata that names a
+/// different repository than the branch the clone was identity-checked on.
+fn prepare_fresh_clone(clone_path: &Path, input: &CommitBookInput) -> Result<(String, String)> {
+    validate_existing_identity(clone_path, input)?;
+    let target = configure_fresh_clone_target(clone_path, &input.branch)?;
+    validate_existing_identity(clone_path, input)?;
+    Ok(target)
 }
 
 fn validate_existing_identity(clone_path: &Path, input: &CommitBookInput) -> Result<()> {

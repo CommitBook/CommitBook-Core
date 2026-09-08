@@ -1,12 +1,14 @@
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 
+use commitbook_engine::commitbooks::publication::{
+    publish_metadata, Publication, PublicationError,
+};
 use commitbook_engine::config::LocalConfig;
 use commitbook_engine::git::remote::list_remote_names;
 use commitbook_engine::git::GitRepo;
 use commitbook_engine::state::{self, RepoLock};
 
-const METADATA_PATHS: &[&str] = &[".CommitBook/config.toml", ".CommitBook/.gitignore"];
 const METADATA_COMMIT_MESSAGE: &str = "Initialize CommitBook metadata for synchronized state";
 
 fn initialize_and_publish(repo_root: &std::path::Path, remote_name: Option<&str>) -> Result<()> {
@@ -29,17 +31,28 @@ fn initialize_and_publish(repo_root: &std::path::Path, remote_name: Option<&str>
         config.git.branch = current_branch;
         config.save(repo_root)?;
     }
-    repo.commit_selected_paths_on_branch(
-        METADATA_PATHS,
-        METADATA_COMMIT_MESSAGE,
+    let publication = publish_metadata(
+        &repo,
+        &config.git.remote,
         &config.git.branch,
-    )?;
-    repo.push(&config.git.remote, &config.git.branch).with_context(|| {
-        format!(
+        METADATA_COMMIT_MESSAGE,
+        config.git.auto_push,
+        &commitbook_engine::platform::SystemCredentials,
+    )
+    .map_err(|error| match error {
+        PublicationError::Push(_) => anyhow::Error::new(error).context(format!(
             "CommitBook metadata was committed locally, but pushing {}/{} failed; retry `commitbook init` or `commitbook sync` after fixing authentication or remote access",
             config.git.remote, config.git.branch
-        )
+        )),
+        PublicationError::Commit(_) | PublicationError::State(_) => anyhow::Error::new(error),
     })?;
+    if publication == Publication::Deferred {
+        println!(
+            "{}",
+            "Metadata committed locally; git.auto_push is off, so run `commitbook sync` or `git push` to publish it."
+                .yellow()
+        );
+    }
     Ok(())
 }
 

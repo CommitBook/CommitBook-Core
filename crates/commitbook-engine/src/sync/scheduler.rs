@@ -295,9 +295,20 @@ pub async fn sync_with_resolver_locked(
         if !options.auto_push {
             break;
         }
-        match repo.push_with(&options.remote, &options.branch, creds) {
+        let published_tip = repo.rev_parse("HEAD")?;
+        match repo.push_commit_with(&options.remote, &options.branch, &published_tip, creds) {
             Ok(()) => {
                 outcome.pushed = ahead;
+                if let Err(error) = crate::commitbooks::publication::clear_published(
+                    &repo,
+                    &options.remote,
+                    &options.branch,
+                    &published_tip,
+                ) {
+                    outcome.errors.push(format!(
+                        "Push succeeded but initialization state cleanup failed: {error:#}"
+                    ));
+                }
                 break;
             }
             Err(e) if attempt < MAX_PUSH_RETRIES && is_non_fast_forward_push(&e) => {

@@ -166,3 +166,64 @@ fn initialization_refuses_to_commit_metadata_on_another_branch() {
         ".CommitBook/config.toml"
     ));
 }
+
+#[test]
+fn init_with_auto_push_disabled_records_pending_without_pushing() {
+    let (local, remote) = initialize_repo_with_remote();
+    state::initialize(local.path(), "origin").unwrap();
+    let mut config = LocalConfig::load(local.path()).unwrap();
+    config.git.auto_push = false;
+    config.save(local.path()).unwrap();
+    // Publication must not depend on the remote being reachable.
+    git(
+        local.path(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "file:///definitely/missing/commitbook.git",
+        ],
+    );
+
+    initialize_and_publish(local.path(), None).unwrap();
+
+    let cb_dir = LocalConfig::commitbook_dir(local.path());
+    let pending = commitbook_engine::state::sync_state::SyncState::load(&cb_dir)
+        .unwrap()
+        .pending_init_push
+        .expect("pending publication recorded");
+    let head = git(local.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    assert_eq!(pending.commit_oid, head);
+    assert_eq!(pending.remote, "origin");
+    assert_eq!(pending.branch, "main");
+    assert!(tree_contains(
+        local.path(),
+        "HEAD",
+        ".CommitBook/config.toml"
+    ));
+    assert!(!tree_contains(
+        remote.path(),
+        "refs/heads/main",
+        ".CommitBook/config.toml"
+    ));
+
+    // Re-enabling auto_push publishes the recorded commit without a new one.
+    let remote_url = format!("file://{}", remote.path().display());
+    git(local.path(), &["remote", "set-url", "origin", &remote_url]);
+    let mut config = LocalConfig::load(local.path()).unwrap();
+    config.git.auto_push = true;
+    config.save(local.path()).unwrap();
+    initialize_and_publish(local.path(), None).unwrap();
+
+    assert!(
+        commitbook_engine::state::sync_state::SyncState::load(&cb_dir)
+            .unwrap()
+            .pending_init_push
+            .is_none()
+    );
+    assert!(tree_contains(
+        remote.path(),
+        "refs/heads/main",
+        ".CommitBook/config.toml"
+    ));
+}

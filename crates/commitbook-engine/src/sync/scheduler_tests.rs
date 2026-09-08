@@ -976,3 +976,85 @@ async fn default_commit_message_uses_writing_timestamp() {
     )
     .unwrap();
 }
+
+fn record_pending_metadata(fx: &RepoFixture) -> String {
+    let mut config = crate::config::LocalConfig::new("0 * * * *");
+    config.git.branch = fx.branch.clone();
+    config.git.remote = "origin".to_string();
+    config.save(fx.repo_dir.path()).unwrap();
+    crate::config::LocalConfig::ensure_gitignore(fx.repo_dir.path()).unwrap();
+    fx.repo
+        .commit_selected_paths_on_branch(
+            &[".CommitBook/config.toml", ".CommitBook/.gitignore"],
+            "Initialize CommitBook",
+            &fx.branch,
+        )
+        .unwrap()
+        .expect("metadata commit");
+    let head = fx.repo.rev_parse("HEAD").unwrap();
+    let mut state = SyncState::load(&cb_dir_of(fx)).unwrap();
+    state.pending_init_push = Some(crate::state::sync_state::PendingInitPush {
+        commit_oid: head.clone(),
+        remote: "origin".to_string(),
+        branch: fx.branch.clone(),
+    });
+    state.save(&cb_dir_of(fx)).unwrap();
+    head
+}
+
+#[tokio::test]
+async fn sync_push_clears_pending_init_push_once_remote_contains_it() {
+    let (fx, logger) = setup_with_state();
+    let head = record_pending_metadata(&fx);
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(outcome.pushed >= 1, "{outcome:?}");
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert!(SyncState::load(&cb_dir_of(&fx))
+        .unwrap()
+        .pending_init_push
+        .is_none());
+    let remote_tip = git2::Repository::open_bare(fx.remote_dir.path())
+        .unwrap()
+        .refname_to_id(&format!("refs/heads/{}", fx.branch))
+        .unwrap();
+    assert_eq!(remote_tip.to_string(), head);
+}
+
+#[tokio::test]
+async fn sync_without_auto_push_keeps_pending_init_push() {
+    let (fx, logger) = setup_with_state();
+    let head = record_pending_metadata(&fx);
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, false),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.pushed, 0, "{outcome:?}");
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert_eq!(
+        SyncState::load(&cb_dir_of(&fx))
+            .unwrap()
+            .pending_init_push
+            .unwrap()
+            .commit_oid,
+        head
+    );
+}
