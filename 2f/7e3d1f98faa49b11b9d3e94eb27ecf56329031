@@ -1,0 +1,22 @@
+crates/commitbook-engine/src/git/conflicts.rs
+  s_6d80990cdd007c::t_c4e7206a6a3109 75-78
+  s_6d80990cdd007c::t_ab58409500e90f 73-74
+crates/commitbook-engine/src/git/conflicts_tests.rs
+  s_6d80990cdd007c::t_badbfa176c6661 294-297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "2f7e3d1f98faa49b11b9d3e94eb27ecf56329031",
+  "prompts": {},
+  "sessions": {
+    "s_6d80990cdd007c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6bc87138-dfd5-4478-8112-85d59bc4b03c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
