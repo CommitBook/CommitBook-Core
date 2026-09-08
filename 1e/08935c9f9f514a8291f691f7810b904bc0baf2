@@ -1,0 +1,59 @@
+crates/commitbook-client/src/commitbooks_ops.rs
+  s_2b4c936519cf74::t_c31cbb358493e0 47,353-354,356-358,360-370,374-381
+  s_2b4c936519cf74::t_b22c3bf324b532 7
+  s_e84d0cbad7bace::t_698afa4addc951 352
+  s_2b4c936519cf74::t_c4efea27c11455 382-383
+crates/commitbook-engine/src/commitbooks/publication_tests.rs
+  s_2b4c936519cf74::t_b22c3bf324b532 5
+  s_2b4c936519cf74::t_b18f4f2140f9ad 1-4,6-207
+crates/commitbook-cli/src/commands/init_cmd_tests.rs
+  s_2b4c936519cf74::t_85d73662a4bce5 169-190,192-217,224-229
+  s_2b4c936519cf74::t_e28add2561a88b 191
+  s_2b4c936519cf74::t_d0d87577a023b4 218-223
+crates/commitbook-engine/src/sync/scheduler.rs
+  s_e84d0cbad7bace::t_4ad8762504ab65 303-306,308-310
+  s_e84d0cbad7bace::t_ef3f5315c46aa1 298-299,302,307,311
+crates/commitbook-cli/src/commands/init_cmd.rs
+  s_2b4c936519cf74::t_c31cbb358493e0 34-36,38-39,41-43,46-47,49-55
+  s_e84d0cbad7bace::t_698afa4addc951 40
+  s_2b4c936519cf74::t_b22c3bf324b532 4-6
+crates/commitbook-engine/src/commitbooks/publication.rs
+  s_e84d0cbad7bace::t_698afa4addc951 1-2,6,67,69,75-76,81,85,87,94-95,98,104-110,115-120
+  s_2b4c936519cf74::t_e4bd2c4d82af54 4-5,7-58,64,66,68,70-74,77-80,82,86,89,91-93,96-97,102-103,121-124
+  s_e84d0cbad7bace::t_4ad8762504ab65 3,59-63,65,83-84,88,90,99-101,111-114
+crates/commitbook-client/src/commitbooks_ops_tests.rs
+  s_2b4c936519cf74::t_d0d87577a023b4 727-920
+crates/commitbook-engine/src/state/sync_state_tests.rs
+  s_e84d0cbad7bace::t_ef3f5315c46aa1 24,50,57
+crates/commitbook-engine/src/sync/scheduler_tests.rs
+  s_2b4c936519cf74::t_b18f4f2140f9ad 979-1060
+crates/commitbook-engine/src/state/sync_state.rs
+  s_e84d0cbad7bace::t_698afa4addc951 5-11,24-25,45-48,51
+  s_e84d0cbad7bace::t_4ad8762504ab65 49-50
+crates/commitbook-engine/src/commitbooks/mod.rs
+  s_e84d0cbad7bace::t_698afa4addc951 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "1e08935c9f9f514a8291f691f7810b904bc0baf2",
+  "prompts": {},
+  "sessions": {
+    "s_2b4c936519cf74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08290058-99ae-418c-9638-98a65d963606",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_e84d0cbad7bace": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fee3a-6e7f-74e0-898b-6673d578ea3d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
