@@ -22,7 +22,7 @@ git2 = { version = "0.21.0", default-features = false, features = ["https", "ssh
 hex = "0.4.3"
 libc = "0.2.189"
 sha2 = "0.11.0"
-reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features = false }
+reqwest = { version = "0.13.5", features = ["json", "rustls"], default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.20"
