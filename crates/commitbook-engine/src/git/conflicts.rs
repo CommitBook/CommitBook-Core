@@ -72,6 +72,12 @@ impl GitConflict {
         if [&self.ancestor, &self.local, &self.remote]
             .into_iter()
             .flatten()
+            .any(|side| side.is_gitlink())
+        {
+            "gitlink"
+        } else if [&self.ancestor, &self.local, &self.remote]
+            .into_iter()
+            .flatten()
             .any(|side| side.is_symlink())
         {
             "symlink"

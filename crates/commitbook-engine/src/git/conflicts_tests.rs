@@ -291,6 +291,10 @@ fn selecting_absent_gitlink_side_keeps_submodule_worktree_directory() {
     let conflict = fixture.repo.find_conflict("modules/book").unwrap().unwrap();
     assert!(conflict.local.as_ref().unwrap().is_gitlink());
     assert!(conflict.remote.is_none());
+    // Gitlinks report their own kind so callers can render submodule-specific
+    // messaging, while still being excluded from text resolution.
+    assert_eq!(conflict.classification(), "gitlink");
+    assert!(conflict.is_binary_or_special());
 
     fixture
         .repo
