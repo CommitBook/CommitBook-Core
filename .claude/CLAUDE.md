@@ -32,14 +32,14 @@ All UI crates depend on `commitbook-engine`. No database: all state is file-base
 - **No global config.** Each repo is self-contained. No `~/.commitbook/`.
 - **Explicit init.** `commitbook init` is a separate command. Other commands hard-fail with "CommitBook is not initialized" if `.CommitBook/` is missing.
 - **Exactly one remote required.** `init` blocks if the repo has 0 or >1 remotes; the remote's name is persisted in `config.git.remote` (need not be `origin`).
-- **libgit2 merge-based sync.** Sync commits dirty markdown first, then fetches, runs an in-process libgit2 3-way merge (fast-forward, true merge, or surfaced conflicts), then pushes, retrying once on a non-fast-forward push race. Same single code path on desktop and mobile. Conflicts surface at the merge step and are resolved by the configured AI CLI (or left as `<<<<<<<` markers in `manual` mode).
+- **libgit2 merge-based sync.** Sync commits every dirty, non-ignored change first, then fetches, runs an in-process libgit2 3-way merge (fast-forward, true merge, or surfaced conflicts), then pushes, retrying once on a non-fast-forward push race. Same single code path on desktop and mobile. Conflicts surface at the merge step and are resolved by the configured AI CLI (or left as `<<<<<<<` markers in `manual` mode).
 - `.CommitBook/` folder always uses capital C and B.
 
 ### Key Modules (commitbook-engine)
 
 | Module | Purpose |
 |---|---|
-| `sync/` | `sync_repository` orchestrator: commit dirty markdown → fetch → libgit2 3-way merge → push |
+| `sync/` | `sync_repository` orchestrator: commit dirty changes → fetch → libgit2 3-way merge → push |
 | `state/` | File-based state: `SyncState` (`last_sync_at`, `last_error`), `AuthConfig` |
 | `config/` | `LocalConfig` reads/writes `.CommitBook/config.toml` (incl. `[conflict]` and `[commit]`) |
 | `ai/` | Commit-message providers + conflict resolvers: Claude, Codex, Copilot, Gemini, Cursor, fallback |
@@ -52,7 +52,7 @@ All UI crates depend on `commitbook-engine`. No database: all state is file-base
 
 ```
 commitbook init        # Initialize .CommitBook/ (required before any other command)
-commitbook sync        # Commit dirty markdown + libgit2 merge + push
+commitbook sync        # Commit dirty changes + libgit2 merge + push
 commitbook start       # Install scheduler
 commitbook stop        # Stop scheduler
 commitbook status      # Show state

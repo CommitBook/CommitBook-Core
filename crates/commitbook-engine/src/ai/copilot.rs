@@ -5,7 +5,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::conflict::{
-    build_resolve_prompt, strip_outer_code_fence, ConflictResolution, ConflictResolver,
+    build_resolve_prompt, finalize_resolved_text, strip_outer_code_fence, ConflictResolution,
+    ConflictResolver,
 };
 use super::{
     clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
@@ -162,13 +163,7 @@ impl ConflictResolver for CopilotProvider {
 
         let raw = String::from_utf8_lossy(&output.stdout);
         let resolved = parse_response(&raw)?;
-        if resolved.contains("<<<<<<<")
-            || resolved.contains("=======")
-            || resolved.contains(">>>>>>>")
-        {
-            bail!("GitHub Copilot left conflict markers in its response");
-        }
-        Ok(ConflictResolution::WriteContent(resolved))
+        finalize_resolved_text(&resolved, "GitHub Copilot")
     }
 }
 

@@ -86,3 +86,34 @@ fn build_resolve_prompt_includes_path_and_structured_sides() {
     assert!(prompt.contains("REMOTE:\nremote"));
     assert!(!prompt.contains("<<<<<<<"));
 }
+
+#[test]
+fn finalize_resolved_text_accepts_setext_heading_underline() {
+    let raw = "Title\n=======\n\nbody text";
+    let resolved = finalize_resolved_text(raw, "test CLI").unwrap();
+    assert_eq!(resolved, ConflictResolution::WriteContent(raw.to_string()));
+}
+
+#[test]
+fn finalize_resolved_text_strips_outer_fence() {
+    let raw = "```markdown\n# Title\nbody\n```";
+    let resolved = finalize_resolved_text(raw, "test CLI").unwrap();
+    assert_eq!(
+        resolved,
+        ConflictResolution::WriteContent("# Title\nbody".to_string())
+    );
+}
+
+#[test]
+fn finalize_resolved_text_rejects_real_conflict_markers() {
+    let raw = "intro\n<<<<<<< ours\nleft\n=======\nright\n>>>>>>> theirs\n";
+    let err = finalize_resolved_text(raw, "test CLI").unwrap_err();
+    assert!(err.to_string().contains("left conflict markers"));
+    assert!(err.to_string().contains("test CLI"));
+}
+
+#[test]
+fn finalize_resolved_text_rejects_empty_output() {
+    let err = finalize_resolved_text("  \n```\n\n```\n", "test CLI").unwrap_err();
+    assert!(err.to_string().contains("Empty resolution from test CLI"));
+}

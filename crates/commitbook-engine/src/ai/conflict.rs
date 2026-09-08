@@ -115,6 +115,23 @@ pub(crate) fn strip_outer_code_fence(s: &str) -> String {
     inner.to_string()
 }
 
+/// Turn a resolver CLI's raw stdout into a `WriteContent` resolution.
+///
+/// Strips an outer code fence, rejects empty output, and rejects output that
+/// still contains real conflict markers. The marker check delegates to
+/// `git::conflicts::has_conflict_markers`, which deliberately ignores a bare
+/// `=======` line because that is valid Markdown (a setext heading underline).
+pub(crate) fn finalize_resolved_text(raw: &str, cli_name: &str) -> Result<ConflictResolution> {
+    let resolved = strip_outer_code_fence(raw);
+    if resolved.trim().is_empty() {
+        anyhow::bail!("Empty resolution from {cli_name}");
+    }
+    if crate::git::conflicts::has_conflict_markers(&resolved) {
+        anyhow::bail!("{cli_name} left conflict markers in its response");
+    }
+    Ok(ConflictResolution::WriteContent(resolved))
+}
+
 /// Build the prompt sent to a resolver CLI for a single structured text
 /// conflict. Deleted sides are represented explicitly; no working-tree marker
 /// parsing is involved.

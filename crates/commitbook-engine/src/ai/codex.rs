@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::conflict::{
-    build_resolve_prompt, strip_outer_code_fence, ConflictResolution, ConflictResolver,
+    build_resolve_prompt, finalize_resolved_text, ConflictResolution, ConflictResolver,
 };
 use super::{
     clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
@@ -46,18 +46,27 @@ fn run(prompt: &str, repo_path: &Path, timeout: Duration) -> Result<String> {
         .spawn()
         .context("Failed to start codex CLI")?;
 
-    child
-        .stdin
-        .take()
-        .context("codex CLI stdin missing")?
-        .write_all(prompt.as_bytes())
-        .context("Failed to write prompt to codex CLI")?;
+    // Write the prompt from a separate thread so a prompt larger than the OS
+    // pipe buffer can never block this thread before `wait_with_timeout`
+    // starts draining stdout/stderr and enforcing the timeout. If the child
+    // exits or is killed, the closed pipe unblocks the writer.
+    let mut stdin = child.stdin.take().context("codex CLI stdin missing")?;
+    let prompt_bytes = prompt.as_bytes().to_vec();
+    let writer = std::thread::spawn(move || {
+        let result = stdin.write_all(&prompt_bytes);
+        drop(stdin);
+        result
+    });
 
     let output = wait_with_timeout(child, timeout).context("codex CLI timed out")?;
+    let write_result = writer
+        .join()
+        .unwrap_or_else(|_| Err(std::io::Error::other("prompt writer thread panicked")));
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("codex CLI failed: {}", stderr.trim());
     }
+    write_result.context("Failed to write prompt to codex CLI")?;
 
     std::fs::read_to_string(output_file.path())
         .context("Failed to read the final response from codex CLI")
@@ -123,17 +132,7 @@ impl ConflictResolver for CodexProvider {
     ) -> Result<ConflictResolution> {
         let prompt = build_resolve_prompt(conflict)?;
         let raw = run(&prompt, repo_path, CODEX_RESOLVE_TIMEOUT)?;
-        let resolved = strip_outer_code_fence(&raw);
-        if resolved.trim().is_empty() {
-            bail!("Empty resolution from codex CLI");
-        }
-        if resolved.contains("<<<<<<<")
-            || resolved.contains("=======")
-            || resolved.contains(">>>>>>>")
-        {
-            bail!("codex CLI left conflict markers in its response");
-        }
-        Ok(ConflictResolution::WriteContent(resolved))
+        finalize_resolved_text(&raw, "codex CLI")
     }
 }
 
