@@ -1,0 +1,23 @@
+README.md
+  s_8711105e60417a::t_fe68d7077fde59 37-39,46-48
+docs/details/sync-architecture.md
+  s_8711105e60417a::t_fe68d7077fde59 157-164,227-229
+.claude/CLAUDE.md
+  s_8711105e60417a::t_fe68d7077fde59 58-59,74-75,78-80,88-89,96-102,120-121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "03f67dfec32799a70e3b270bbe918ab6b90fbfb4",
+  "prompts": {},
+  "sessions": {
+    "s_8711105e60417a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4abb5f21-2d34-48a2-afa8-b52e96444d86",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
