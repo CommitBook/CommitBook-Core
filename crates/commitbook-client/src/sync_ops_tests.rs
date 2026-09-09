@@ -414,3 +414,79 @@ fn ai_mode_can_recover_preserved_merge_after_callback_is_configured() {
         "resolved on phone\n"
     );
 }
+
+#[test]
+fn native_ai_review_preserves_conflicts_for_host_resolution() {
+    let (root, remote, clone, branch) = managed_sync_fixture();
+    let local_repo = commitbook_engine::git::GitRepo::open(&clone).unwrap();
+    std::fs::write(clone.join("shared.md"), "local\n").unwrap();
+    local_repo.stage_all().unwrap();
+    local_repo.commit("local edit").unwrap();
+
+    let other = tempfile::tempdir().unwrap();
+    let repository = git2::build::RepoBuilder::new()
+        .branch(&branch)
+        .clone(remote.path().to_str().unwrap(), other.path())
+        .unwrap();
+    let mut config = repository.config().unwrap();
+    config.set_str("user.name", "Remote").unwrap();
+    config.set_str("user.email", "remote@example.com").unwrap();
+    config.set_bool("commit.gpgsign", false).unwrap();
+    drop(config);
+    std::fs::write(other.path().join("shared.md"), "remote\n").unwrap();
+    let other_repo = commitbook_engine::git::GitRepo::open(other.path()).unwrap();
+    other_repo.stage_all().unwrap();
+    other_repo.commit("remote edit").unwrap();
+    other_repo
+        .push_with("origin", &branch, &TokenCredentials::new("unused"))
+        .unwrap();
+
+    let outcome = sync_one_commitbook(
+        root.path(),
+        "owner/repo",
+        SyncMode::AiResolve,
+        "unused",
+        None,
+    )
+    .unwrap();
+    assert_eq!(outcome.manual_conflicts, 1);
+    assert!(outcome
+        .errors
+        .iter()
+        .any(|error| error.contains("did not register")));
+    let local_repo = commitbook_engine::git::GitRepo::open(&clone).unwrap();
+    assert!(local_repo.merge_in_progress());
+    assert_eq!(
+        local_repo.list_conflicted_paths().unwrap(),
+        vec!["shared.md".to_string()]
+    );
+
+    let callback = FixedCallback(AiConflictCallbackResult {
+        resolution: Some(AiConflictResolution {
+            action: AiConflictResolutionAction::WriteContent,
+            content: Some("resolved on phone\n".to_string()),
+        }),
+        error_message: None,
+    });
+    let mut config = LocalConfig::load(&clone).unwrap();
+    config.conflict.review_ai_resolutions = true;
+    config.save(&clone).unwrap();
+    let recovered = sync_one_commitbook(
+        root.path(),
+        "owner/repo",
+        SyncMode::AiResolve,
+        "unused",
+        Some(Arc::new(callback)),
+    )
+    .unwrap();
+    assert_eq!(recovered.manual_conflicts, 1);
+    assert_eq!(recovered.conflicts_resolved, 0);
+    assert_eq!(recovered.pushed, 0);
+    assert!(local_repo.merge_in_progress());
+    let proposals = commitbook_engine::review::list(&clone).unwrap();
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(
+        proposals[0].proposal.as_ref().unwrap().content.as_deref(),
+        Some("resolved on phone\n")
+    );
+}

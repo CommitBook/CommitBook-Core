@@ -17,7 +17,7 @@ struct Cli {
     #[arg(short, long, global = true)]
     quiet: bool,
 
-    /// Output as JSON (for status, doctor, log)
+    /// Output as JSON (for status, preview, doctor, log)
     #[arg(long, global = true)]
     json: bool,
 
@@ -32,6 +32,9 @@ enum Commands {
 
     /// Commit locally and sync with remote
     Sync,
+
+    /// Preview the next local snapshot without changing files or contacting the remote
+    Preview,
 
     /// Start the sync scheduler
     Start,
@@ -144,6 +147,7 @@ async fn run(cli: Cli) -> Result<()> {
     let repo_root = commitbook_engine::state::repo_root(&cb_dir);
 
     match cli.command {
+        Commands::Preview => commands::preview::run(&repo_root, cli.json)?,
         Commands::Sync => commands::sync_cmd::run_sync(&repo_root).await?,
         Commands::Start => commands::start::run(&cb_dir, &repo_root)?,
         Commands::Stop => commands::stop::run(&cb_dir, &repo_root)?,

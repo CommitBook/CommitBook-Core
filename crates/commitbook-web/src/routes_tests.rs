@@ -490,3 +490,276 @@ async fn provider_status_disabled_on_default_or_invalid_config() {
         assert!(providers.is_empty());
     }
 }
+
+fn run_git(root: &Path, args: &[&str]) {
+    let result = ProcessCommand::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+fn conflict_app() -> (tempfile::TempDir, Router) {
+    let (tmp, app) = setup_test_app();
+    let root = tmp.path();
+    run_git(root, &["config", "user.name", "Test"]);
+    run_git(root, &["config", "user.email", "test@example.com"]);
+    run_git(root, &["config", "commit.gpgsign", "false"]);
+    run_git(root, &["checkout", "-b", "review-test"]);
+    let mut config = LocalConfig::load(root).unwrap();
+    config.git.branch = "review-test".into();
+    config.save(root).unwrap();
+    std::fs::write(root.join("note.md"), "base\n").unwrap();
+    run_git(root, &["add", "."]);
+    run_git(root, &["commit", "-m", "base"]);
+    run_git(root, &["checkout", "-b", "other"]);
+    std::fs::write(root.join("note.md"), "remote <script>alert(1)</script>\n").unwrap();
+    run_git(root, &["commit", "-am", "remote"]);
+    run_git(root, &["checkout", "review-test"]);
+    std::fs::write(root.join("note.md"), "local\n").unwrap();
+    run_git(root, &["commit", "-am", "local"]);
+    let result = ProcessCommand::new("git")
+        .args(["merge", "other"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    (tmp, app)
+}
+#[tokio::test]
+async fn conflict_endpoints_validate_revision_and_resolve_locally() {
+    let (tmp, app) = conflict_app();
+    let (_, views): (_, Vec<commitbook_engine::review::ConflictView>) =
+        get_json(app.clone(), "/api/conflicts").await;
+    assert_eq!(views.len(), 1);
+    assert!(views[0].local_present && views[0].remote_present);
+    let view = &views[0];
+    let stale = serde_json::json!({"path":view.path,"revision":"stale","action":"take_local"});
+    assert_eq!(
+        post_json(app.clone(), "/api/conflicts/resolve", stale)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+    let input = serde_json::json!({"path":view.path,"revision":view.revision,"action":"manual_edit","content":"edited resolution\n"});
+    {
+        let _lock = commitbook_engine::state::RepoLock::acquire(tmp.path()).unwrap();
+        assert_eq!(
+            post_json(app.clone(), "/api/conflicts/resolve", input.clone())
+                .await
+                .0,
+            StatusCode::CONFLICT
+        );
+    }
+    assert_eq!(
+        post_json(app.clone(), "/api/conflicts/resolve", input)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("note.md")).unwrap(),
+        "edited resolution\n"
+    );
+    let repo = commitbook_engine::git::GitRepo::open(tmp.path()).unwrap();
+    assert!(!repo.merge_in_progress());
+    let parents = ProcessCommand::new("git")
+        .args(["show", "-s", "--format=%P", "HEAD"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(parents.stdout)
+            .unwrap()
+            .split_whitespace()
+            .count(),
+        2
+    );
+}
+#[tokio::test]
+async fn preview_and_status_reads_do_not_repair_config_or_create_local_state() {
+    let (tmp, app) = setup_test_app();
+    let path = LocalConfig::config_path(tmp.path());
+    let original = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("config_version = \"1\"", "version = \"1\"");
+    std::fs::write(&path, &original).unwrap();
+    std::fs::remove_dir_all(LocalConfig::local_dir(tmp.path())).unwrap();
+    for endpoint in ["/api/status", "/api/changes", "/", "/config", "/changes"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(endpoint)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    assert!(!LocalConfig::local_dir(tmp.path()).exists());
+}
+#[tokio::test]
+async fn review_settings_support_json_and_form_and_preserve_defaults() {
+    let (tmp, app) = setup_test_app();
+    assert!(
+        !LocalConfig::load_read_only(tmp.path())
+            .unwrap()
+            .conflict
+            .review_ai_resolutions
+    );
+    assert_eq!(
+        post_json(
+            app.clone(),
+            "/api/config",
+            serde_json::json!({"review_ai_resolutions":true,"resolver":"codex"})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/config")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("review_ai_resolutions=false&resolver=manual"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let config = LocalConfig::load_read_only(tmp.path()).unwrap();
+    assert!(!config.conflict.review_ai_resolutions);
+    assert_eq!(config.conflict.resolver, "manual");
+    assert!(!config.commit.ai_messages);
+}
+
+struct FakeProposalResolver;
+
+#[async_trait::async_trait]
+impl commitbook_engine::ai::ConflictResolver for FakeProposalResolver {
+    fn name(&self) -> &str {
+        "fake"
+    }
+    fn key(&self) -> &str {
+        "fake"
+    }
+    fn is_available(&self) -> bool {
+        true
+    }
+    async fn resolve(
+        &self,
+        _: &commitbook_engine::git::GitConflict,
+        _: &Path,
+    ) -> anyhow::Result<commitbook_engine::ai::ConflictResolution> {
+        Ok(commitbook_engine::ai::ConflictResolution::WriteContent(
+            "proposed resolution\n".into(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn proposal_endpoints_reject_stale_proposal_version() {
+    let (tmp, app) = conflict_app();
+    let root = tmp.path();
+    let view = commitbook_engine::review::list(root).unwrap().remove(0);
+    {
+        let lock = commitbook_engine::state::RepoLock::acquire(root).unwrap();
+        commitbook_engine::review::propose_locked(
+            root,
+            &view.path,
+            &view.revision,
+            &FakeProposalResolver,
+            &lock,
+        )
+        .await
+        .unwrap();
+    }
+    let old = commitbook_engine::review::list(root).unwrap().remove(0);
+    {
+        let lock = commitbook_engine::state::RepoLock::acquire(root).unwrap();
+        commitbook_engine::review::propose_locked(
+            root,
+            &view.path,
+            &view.revision,
+            &FakeProposalResolver,
+            &lock,
+        )
+        .await
+        .unwrap();
+    }
+    let new = commitbook_engine::review::list(root).unwrap().remove(0);
+    assert_ne!(old.proposal_version, new.proposal_version);
+    for action in ["accept", "reject"] {
+        assert_eq!(
+            post_json(
+                app.clone(),
+                "/api/conflicts/proposal",
+                serde_json::json!({
+                    "path": old.path,
+                    "revision": old.revision,
+                    "proposal_version": old.proposal_version,
+                    "action": action
+                })
+            )
+            .await
+            .0,
+            StatusCode::CONFLICT
+        );
+    }
+    assert_eq!(
+        post_json(
+            app.clone(),
+            "/api/conflicts/proposal",
+            serde_json::json!({
+                "path": new.path,
+                "revision": new.revision,
+                "proposal_version": new.proposal_version,
+                "action": "accept"
+            })
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let repo = commitbook_engine::git::GitRepo::open(root).unwrap();
+    assert!(!repo.merge_in_progress());
+    assert_eq!(
+        std::fs::read_to_string(root.join("note.md")).unwrap(),
+        "proposed resolution\n"
+    );
+}
+
+#[tokio::test]
+async fn changes_api_lists_pending_snapshot_files() {
+    let (tmp, app) = setup_test_app();
+    let root = tmp.path();
+    run_git(root, &["config", "user.name", "Test"]);
+    run_git(root, &["config", "user.email", "test@example.com"]);
+    run_git(root, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(root.join("tracked.md"), "base\n").unwrap();
+    run_git(root, &["add", "tracked.md"]);
+    run_git(root, &["commit", "-m", "base"]);
+    std::fs::write(root.join("tracked.md"), "edited\n").unwrap();
+    std::fs::write(root.join("new.json"), "{}\n").unwrap();
+    let (status, preview): (_, commitbook_engine::inspection::CommitPreview) =
+        get_json(app, "/api/changes").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(preview
+        .entries
+        .iter()
+        .any(|e| e.path == "tracked.md" && e.change == "modified"));
+    assert!(preview
+        .entries
+        .iter()
+        .any(|e| e.path == "new.json" && e.change == "added"));
+    assert!(preview.policy.contains("non-Markdown"));
+}

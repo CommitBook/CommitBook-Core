@@ -18,6 +18,14 @@ pub struct PendingInitPush {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SyncState {
     #[serde(default)]
+    pub last_attempt_at: Option<String>,
+    #[serde(default)]
+    pub last_fetch_at: Option<String>,
+    #[serde(default)]
+    pub last_push_at: Option<String>,
+    #[serde(default)]
+    pub last_error_stage: Option<String>,
+    #[serde(default)]
     pub last_sync_at: Option<String>,
     #[serde(default)]
     pub last_error: Option<String>,

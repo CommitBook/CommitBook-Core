@@ -622,6 +622,7 @@ version = "0.6.0"
 dependencies = [
  "anyhow",
  "askama",
+ "async-trait",
  "axum",
  "chrono",
  "clap",

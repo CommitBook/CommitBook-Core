@@ -28,3 +28,4 @@ which = "8.0.6"
 tempfile = "3.27.0"
 tower = { version = "0.5.3", features = ["util"] }
 http-body-util = "0.1.5"
+async-trait = "0.1.92"

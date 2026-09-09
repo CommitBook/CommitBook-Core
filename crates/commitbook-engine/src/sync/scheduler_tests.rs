@@ -1058,3 +1058,199 @@ async fn sync_without_auto_push_keeps_pending_init_push() {
         head
     );
 }
+
+#[tokio::test]
+async fn failure_stages_and_timestamps_preserve_existing_state() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    let cb_dir = cb_dir_of(&fx);
+    let mut state = SyncState::default();
+    state.last_sync_at = Some("previous successful cycle".into());
+    state.pending_init_push = Some(crate::state::sync_state::PendingInitPush {
+        commit_oid: fx.repo.rev_parse("HEAD").unwrap(),
+        remote: "origin".into(),
+        branch: fx.branch.clone(),
+    });
+    state.save(&cb_dir).unwrap();
+    std::fs::write(root.join("offline.md"), "saved before fetch failure").unwrap();
+    let outcome = sync_with_resolver(
+        root,
+        &SyncOptions::new("missing", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(outcome.committed);
+    assert!(!outcome.errors.is_empty());
+    let saved = SyncState::load(&cb_dir).unwrap();
+    assert_eq!(saved.last_error_stage.as_deref(), Some("fetch"));
+    assert!(saved.last_attempt_at.is_some());
+    assert!(saved.last_fetch_at.is_none());
+    assert!(saved.last_push_at.is_none());
+    assert_eq!(saved.pending_init_push, state.pending_init_push);
+    assert_eq!(saved.last_sync_at, state.last_sync_at);
+    let outcome = sync_with_resolver(
+        root,
+        &SyncOptions::new("origin", &fx.branch, false),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(outcome.errors.is_empty());
+    let saved = SyncState::load(&cb_dir).unwrap();
+    assert!(saved.last_fetch_at.is_some());
+    assert!(saved.last_push_at.is_none());
+    assert!(saved.last_error.is_none());
+    assert_eq!(saved.pending_init_push, state.pending_init_push);
+}
+
+#[tokio::test]
+async fn push_failure_records_push_stage_and_preserves_pending_init() {
+    use crate::state::sync_state::SyncState;
+    let (fx, logger) = setup_with_state();
+    let cb_dir = cb_dir_of(&fx);
+    let mut state = SyncState::default();
+    state.pending_init_push = Some(crate::state::sync_state::PendingInitPush {
+        commit_oid: fx.repo.rev_parse("HEAD").unwrap(),
+        remote: "origin".into(),
+        branch: fx.branch.clone(),
+    });
+    state.save(&cb_dir).unwrap();
+    std::fs::write(fx.repo_dir.path().join("local.txt"), "local\n").unwrap();
+    crate::git::operations::set_push_failpoint(crate::git::operations::PushFailpoint::Auth);
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        Some("rejected push".to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.pushed, 0, "{outcome:?}");
+    assert!(!outcome.errors.is_empty(), "{outcome:?}");
+    let saved = SyncState::load(&cb_dir).unwrap();
+    assert_eq!(saved.last_error_stage.as_deref(), Some("push"));
+    assert!(saved
+        .last_error
+        .as_ref()
+        .is_some_and(|e| e.contains("Push")));
+    assert!(saved.last_fetch_at.is_some());
+    assert!(saved.last_push_at.is_none());
+    assert_eq!(saved.pending_init_push, state.pending_init_push);
+}
+
+#[tokio::test]
+async fn merge_finalization_failure_is_labeled_merge_not_ai_resolution() {
+    use crate::state::sync_state::SyncState;
+    let (fx, logger) = setup_with_state();
+    leave_merge_in_progress(&fx, &logger).await;
+    std::fs::write(fx.repo_dir.path().join("shared.md"), "line A RESOLVED\n").unwrap();
+    fx.repo.stage_paths(&["shared.md".to_string()]).unwrap();
+    let raw = git2::Repository::open(fx.repo_dir.path()).unwrap();
+    let mut config = raw.config().unwrap();
+    config.set_bool("commit.gpgsign", true).unwrap();
+    config
+        .set_str("gpg.format", "commitbook-test-unsupported")
+        .unwrap();
+
+    let result = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await;
+    assert!(result.is_err(), "{result:?}");
+    let saved = SyncState::load(&cb_dir_of(&fx)).unwrap();
+    assert_eq!(saved.last_error_stage.as_deref(), Some("merge"));
+    assert_ne!(saved.last_error_stage.as_deref(), Some("ai_resolution"));
+    assert!(saved.last_error.is_some());
+    assert!(fx.repo.merge_in_progress());
+}
+
+#[tokio::test]
+async fn ai_resolution_then_finalize_failure_is_still_labeled_merge() {
+    use crate::state::sync_state::SyncState;
+    let (fx, logger) = setup_with_state();
+    leave_merge_in_progress(&fx, &logger).await;
+    let raw = git2::Repository::open(fx.repo_dir.path()).unwrap();
+    let mut config = raw.config().unwrap();
+    config.set_bool("commit.gpgsign", true).unwrap();
+    config
+        .set_str("gpg.format", "commitbook-test-unsupported")
+        .unwrap();
+    let resolver = MockResolver::ok("line A RESOLVED\n");
+
+    let result = sync_with_resolver(
+        fx.repo_dir.path(),
+        &SyncOptions::new("origin", &fx.branch, true),
+        Some(&resolver),
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await;
+    assert!(result.is_err(), "{result:?}");
+    let saved = SyncState::load(&cb_dir_of(&fx)).unwrap();
+    assert_eq!(
+        saved.last_error_stage.as_deref(),
+        Some("merge"),
+        "finalize after AI write must not remain ai_resolution"
+    );
+    assert!(fx.repo.merge_in_progress());
+}
+
+#[tokio::test]
+async fn malformed_state_is_preserved_before_mutation_and_commit_failure_is_recorded() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    let path = cb_dir_of(&fx).join("local/state.toml");
+    std::fs::write(&path, "broken = [").unwrap();
+    let head = fx.repo.rev_parse("HEAD").unwrap();
+    std::fs::write(root.join("note.md"), "new text").unwrap();
+    assert!(sync_with_resolver(
+        root,
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None
+    )
+    .await
+    .is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "broken = [");
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
+    std::fs::remove_file(&path).unwrap();
+    // Unsupported signing format fails before invoking any external signing program.
+    let raw = git2::Repository::open(root).unwrap();
+    let mut config = raw.config().unwrap();
+    config.set_bool("commit.gpgsign", true).unwrap();
+    config
+        .set_str("gpg.format", "commitbook-test-unsupported")
+        .unwrap();
+    let result = sync_with_resolver(
+        root,
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await;
+    assert!(result.is_err());
+    let saved = SyncState::load(&cb_dir_of(&fx)).unwrap();
+    assert_eq!(saved.last_error_stage.as_deref(), Some("commit"));
+    assert!(saved.last_error.is_some());
+}

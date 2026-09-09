@@ -66,6 +66,12 @@ pub fn run_init() -> Result<()> {
     let repo_root = state::find_git_root()
         .context("CommitBook must be initialized inside a git repository.")?;
 
+    println!("{}", commitbook_engine::inspection::INCLUSION_POLICY);
+    for entry in commitbook_engine::inspection::preview_files(&repo_root)? {
+        println!("  {} {}", entry.change, entry.path);
+    }
+    println!("Initialization publishes CommitBook metadata only; working changes are included by a later sync.");
+
     // Already initialized: report and exit before enforcing the remote rule,
     // so a repo that gained extra remotes after init doesn't fail here. The
     // remote persisted in config.toml stays authoritative for sync.

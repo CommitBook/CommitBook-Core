@@ -7,3 +7,5 @@ pub mod start;
 pub mod status;
 pub mod stop;
 pub mod sync_cmd;
+
+pub mod preview;

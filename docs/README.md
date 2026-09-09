@@ -45,6 +45,7 @@ commitbook start
 | `commitbook start` | Start the sync scheduler (launchd/cron) |
 | `commitbook stop` | Stop the sync scheduler |
 | `commitbook status` | Show current sync state, schedule, and config |
+| `commitbook preview` | List files the next local snapshot would include |
 | `commitbook schedule <expr>` | Change the sync schedule |
 | `commitbook doctor` | Check system health and dependencies |
 | `commitbook log` | View recent activity log |
@@ -362,3 +363,79 @@ commitbook sync
 ## License
 
 MIT License - Copyright (c) 2026 ZAAI
+
+## Inspect saving and synchronization
+
+`commitbook status` reports local saving separately from remote synchronization
+and scheduler installation. “Running” means a scheduler job is installed; it
+is not proof that the last sync succeeded. The latest commit comes from Git
+history. Status also shows the last remote check, successful push, and any
+recorded operation error. The web dashboard and terminal dashboard use the
+same repository status service.
+
+Remote ahead/behind counts describe the cached remote-tracking branch. Status
+never fetches or invokes AI, and an unavailable remote reference is reported
+as unknown. “Up to date at last remote check” is not a live connectivity check.
+A successful cycle with automatic pushing disabled does not imply publication.
+
+```bash
+commitbook status --json
+commitbook preview
+commitbook preview --json
+```
+
+Preview lists the files that normal staging would include in the next local
+snapshot, with staged/unstaged indicators and any sync blockers. It includes
+all eligible Git files, including non-Markdown files, hidden files, and
+deletions, and respects Git ignore rules. It does not stage, commit, fetch,
+invoke AI, or write application state. It is a snapshot: later edits can change
+what the next sync commits. A blocked CLI preview returns a nonzero exit code,
+including when JSON output is requested.
+
+Open **Changes** in the web dashboard for the same preview. In the terminal
+dashboard, press **p** to open changes, **↑/↓** to scroll, **r** to refresh, and
+**Esc** to return. The status panel also supports scrolling.
+
+## Review and resolve conflicts
+
+Open **Conflicts** in the web dashboard to inspect local, remote, and ancestor
+versions. Choose a side, delete the file, or save edited text. **Keep both in
+editor** concatenates the two versions for you to edit; saving remains an
+explicit action. Binary files, symlinks, and submodules support side selection
+or deletion rather than text editing.
+
+The last resolution creates a local merge commit. **Sync now**, or the next
+scheduled sync, publishes it only when `git.auto_push` is enabled. Manual Git
+recovery remains supported: edit the files, run `git add`, and run
+`commitbook sync`.
+
+To review AI suggestions before they are applied:
+
+```toml
+[conflict]
+resolver = "codex" # or another supported, installed resolver
+review_ai_resolutions = true # default: false
+```
+
+This setting is independent of `[commit].ai_messages`, which remains off by
+default. Configure it in the web settings page or edit the repository config.
+With review enabled, sync saves proposals in
+`.CommitBook/local/conflict-proposals.toml` and pauses without applying the
+proposal or pushing the merge. Proposals survive process restarts. Reviewers
+can accept, edit, reject, or explicitly generate a replacement. Pending and
+rejected proposals are not automatically regenerated on subsequent cycles.
+Turning review off does not approve already stored proposals.
+
+An acceptance checks both the current conflict revision and the proposal
+version. If files or the proposal changed since the page loaded, refresh and
+review the new version. Conflict actions and settings changes share the
+repository mutation lock, so concurrent operations report that the repository
+is busy. Native sync also honors review mode; existing native manual-resolution
+APIs remain available without an FFI signature change.
+
+Sync timestamps and error stages are stored in `local/state.toml`. Older state
+files remain supported. The existing `last_sync_at` field denotes a successful
+cycle; the additional `last_attempt_at`, `last_fetch_at`, and `last_push_at`
+fields distinguish attempts, remote checks, and publication. The web status
+API retains its existing fields and adds a `repository` object containing the
+shared detailed status. Unknown change counts are null rather than zero.

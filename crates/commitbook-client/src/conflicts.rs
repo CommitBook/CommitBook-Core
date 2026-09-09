@@ -71,53 +71,24 @@ pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) ->
             ))
         })?;
 
-    match input.resolution_type.as_str() {
-        "take_local" => repo
-            .resolve_conflict_with_side(&input.conflict_id, conflict.local.as_ref())
-            .map_err(|error| CommitBookError::merge(format!("Resolve local side: {error}")))?,
-        "take_remote" => repo
-            .resolve_conflict_with_side(&input.conflict_id, conflict.remote.as_ref())
-            .map_err(|error| CommitBookError::merge(format!("Resolve remote side: {error}")))?,
-        "delete" => repo
-            .resolve_conflict_with_side(&input.conflict_id, None)
-            .map_err(|error| CommitBookError::merge(format!("Resolve deletion: {error}")))?,
-        "keep_both" => {
-            if conflict.is_binary_or_special() {
-                return Err(CommitBookError::invalid_input(format!(
-                    "Conflict {} is binary or special; choose a side instead",
-                    input.conflict_id
-                )));
-            }
-            let combined = [conflict.local_text(), conflict.remote_text()]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join("\n");
-            repo.resolve_conflict_with_text(&input.conflict_id, &combined)
-                .map_err(|error| CommitBookError::merge(format!("Resolve both sides: {error}")))?;
-        }
-        "manual_edit" => {
-            let content = input.manual_content.as_deref().ok_or_else(|| {
-                CommitBookError::invalid_input("manual_edit requires manual_content")
-            })?;
-            repo.resolve_conflict_with_text(&input.conflict_id, content)
-                .map_err(|error| CommitBookError::merge(format!("Resolve manual edit: {error}")))?;
-        }
-        other => {
-            return Err(CommitBookError::invalid_input(format!(
-                "Unknown resolution_type: {other}"
-            )))
-        }
-    }
-
-    if repo
-        .list_conflicts_structured()
-        .map_err(|error| CommitBookError::database(format!("List conflicts: {error}")))?
-        .is_empty()
-    {
-        repo.finalize_merge_commit_on_branch(None, &commitbook.branch)
-            .map_err(|error| CommitBookError::merge(format!("Finalize merge: {error}")))?;
-    }
+    let view = commitbook_engine::review::list(&commitbook.local_path)
+        .map_err(|e| CommitBookError::merge(format!("Inspect conflicts: {e:#}")))?
+        .into_iter()
+        .find(|c| c.path == conflict.path)
+        .ok_or_else(|| CommitBookError::not_found("Conflict disappeared"))?;
+    commitbook_engine::review::apply_locked(
+        &commitbook.local_path,
+        &commitbook.branch,
+        &commitbook_engine::review::ResolutionInput {
+            proposal_version: None,
+            path: input.conflict_id.clone(),
+            revision: view.revision,
+            action: input.resolution_type.clone(),
+            content: input.manual_content.clone(),
+        },
+        &_lock,
+    )
+    .map_err(|e| CommitBookError::merge(format!("Resolve conflict: {e:#}")))?;
     Ok(())
 }
 

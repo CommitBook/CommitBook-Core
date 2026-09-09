@@ -13,7 +13,7 @@ use askama::Template;
 use commitbook_engine::ai::ProviderChain;
 use commitbook_engine::config::local::LocalConfig;
 use commitbook_engine::cron::{self, SchedulerAdapter, SystemScheduler};
-use commitbook_engine::git::GitRepo;
+use commitbook_engine::inspection::RepositoryStatus;
 use commitbook_engine::logger::FileLogger;
 use commitbook_engine::settings::{self, SchedulerContext, SettingsUpdate, SettingsUpdateError};
 use commitbook_engine::state::RepoLockContended;
@@ -58,6 +58,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/", get(dashboard))
         .route("/logs", get(logs_page))
         .route("/config", get(config_page))
+        .route("/changes", get(changes_page))
+        .route("/conflicts", get(conflicts_page))
+        .route("/api/changes", get(api_changes))
+        .route("/api/conflicts", get(api_conflicts))
+        .route("/api/conflicts/resolve", post(api_resolve))
+        .route("/api/conflicts/proposal", post(api_proposal))
+        .route("/api/sync", post(api_sync))
         // HTMX partials
         .route("/htmx/status", get(htmx_status))
         .route("/htmx/providers", get(htmx_providers))
@@ -105,13 +112,12 @@ fn action_json(status: StatusCode, success: bool, message: String) -> Response {
 #[derive(Template)]
 #[template(path = "dashboard.html")]
 struct DashboardTemplate {
+    status_lines: Vec<String>,
+    needs_attention: bool,
     running: bool,
     schedule_desc: String,
     current_branch: String,
     auto_push: bool,
-    last_commit: String,
-    changes_total: usize,
-    changes_summary: String,
     providers: Vec<ProviderInfo>,
 }
 
@@ -122,6 +128,8 @@ struct LogsTemplate {}
 #[derive(Template)]
 #[template(path = "config.html")]
 struct ConfigTemplate {
+    review_ai_resolutions: bool,
+    resolver: String,
     ai_messages: bool,
     schedule: String,
     branch: String,
@@ -131,13 +139,12 @@ struct ConfigTemplate {
 #[derive(Template)]
 #[template(path = "partials/status.html")]
 struct StatusPartial {
+    status_lines: Vec<String>,
+    needs_attention: bool,
     running: bool,
     schedule_desc: String,
     current_branch: String,
     auto_push: bool,
-    last_commit: String,
-    changes_total: usize,
-    changes_summary: String,
 }
 
 #[derive(Template)]
@@ -164,47 +171,34 @@ fn escape_html(s: &str) -> String {
 }
 
 fn load_status(repo_path: &Path) -> StatusResponse {
-    let config = LocalConfig::load(repo_path).ok();
-    let running = cron::is_loaded(repo_path);
-
-    let (schedule, schedule_desc, auto_push, branch, last_commit) = match &config {
-        Some(c) => (
-            c.schedule.clone(),
-            cron::describe_schedule(&c.schedule),
-            c.git.auto_push,
-            c.git.branch.clone(),
-            None::<String>, // last_commit moved to state.toml
-        ),
-        None => (String::new(), "Unknown".into(), true, "main".into(), None),
-    };
-
-    let (current_branch, changes_total, changes_summary) =
-        if let Ok(repo) = GitRepo::open(repo_path) {
-            let branch = repo.current_branch().unwrap_or_else(|_| "unknown".into());
-            let changes = repo.changes_summary().unwrap_or_default();
-            let total = changes.total();
-            let summary = changes.to_summary_text();
-            (branch, total, summary)
-        } else {
-            ("unknown".into(), 0, "unknown".into())
-        };
-
+    let repository = RepositoryStatus::read(repo_path);
     StatusResponse {
-        running,
-        enabled: config.as_ref().map(|c| c.enabled).unwrap_or(false),
-        schedule,
-        schedule_desc,
-        branch,
-        current_branch,
-        auto_push,
-        last_commit,
-        changes_total,
-        changes_summary,
+        running: cron::is_loaded(repo_path),
+        enabled: repository.enabled.unwrap_or(false),
+        schedule: repository.schedule.clone().unwrap_or_default(),
+        schedule_desc: repository
+            .schedule
+            .as_deref()
+            .map(cron::describe_schedule)
+            .unwrap_or_else(|| "Unknown".into()),
+        branch: repository
+            .branch
+            .clone()
+            .unwrap_or_else(|| "unknown".into()),
+        current_branch: repository
+            .current_branch
+            .clone()
+            .unwrap_or_else(|| "unknown".into()),
+        auto_push: repository.auto_push.unwrap_or(false),
+        last_commit: repository.last_commit.clone(),
+        changes_total: repository.changes_total,
+        changes_summary: repository.local_status.clone(),
+        repository,
     }
 }
 
 fn load_providers(repo_path: &Path) -> Vec<ProviderInfo> {
-    let ai_messages = LocalConfig::load(repo_path)
+    let ai_messages = LocalConfig::load_read_only(repo_path)
         .map(|config| config.commit.ai_messages)
         .unwrap_or(false);
     if !ai_messages {
@@ -237,10 +231,7 @@ fn load_log_entries_filtered(
     offset: usize,
     level: Option<&str>,
 ) -> Vec<LogEntry> {
-    let logger = match FileLogger::new(repo_path, 30) {
-        Ok(l) => l,
-        Err(_) => return Vec::new(),
-    };
+    let logger = FileLogger::read_only(repo_path, 30);
 
     let lines = logger
         .read_entries_filtered(limit, offset, level)
@@ -263,24 +254,25 @@ fn load_log_entries_filtered(
 // HTML page handlers
 // ---------------------------------------------------------------------------
 
-pub async fn dashboard(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let status = load_status(&state.repo_path);
-    let providers = load_providers(&state.repo_path);
+pub async fn dashboard(State(state): State<Arc<AppState>>) -> Result<Html<String>, StatusCode> {
+    let path = state.repo_path.clone();
+    let status = blocking(move || load_status(&path)).await?;
+    let path = state.repo_path.clone();
+    let providers = blocking(move || load_providers(&path)).await?;
 
     let tpl = DashboardTemplate {
+        status_lines: status.repository.lines(),
+        needs_attention: status.repository.merge_in_progress
+            || !status.repository.conflicts.is_empty(),
         running: status.running,
         schedule_desc: status.schedule_desc,
         current_branch: status.current_branch,
         auto_push: status.auto_push,
-        last_commit: status.last_commit.unwrap_or_else(|| "never".into()),
-        changes_total: status.changes_total,
-        changes_summary: status.changes_summary,
         providers,
     };
-    Html(
-        tpl.render()
-            .unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))),
-    )
+    Ok(Html(tpl.render().unwrap_or_else(|e| {
+        format!("Template error: {}", escape_html(&e.to_string()))
+    })))
 }
 
 pub async fn logs_page(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -292,22 +284,24 @@ pub async fn logs_page(State(_state): State<Arc<AppState>>) -> impl IntoResponse
 }
 
 pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let config = LocalConfig::load(&state.repo_path).ok();
-    let (schedule, branch, auto_push, ai_messages) = match config {
-        Some(c) => (
-            c.schedule,
-            c.git.branch,
-            c.git.auto_push,
-            c.commit.ai_messages,
-        ),
-        None => ("0 * * * *".into(), "main".into(), true, false),
+    let path = state.repo_path.clone();
+    let config = match blocking(move || LocalConfig::load_read_only(&path)).await {
+        Ok(Ok(config)) => config,
+        Ok(Err(error)) => {
+            return Html(format!(
+                "Cannot load configuration: {}",
+                escape_html(&format!("{error:#}"))
+            ))
+        }
+        Err(_) => return Html("Configuration inspection failed".into()),
     };
-
     let tpl = ConfigTemplate {
-        ai_messages,
-        schedule,
-        branch,
-        auto_push,
+        review_ai_resolutions: config.conflict.review_ai_resolutions,
+        resolver: config.conflict.resolver,
+        ai_messages: config.commit.ai_messages,
+        schedule: config.schedule,
+        branch: config.git.branch,
+        auto_push: config.git.auto_push,
     };
     Html(
         tpl.render()
@@ -319,30 +313,32 @@ pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoRespons
 // HTMX partial handlers
 // ---------------------------------------------------------------------------
 
-pub async fn htmx_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let status = load_status(&state.repo_path);
+pub async fn htmx_status(State(state): State<Arc<AppState>>) -> Result<Html<String>, StatusCode> {
+    let path = state.repo_path.clone();
+    let status = blocking(move || load_status(&path)).await?;
     let tpl = StatusPartial {
+        status_lines: status.repository.lines(),
+        needs_attention: status.repository.merge_in_progress
+            || !status.repository.conflicts.is_empty(),
         running: status.running,
         schedule_desc: status.schedule_desc,
         current_branch: status.current_branch,
         auto_push: status.auto_push,
-        last_commit: status.last_commit.unwrap_or_else(|| "never".into()),
-        changes_total: status.changes_total,
-        changes_summary: status.changes_summary,
     };
-    Html(
-        tpl.render()
-            .unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))),
-    )
+    Ok(Html(tpl.render().unwrap_or_else(|e| {
+        format!("Template error: {}", escape_html(&e.to_string()))
+    })))
 }
 
-pub async fn htmx_providers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let providers = load_providers(&state.repo_path);
+pub async fn htmx_providers(
+    State(state): State<Arc<AppState>>,
+) -> Result<Html<String>, StatusCode> {
+    let path = state.repo_path.clone();
+    let providers = blocking(move || load_providers(&path)).await?;
     let tpl = ProvidersPartial { providers };
-    Html(
-        tpl.render()
-            .unwrap_or_else(|e| format!("Template error: {}", escape_html(&e.to_string()))),
-    )
+    Ok(Html(tpl.render().unwrap_or_else(|e| {
+        format!("Template error: {}", escape_html(&e.to_string()))
+    })))
 }
 
 pub async fn htmx_logs(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -358,8 +354,10 @@ pub async fn htmx_logs(State(state): State<Arc<AppState>>) -> impl IntoResponse 
 // REST API handlers
 // ---------------------------------------------------------------------------
 
-pub async fn api_status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> {
-    Json(load_status(&state.repo_path))
+pub async fn api_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<StatusResponse>, StatusCode> {
+    Ok(Json(blocking(move || load_status(&state.repo_path)).await?))
 }
 
 pub async fn api_logs(
@@ -411,6 +409,8 @@ pub async fn api_config(State(state): State<Arc<AppState>>, request: Request) ->
         auto_push: update.auto_push,
         ai_messages: update.ai_messages,
         enabled: None,
+        review_ai_resolutions: update.review_ai_resolutions,
+        resolver: update.resolver,
     };
 
     let repo_path = state.repo_path.clone();
@@ -506,10 +506,178 @@ pub async fn api_stop(State(state): State<Arc<AppState>>) -> Response {
     scheduler_action_response(result, "Scheduler stopped", "Failed to stop")
 }
 
-pub async fn api_providers(State(state): State<Arc<AppState>>) -> Json<Vec<ProviderInfo>> {
-    Json(load_providers(&state.repo_path))
+pub async fn api_providers(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ProviderInfo>>, StatusCode> {
+    Ok(Json(
+        blocking(move || load_providers(&state.repo_path)).await?,
+    ))
 }
 
 #[cfg(test)]
 #[path = "routes_tests.rs"]
 mod tests;
+
+#[derive(Template)]
+#[template(path = "changes.html")]
+struct ChangesTemplate {
+    preview: commitbook_engine::inspection::CommitPreview,
+}
+#[derive(Template)]
+#[template(path = "conflicts.html")]
+struct ConflictsTemplate {}
+pub async fn changes_page(State(state): State<Arc<AppState>>) -> Result<Html<String>, StatusCode> {
+    let preview =
+        blocking(move || commitbook_engine::inspection::preview(&state.repo_path)).await?;
+    Ok(Html(
+        ChangesTemplate { preview }
+            .render()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    ))
+}
+pub async fn conflicts_page() -> Result<Html<String>, StatusCode> {
+    Ok(Html(
+        ConflictsTemplate {}
+            .render()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    ))
+}
+pub async fn api_changes(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<commitbook_engine::inspection::CommitPreview>, StatusCode> {
+    Ok(Json(
+        blocking(move || commitbook_engine::inspection::preview(&state.repo_path)).await?,
+    ))
+}
+fn review_error(error: anyhow::Error) -> Response {
+    use commitbook_engine::review::ReviewError;
+    let status = match error.downcast_ref::<ReviewError>() {
+        Some(ReviewError::Stale) => StatusCode::CONFLICT,
+        Some(ReviewError::Missing) => StatusCode::NOT_FOUND,
+        None => mutation_error_status(&error),
+    };
+    action_json(status, false, format!("{error:#}"))
+}
+pub async fn api_conflicts(State(state): State<Arc<AppState>>) -> Result<Response, StatusCode> {
+    Ok(
+        match blocking(move || commitbook_engine::review::list(&state.repo_path)).await? {
+            Ok(conflicts) => Json(conflicts).into_response(),
+            Err(error) => review_error(error),
+        },
+    )
+}
+pub async fn api_resolve(
+    State(state): State<Arc<AppState>>,
+    Json(input): Json<commitbook_engine::review::ResolutionInput>,
+) -> Result<Response, StatusCode> {
+    Ok(
+        match blocking(move || {
+            let lock = commitbook_engine::state::RepoLock::acquire(&state.repo_path)?;
+            let config = LocalConfig::load_read_only(&state.repo_path)?;
+            commitbook_engine::review::apply_locked(
+                &state.repo_path,
+                &config.git.branch,
+                &input,
+                &lock,
+            )
+        })
+        .await?
+        {
+            Ok(()) => action_json(
+                StatusCode::OK,
+                true,
+                "Resolved locally. Sync to publish according to your auto-push setting.".into(),
+            ),
+            Err(error) => review_error(error),
+        },
+    )
+}
+pub async fn api_proposal(
+    State(state): State<Arc<AppState>>,
+    Json(input): Json<commitbook_engine::review::ResolutionInput>,
+) -> Result<Response, StatusCode> {
+    Ok(
+        match blocking(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+                .block_on(commitbook_engine::review::proposal_action(
+                    &state.repo_path,
+                    &input,
+                ))
+        })
+        .await?
+        {
+            Ok(()) => action_json(
+                StatusCode::OK,
+                true,
+                "Proposal updated. Accepted resolutions are saved locally.".into(),
+            ),
+            Err(error) => review_error(error),
+        },
+    )
+}
+pub async fn api_sync(State(state): State<Arc<AppState>>) -> Result<Response, StatusCode> {
+    let result = blocking(move || -> anyhow::Result<_> {
+        let lock = commitbook_engine::state::RepoLock::acquire(&state.repo_path)?;
+        let config = LocalConfig::load(&state.repo_path)?;
+        let logger = FileLogger::new(&state.repo_path, config.logging.max_log_days)?;
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(async {
+                let repo = commitbook_engine::git::GitRepo::open(&state.repo_path)?;
+                let message = if config.commit.ai_messages
+                    && !repo.merge_in_progress()
+                    && repo.has_dirty_changes()?
+                {
+                    let chain = ProviderChain::new();
+                    let keys =
+                        ["gh-copilot", "claude-cli", "codex-cli", "fallback"].map(str::to_string);
+                    Some(
+                        chain
+                            .generate(&repo.changes_summary()?, &keys, &state.repo_path)
+                            .await
+                            .0,
+                    )
+                } else {
+                    None
+                };
+                commitbook_engine::sync::sync_repository_locked(
+                    &state.repo_path,
+                    &config,
+                    &logger,
+                    message,
+                    &lock,
+                )
+                .await
+            })
+    })
+    .await?;
+    Ok(match result {
+        Ok(outcome) => {
+            let success = outcome.errors.is_empty() && outcome.manual_conflicts == 0;
+            let message = if outcome.manual_conflicts > 0 {
+                format!(
+                    "{} conflicts need resolution or review. {}",
+                    outcome.manual_conflicts,
+                    outcome.errors.join("; ")
+                )
+            } else if !outcome.errors.is_empty() {
+                outcome.errors.join("; ")
+            } else {
+                "Sync cycle complete. Check status for local and remote details.".into()
+            };
+            action_json(
+                if success {
+                    StatusCode::OK
+                } else {
+                    StatusCode::CONFLICT
+                },
+                success,
+                message,
+            )
+        }
+        Err(error) => review_error(error),
+    })
+}

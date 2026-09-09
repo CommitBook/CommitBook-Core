@@ -57,6 +57,8 @@ fn default_conflict_resolver() -> String {
 /// conflicted index for the user to resolve.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConflictSettings {
+    #[serde(default)]
+    pub review_ai_resolutions: bool,
     #[serde(default = "default_conflict_resolver")]
     pub resolver: String,
 }
@@ -65,6 +67,7 @@ impl Default for ConflictSettings {
     fn default() -> Self {
         Self {
             resolver: default_conflict_resolver(),
+            review_ai_resolutions: false,
         }
     }
 }

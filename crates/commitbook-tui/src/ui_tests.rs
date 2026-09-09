@@ -64,7 +64,8 @@ fn draw_renders_panels_content_and_footer() {
         "q:quit",
         "s:start/stop",
         "r:refresh",
-        "↑↓:scroll logs",
+        "↑↓:scroll status/logs",
+        "p:preview",
     ] {
         assert!(
             text.contains(content),

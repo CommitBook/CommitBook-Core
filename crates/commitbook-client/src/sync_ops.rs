@@ -155,7 +155,8 @@ pub fn sync_one_commitbook(
         .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
     let config = LocalConfig::load(&commitbook.local_path)
         .map_err(|error| CommitBookError::database(format!("Load config: {error}")))?;
-    let options = SyncOptions::from(&config.git);
+    let mut options = SyncOptions::from(&config.git);
+    options.review_ai_resolutions = config.conflict.review_ai_resolutions;
 
     let host_resolver = callback.map(|callback| HostConflictResolver {
         commitbook_id: commitbook_id.to_string(),

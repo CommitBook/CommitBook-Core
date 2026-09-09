@@ -9,3 +9,6 @@ pub mod settings;
 pub mod state;
 pub mod sync;
 pub mod utils;
+
+pub mod inspection;
+pub mod review;

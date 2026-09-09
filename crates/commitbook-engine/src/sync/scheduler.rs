@@ -24,6 +24,7 @@ pub struct SyncOptions {
     pub remote: String,
     pub branch: String,
     pub auto_push: bool,
+    pub review_ai_resolutions: bool,
 }
 
 impl SyncOptions {
@@ -32,6 +33,7 @@ impl SyncOptions {
             remote: remote.into(),
             branch: branch.into(),
             auto_push,
+            review_ai_resolutions: false,
         }
     }
 }
@@ -42,12 +44,13 @@ impl From<&GitSettings> for SyncOptions {
             remote: settings.remote.clone(),
             branch: settings.branch.clone(),
             auto_push: settings.auto_push,
+            review_ai_resolutions: false,
         }
     }
 }
 
 /// Result of one sync cycle.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize)]
 pub struct SyncOutcome {
     pub committed: bool,
     pub pushed: u32,
@@ -95,7 +98,8 @@ pub async fn sync_repository_locked(
     lock.ensure_matches(repo_root)?;
     let registry = ResolverRegistry::new();
     let resolver = registry.get(&config.conflict.resolver);
-    let options = SyncOptions::from(&config.git);
+    let mut options = SyncOptions::from(&config.git);
+    options.review_ai_resolutions = config.conflict.review_ai_resolutions;
     sync_with_resolver_locked(
         repo_root,
         &options,
@@ -142,6 +146,69 @@ pub async fn sync_with_resolver_locked(
     lock: &RepoLock,
 ) -> Result<SyncOutcome> {
     lock.ensure_matches(repo_root)?;
+    let cb_dir = LocalConfig::commitbook_dir(repo_root);
+    // Never replace malformed state with defaults; validate before mutations.
+    let mut state = SyncState::load(&cb_dir)?;
+    state.last_attempt_at = Some(crate::utils::datetime::now_iso());
+    state.save(&cb_dir)?;
+    let mut stage = "inspection";
+    let result = sync_cycle(
+        repo_root,
+        options,
+        resolver,
+        creds,
+        logger,
+        commit_message,
+        lock,
+        &mut state,
+        &mut stage,
+    )
+    .await;
+    // Publication cleanup may update pending_init_push during the cycle.
+    let persist = (|| -> Result<()> {
+        let mut current = SyncState::load(&cb_dir)?;
+        current.last_attempt_at = state.last_attempt_at;
+        current.last_fetch_at = state.last_fetch_at;
+        current.last_push_at = state.last_push_at;
+        let failure = match &result {
+            Ok(outcome) if !outcome.errors.is_empty() => Some(outcome.errors.join("; ")),
+            Err(error) => Some(format!("{error:#}")),
+            _ => None,
+        };
+        current.last_error_stage = failure.as_ref().map(|_| stage.to_string());
+        current.last_error = failure;
+        if let Ok(outcome) = &result {
+            if outcome.errors.is_empty() && outcome.manual_conflicts == 0 {
+                current.last_sync_at = Some(crate::utils::datetime::now_iso());
+            }
+        }
+        current.save(&cb_dir)
+    })();
+    match (result, persist) {
+        (Ok(outcome), Ok(())) => Ok(outcome),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(outcome), Err(error)) => anyhow::bail!(
+            "Sync state persistence failed: {error:#}; sync errors: {}",
+            outcome.errors.join("; ")
+        ),
+        (Err(error), Err(save_error)) => {
+            anyhow::bail!("{error:#}; sync state persistence also failed: {save_error:#}")
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn sync_cycle(
+    repo_root: &Path,
+    options: &SyncOptions,
+    resolver: Option<&dyn ConflictResolver>,
+    creds: &dyn CredentialProvider,
+    logger: &dyn Logger,
+    commit_message: Option<String>,
+    lock: &RepoLock,
+    state: &mut SyncState,
+    stage: &mut &'static str,
+) -> Result<SyncOutcome> {
     let repo = GitRepo::open(repo_root)?;
     let current_branch = repo.current_branch()?;
     if current_branch != options.branch {
@@ -151,16 +218,29 @@ pub async fn sync_with_resolver_locked(
             options.branch
         );
     }
-    let cb_dir = LocalConfig::commitbook_dir(repo_root);
+    crate::review::cleanup_locked(repo_root, lock)?;
     let mut outcome = SyncOutcome::default();
 
     for attempt in 0..=MAX_PUSH_RETRIES {
         // 0. Recover from a merge left in progress by a previous manual-mode
         //    or failed-resolver cycle before touching the working tree.
         //    Guarding on merge_in_progress() makes this a no-op on retries.
+        *stage = "merge";
         if repo.merge_in_progress() {
             let unresolved = repo.list_conflicted_paths()?;
             if !unresolved.is_empty() {
+                *stage = "ai_resolution";
+                if crate::review::prepare_locked(
+                    repo_root,
+                    options.review_ai_resolutions,
+                    resolver,
+                    lock,
+                )
+                .await?
+                {
+                    outcome.manual_conflicts = unresolved.len() as u32;
+                    return Ok(outcome);
+                }
                 match resolver {
                     Some(resolver) => {
                         if let Err(error) =
@@ -174,8 +254,9 @@ pub async fn sync_with_resolver_locked(
                                 &error,
                                 logger,
                             )?;
-                            return Ok(finalize_outcome(&cb_dir, outcome));
+                            return Ok(outcome);
                         }
+                        *stage = "merge";
                         repo.finalize_merge_commit_on_branch(None, &options.branch)?;
                         outcome.conflicts_resolved += unresolved.len() as u32;
                     }
@@ -188,7 +269,7 @@ pub async fn sync_with_resolver_locked(
                         );
                         let _ = logger.warn(&msg);
                         outcome.errors.push(msg);
-                        return Ok(finalize_outcome(&cb_dir, outcome));
+                        return Ok(outcome);
                     }
                 }
             } else {
@@ -201,12 +282,14 @@ pub async fn sync_with_resolver_locked(
         //    before the merge means
         //    a) we never lose work to a failed merge, b) the merge sees a
         //    proper local commit if the dirty file overlaps with remote.
+        *stage = "staging";
         if repo.has_dirty_changes()? {
             repo.stage_all()?;
             if repo.has_real_staged_changes()? {
                 let msg = commit_message.clone().unwrap_or_else(|| {
                     crate::ai::fallback::generate_timestamp_message(&Default::default())
                 });
+                *stage = "commit";
                 repo.commit_on_branch(&msg, &options.branch)?;
                 outcome.committed = true;
             }
@@ -214,13 +297,15 @@ pub async fn sync_with_resolver_locked(
 
         // 2. Fetch first (separate from merge) so we can compute pulled/pushed
         //    counts from the divergence BEFORE merge creates a merge commit.
+        *stage = "fetch";
         if let Err(e) = repo.fetch_with(&options.remote, &options.branch, creds) {
             let msg = format!("Fetch failed: {e}");
             let _ = logger.error(&msg);
             outcome.errors.push(msg);
-            return Ok(finalize_outcome(&cb_dir, outcome));
+            return Ok(outcome);
         }
 
+        state.last_fetch_at = Some(crate::utils::datetime::now_iso());
         let local_tip = repo.rev_parse("HEAD").ok();
         let remote_ref = format!("{}/{}", options.remote, options.branch);
         let remote_tip = repo.rev_parse(&remote_ref).ok();
@@ -242,6 +327,7 @@ pub async fn sync_with_resolver_locked(
         // 3. Merge from remote (already fetched). Skip when the remote branch
         //    does not exist yet (never-pushed branch): there is nothing to
         //    merge, and the push below bootstraps refs/heads/<branch>.
+        *stage = "merge";
         let merge_outcome = if remote_tip.is_some() {
             match repo.merge_fetched(&options.remote, &options.branch) {
                 Ok(o) => o,
@@ -249,7 +335,7 @@ pub async fn sync_with_resolver_locked(
                     let msg = format!("Merge failed: {e}");
                     let _ = logger.error(&msg);
                     outcome.errors.push(msg);
-                    return Ok(finalize_outcome(&cb_dir, outcome));
+                    return Ok(outcome);
                 }
             }
         } else {
@@ -262,32 +348,55 @@ pub async fn sync_with_resolver_locked(
                 // `behind` then counts only the newly-arrived remote commits.
                 outcome.pulled += behind;
             }
-            MergeOutcome::Conflicts(conflicted) => match resolver {
-                Some(r) => {
-                    match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger).await {
-                        Ok(()) => {
-                            outcome.conflicts_resolved += conflicted.len() as u32;
-                            repo.finalize_merge_commit_on_branch(None, &options.branch)?;
-                            outcome.pulled += behind;
-                        }
-                        Err(e) => {
-                            record_resolver_failure(&repo, &conflicted, &mut outcome, &e, logger)?;
-                            return Ok(finalize_outcome(&cb_dir, outcome));
+            MergeOutcome::Conflicts(conflicted) => {
+                *stage = "ai_resolution";
+                if crate::review::prepare_locked(
+                    repo_root,
+                    options.review_ai_resolutions,
+                    resolver,
+                    lock,
+                )
+                .await?
+                {
+                    outcome.manual_conflicts = conflicted.len() as u32;
+                    return Ok(outcome);
+                }
+                match resolver {
+                    Some(r) => {
+                        match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger)
+                            .await
+                        {
+                            Ok(()) => {
+                                outcome.conflicts_resolved += conflicted.len() as u32;
+                                *stage = "merge";
+                                repo.finalize_merge_commit_on_branch(None, &options.branch)?;
+                                outcome.pulled += behind;
+                            }
+                            Err(e) => {
+                                record_resolver_failure(
+                                    &repo,
+                                    &conflicted,
+                                    &mut outcome,
+                                    &e,
+                                    logger,
+                                )?;
+                                return Ok(outcome);
+                            }
                         }
                     }
+                    None => {
+                        outcome.manual_conflicts += conflicted.len() as u32;
+                        let msg = format!(
+                            "{} conflict(s) need manual resolution: {}",
+                            conflicted.len(),
+                            conflicted.join(", ")
+                        );
+                        let _ = logger.warn(&msg);
+                        outcome.errors.push(msg);
+                        return Ok(outcome);
+                    }
                 }
-                None => {
-                    outcome.manual_conflicts += conflicted.len() as u32;
-                    let msg = format!(
-                        "{} conflict(s) need manual resolution: {}",
-                        conflicted.len(),
-                        conflicted.join(", ")
-                    );
-                    let _ = logger.warn(&msg);
-                    outcome.errors.push(msg);
-                    return Ok(finalize_outcome(&cb_dir, outcome));
-                }
-            },
+            }
         }
 
         // 4. Push only when configured. Fetch and merge still run in local-only
@@ -295,9 +404,11 @@ pub async fn sync_with_resolver_locked(
         if !options.auto_push {
             break;
         }
+        *stage = "push";
         let published_tip = repo.rev_parse("HEAD")?;
         match repo.push_commit_with(&options.remote, &options.branch, &published_tip, creds) {
             Ok(()) => {
+                state.last_push_at = Some(crate::utils::datetime::now_iso());
                 outcome.pushed = ahead;
                 if let Err(error) = crate::commitbooks::publication::clear_published(
                     &repo,
@@ -329,7 +440,7 @@ pub async fn sync_with_resolver_locked(
         }
     }
 
-    Ok(finalize_outcome(&cb_dir, outcome))
+    Ok(outcome)
 }
 
 fn is_non_fast_forward_push(error: &anyhow::Error) -> bool {
@@ -398,20 +509,6 @@ async fn resolve_conflicts_inner(
     }
 
     Ok(())
-}
-
-fn finalize_outcome(cb_dir: &Path, outcome: SyncOutcome) -> SyncOutcome {
-    let mut state = SyncState::load(cb_dir).unwrap_or_default();
-    if outcome.errors.is_empty() {
-        state.last_sync_at = Some(crate::utils::datetime::now_iso());
-        state.last_error = None;
-    } else {
-        // Record why the cycle failed; leave last_sync_at pointing at the last
-        // successful sync so `commitbook status` distinguishes the two.
-        state.last_error = Some(outcome.errors.join("; "));
-    }
-    let _ = state.save(cb_dir);
-    outcome
 }
 
 #[cfg(test)]

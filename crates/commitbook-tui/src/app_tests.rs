@@ -100,3 +100,44 @@ fn refresh_clears_provider_status_when_disabled_or_config_invalid() {
         assert!(app.providers.is_empty());
     }
 }
+
+#[test]
+fn preview_navigation_refreshes_and_returns_to_dashboard() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    LocalConfig::init(tmp.path(), "hourly").unwrap();
+    let mut app = App::new(tmp.path());
+    app.handle_key(KeyCode::Char('p'), KeyModifiers::NONE);
+    assert!(app.preview.is_some());
+    app.handle_key(KeyCode::Down, KeyModifiers::NONE);
+    assert_eq!(app.preview_scroll, 1);
+    std::fs::write(tmp.path().join("new.json"), "{}").unwrap();
+    app.handle_key(KeyCode::Char('r'), KeyModifiers::NONE);
+    assert!(app
+        .preview
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .any(|e| e.path == "new.json"));
+    app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+    assert!(app.preview.is_none());
+    assert!(!app.quit);
+    app.active_panel = Panel::Status;
+    app.handle_key(KeyCode::Down, KeyModifiers::NONE);
+    assert_eq!(app.status_scroll, 1);
+    app.handle_key(KeyCode::Up, KeyModifiers::NONE);
+    assert_eq!(app.status_scroll, 0);
+    app.auto_push = true;
+    app.enabled = true;
+    std::fs::write(LocalConfig::config_path(tmp.path()), "broken = [").unwrap();
+    app.refresh();
+    assert!(app.schedule.is_empty());
+    assert_eq!(app.branch, "unknown");
+    assert!(!app.auto_push);
+    assert!(!app.enabled);
+}

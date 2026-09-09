@@ -58,7 +58,7 @@ async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
             }
             if o.manual_conflicts > 0 {
                 println!(
-                    "  {} {} conflict(s) need manual resolution. Run `git status` to see them.",
+                    "  {} {} conflict(s) need manual resolution. Open the web dashboard /conflicts to review or resolve them; `git status` also lists them.",
                     "WARN".yellow().bold(),
                     o.manual_conflicts
                 );

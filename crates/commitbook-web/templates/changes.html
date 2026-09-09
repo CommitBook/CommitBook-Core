@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Changes{% endblock %}
+{% block content %}
+<div class="card"><h2>Next local snapshot</h2><p>{{ preview.policy }}</p>
+<p>Repository: {{ preview.repository }}</p>
+{% match preview.branch %}{% when Some with (value) %}<p>Branch: {{ value }}</p>{% when None %}<p>Branch: unknown</p>{% endmatch %}
+{% match preview.remote %}{% when Some with (value) %}<p>Remote: {{ value }}</p>{% when None %}<p>Remote: unknown</p>{% endmatch %}
+{% match preview.auto_push %}{% when Some with (value) %}<p>Automatic pushing: {{ value }}</p>{% when None %}<p>Automatic pushing: unknown</p>{% endmatch %}
+{% for blocker in preview.blockers %}<p class="flash flash-error">{{ blocker }}</p>{% endfor %}
+<table><thead><tr><th>Path</th><th>Change</th><th>Staged</th><th>Unstaged</th></tr></thead><tbody>
+{% for entry in preview.entries %}<tr><td>{{ entry.path }}</td><td>{{ entry.change }}</td><td>{{ entry.staged }}</td><td>{{ entry.unstaged }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

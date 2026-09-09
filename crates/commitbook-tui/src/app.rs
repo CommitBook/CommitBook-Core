@@ -43,6 +43,10 @@ impl Panel {
 }
 
 pub struct App {
+    pub repository_status: Option<commitbook_engine::inspection::RepositoryStatus>,
+    pub preview: Option<commitbook_engine::inspection::CommitPreview>,
+    pub preview_scroll: usize,
+    pub status_scroll: usize,
     pub repo_path: PathBuf,
     pub active_panel: Panel,
     pub running: bool,
@@ -91,6 +95,10 @@ impl App {
     /// An app with empty state and no repository inspection performed.
     pub fn blank(repo_path: &Path) -> Self {
         Self {
+            repository_status: None,
+            preview: None,
+            preview_scroll: 0,
+            status_scroll: 0,
             repo_path: repo_path.to_path_buf(),
             active_panel: Panel::Status,
             running: false,
@@ -115,15 +123,33 @@ impl App {
         // Fail closed on config errors, including after AI was previously enabled.
         let mut ai_messages = false;
         // Load local config
-        if let Ok(config) = LocalConfig::load(&self.repo_path) {
+        if let Ok(config) = LocalConfig::load_read_only(&self.repo_path) {
             ai_messages = config.commit.ai_messages;
             self.schedule = config.schedule.clone();
             self.schedule_desc = cron::describe_schedule(&config.schedule);
             self.auto_push = config.git.auto_push;
             self.branch = config.git.branch.clone();
-            self.last_commit = None; // moved to state.toml
+
             self.enabled = config.enabled;
             self.log_level = config.logging.level.clone();
+        } else {
+            self.schedule.clear();
+            self.schedule_desc = "Unknown (configuration error)".into();
+            self.auto_push = false;
+            self.branch = "unknown".into();
+            self.enabled = false;
+            self.log_level = "unknown".into();
+        }
+
+        self.repository_status = Some(commitbook_engine::inspection::RepositoryStatus::read(
+            &self.repo_path,
+        ));
+        self.last_commit = self
+            .repository_status
+            .as_ref()
+            .and_then(|s| s.last_commit.clone());
+        if self.preview.is_some() {
+            self.preview = Some(commitbook_engine::inspection::preview(&self.repo_path));
         }
 
         // Check scheduler state
@@ -136,7 +162,8 @@ impl App {
         }
 
         // Load log entries
-        if let Ok(logger) = FileLogger::new(&self.repo_path, 30) {
+        {
+            let logger = FileLogger::read_only(&self.repo_path, 30);
             if let Ok(lines) = logger.read_entries(100, 0) {
                 self.log_lines = lines.iter().filter_map(|l| LogEntry::parse(l)).collect();
             }
@@ -157,7 +184,39 @@ impl App {
     }
 
     pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
+        if self.preview.is_some() {
+            match code {
+                KeyCode::Esc => {
+                    self.preview = None;
+                    self.preview_scroll = 0;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.preview_scroll = self.preview_scroll.saturating_sub(1)
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.preview_scroll = (self.preview_scroll + 1).min(
+                        self.preview
+                            .as_ref()
+                            .map_or(0, |p| p.entries.len() + p.blockers.len() + 8),
+                    )
+                }
+                KeyCode::Char('r') => self.refresh(),
+                KeyCode::Char('q') => self.quit = true,
+                _ => (),
+            }
+            return;
+        }
         match code {
+            KeyCode::Char('p') => {
+                self.preview = Some(commitbook_engine::inspection::preview(&self.repo_path));
+                self.preview_scroll = 0;
+            }
+            KeyCode::Up | KeyCode::Char('k') if self.active_panel == Panel::Status => {
+                self.status_scroll = self.status_scroll.saturating_sub(1)
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.active_panel == Panel::Status => {
+                self.status_scroll = (self.status_scroll + 1).min(30)
+            }
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
             KeyCode::Tab => self.active_panel = self.active_panel.next(),

@@ -21,6 +21,8 @@ pub struct SettingsUpdate {
     pub auto_push: Option<bool>,
     pub ai_messages: Option<bool>,
     pub enabled: Option<bool>,
+    pub review_ai_resolutions: Option<bool>,
+    pub resolver: Option<String>,
 }
 
 impl SettingsUpdate {
@@ -196,6 +198,19 @@ pub fn update_settings_with_lock(
         }
     }
 
+    if let Some(review) = update.review_ai_resolutions {
+        changed |= new.conflict.review_ai_resolutions != review;
+        new.conflict.review_ai_resolutions = review;
+    }
+    if let Some(resolver) = &update.resolver {
+        anyhow::ensure!(
+            ["manual", "claude", "codex", "copilot", "gemini", "cursor"]
+                .contains(&resolver.as_str()),
+            "Unknown conflict resolver"
+        );
+        changed |= new.conflict.resolver != *resolver;
+        new.conflict.resolver = resolver.clone();
+    }
     let schedule_changed = new.schedule != old.schedule;
     if !changed {
         return Ok(SettingsUpdateOutcome {
