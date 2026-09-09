@@ -1,8 +1,7 @@
 use super::*;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use axum::routing::{get, post};
-use axum::Router;
+use axum::http::Request;
+use commitbook_engine::cron::FakeScheduler;
 use http_body_util::BodyExt;
 use std::process::Command as ProcessCommand;
 use tower::ServiceExt;
@@ -16,30 +15,21 @@ fn git_init(path: &Path) {
 }
 
 fn setup_test_app() -> (tempfile::TempDir, Router) {
+    setup_test_app_with(Arc::new(FakeScheduler::stopped()))
+}
+
+fn setup_test_app_with(scheduler: Arc<FakeScheduler>) -> (tempfile::TempDir, Router) {
     let tmp = tempfile::tempdir().unwrap();
     git_init(tmp.path());
     commitbook_engine::config::local::LocalConfig::init(tmp.path(), "0 * * * *").unwrap();
 
-    let state = Arc::new(AppState {
-        repo_path: tmp.path().to_path_buf(),
-    });
+    let state = Arc::new(AppState::with_scheduler(
+        tmp.path().to_path_buf(),
+        scheduler,
+        PathBuf::from("/opt/commitbook/bin/commitbook"),
+    ));
 
-    let app = Router::new()
-        .route("/", get(dashboard))
-        .route("/logs", get(logs_page))
-        .route("/config", get(config_page))
-        .route("/htmx/status", get(htmx_status))
-        .route("/htmx/providers", get(htmx_providers))
-        .route("/htmx/logs", get(htmx_logs))
-        .route("/api/status", get(api_status))
-        .route("/api/logs", get(api_logs))
-        .route("/api/config", post(api_config))
-        .route("/api/start", post(api_start))
-        .route("/api/stop", post(api_stop))
-        .route("/api/providers", get(api_providers))
-        .with_state(state);
-
-    (tmp, app)
+    (tmp, build_router(state))
 }
 
 async fn get_json<T: serde::de::DeserializeOwned>(app: Router, uri: &str) -> (StatusCode, T) {
@@ -160,14 +150,88 @@ async fn test_api_config_updates_schedule() {
 
 #[tokio::test]
 async fn test_api_config_rejects_invalid_cron() {
-    let (_tmp, app) = setup_test_app();
-    let (_, body) = post_json(
+    let (tmp, app) = setup_test_app();
+    let (status, body) = post_json(
         app,
         "/api/config",
         serde_json::json!({"schedule": "not a cron"}),
     )
     .await;
-    assert!(body.contains("Error"), "got: {}", body);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let action: ActionResponse = serde_json::from_str(&body).unwrap();
+    assert!(!action.success);
+    assert!(action.message.contains("Error"), "got: {}", body);
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
+    assert_eq!(config.schedule, "0 * * * *");
+}
+
+#[tokio::test]
+async fn config_update_reinstalls_running_scheduler() {
+    let fake = Arc::new(FakeScheduler::running("0 * * * *"));
+    let (tmp, app) = setup_test_app_with(Arc::clone(&fake));
+    let (status, body) = post_json(
+        app,
+        "/api/config",
+        serde_json::json!({"schedule": "*/15 * * * *"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Scheduler reinstalled"), "got: {body}");
+    assert_eq!(fake.installed_schedule().as_deref(), Some("*/15 * * * *"));
+    assert!(fake.calls().iter().any(|call| matches!(
+        call,
+        commitbook_engine::cron::fake::FakeCall::Install { binary, .. }
+            if binary == &PathBuf::from("/opt/commitbook/bin/commitbook")
+    )));
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
+    assert_eq!(config.schedule, "*/15 * * * *");
+}
+
+#[tokio::test]
+async fn config_update_reports_scheduler_failure_and_rolls_back() {
+    let fake = Arc::new(FakeScheduler::running("0 * * * *"));
+    fake.fail_next_install("launchctl load failed");
+    let (tmp, app) = setup_test_app_with(Arc::clone(&fake));
+    let (status, body) = post_json(
+        app,
+        "/api/config",
+        serde_json::json!({"schedule": "*/15 * * * *"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(body.contains("launchctl load failed"), "got: {body}");
+    assert!(body.contains("were restored"), "got: {body}");
+    assert_eq!(fake.installed_schedule().as_deref(), Some("0 * * * *"));
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
+    assert_eq!(config.schedule, "0 * * * *");
+}
+
+#[tokio::test]
+async fn config_update_rejected_while_repository_locked() {
+    let (tmp, app) = setup_test_app();
+    let _held = commitbook_engine::state::RepoLock::acquire(tmp.path()).unwrap();
+    let (status, body) = post_json(
+        app.clone(),
+        "/api/config",
+        serde_json::json!({"auto_push": false}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body.contains("already running"), "got: {body}");
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
+    assert!(config.git.auto_push);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/start")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
 }
 
 #[tokio::test]
@@ -222,12 +286,28 @@ fn test_escape_html_special_chars() {
 #[tokio::test]
 async fn test_api_config_error_is_escaped() {
     let (_tmp, app) = setup_test_app();
-    let (_, body) = post_json(
-        app,
-        "/api/config",
-        serde_json::json!({"schedule": "<script>alert(1)</script>"}),
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/config")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("schedule=%3Cscript%3Ealert(1)%3C%2Fscript%3E"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
     )
-    .await;
+    .unwrap();
     assert!(
         body.contains("&lt;script&gt;"),
         "error should be HTML-escaped, got: {}",

@@ -21,32 +21,23 @@ fn rendered_text(buffer: &Buffer, width: u16, height: u16) -> String {
 
 #[test]
 fn draw_renders_panels_content_and_footer() {
-    let app = App {
-        repo_path: PathBuf::from("/tmp/commitbook-tui-render-test"),
-        active_panel: Panel::Status,
-        running: true,
-        schedule: "0 * * * *".into(),
-        schedule_desc: "hourly".into(),
-        auto_push: true,
-        branch: "main".into(),
-        last_commit: Some("2026-08-09 12:00 UTC".into()),
-        log_lines: vec![LogEntry {
-            timestamp: "12:00:00".into(),
-            level: "INFO".into(),
-            message: "Sync complete".into(),
-        }],
-        log_scroll: 0,
-        providers: vec![("codex-cli".into(), "Codex".into(), true)],
-        changes: ChangesSummary {
-            new_files: vec!["new.md".into()],
-            modified_files: vec!["notes.md".into()],
-            deleted_files: Vec::new(),
-        },
-        current_branch: "feature/security".into(),
-        enabled: true,
-        log_level: "info".into(),
-        quit: false,
+    let mut app = App::blank(&PathBuf::from("/tmp/commitbook-tui-render-test"));
+    app.running = true;
+    app.schedule = "0 * * * *".into();
+    app.schedule_desc = "hourly".into();
+    app.last_commit = Some("2026-08-09 12:00 UTC".into());
+    app.log_lines = vec![LogEntry {
+        timestamp: "12:00:00".into(),
+        level: "INFO".into(),
+        message: "Sync complete".into(),
+    }];
+    app.providers = vec![("codex-cli".into(), "Codex".into(), true)];
+    app.changes = ChangesSummary {
+        new_files: vec!["new.md".into()],
+        modified_files: vec!["notes.md".into()],
+        deleted_files: Vec::new(),
     };
+    app.current_branch = "feature/security".into();
 
     let width = 120;
     let height = 30;

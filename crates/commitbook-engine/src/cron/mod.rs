@@ -1,3 +1,4 @@
+pub mod fake;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[allow(dead_code)]
 pub mod linux;
@@ -7,6 +8,37 @@ pub mod macos;
 
 use anyhow::Result;
 use std::path::Path;
+
+pub use fake::FakeScheduler;
+
+/// Abstraction over the platform scheduler (launchd or crontab) so settings
+/// operations and UI code can be exercised without touching the real one.
+pub trait SchedulerAdapter: Send + Sync {
+    /// Install or replace the job for `repo_root`. Returns the scheduler id.
+    fn install(&self, repo_root: &Path, schedule: &str, binary: &Path) -> Result<String>;
+    /// Remove the job for `repo_root`, if any.
+    fn uninstall(&self, repo_root: &Path, scheduler_id: Option<&str>) -> Result<()>;
+    /// Whether a job is currently loaded for `repo_root`.
+    fn is_loaded(&self, repo_root: &Path) -> bool;
+}
+
+/// The real platform scheduler, delegating to the free functions below.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SystemScheduler;
+
+impl SchedulerAdapter for SystemScheduler {
+    fn install(&self, repo_root: &Path, schedule: &str, binary: &Path) -> Result<String> {
+        install(repo_root, schedule, binary)
+    }
+
+    fn uninstall(&self, repo_root: &Path, scheduler_id: Option<&str>) -> Result<()> {
+        uninstall(repo_root, scheduler_id)
+    }
+
+    fn is_loaded(&self, repo_root: &Path) -> bool {
+        is_loaded(repo_root)
+    }
+}
 
 /// Cron schedule presets mapped to 5-field cron expressions.
 pub fn resolve_schedule(input: &str) -> String {

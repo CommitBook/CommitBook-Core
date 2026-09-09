@@ -471,3 +471,93 @@ fn test_commit_setting_missing_field_and_explicit_values_round_trip() {
         );
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn save_replaces_atomically_and_preserves_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    init_repo_with_remote(tmp.path(), "origin");
+    let mut config = LocalConfig::init(tmp.path(), "hourly").unwrap();
+    let path = LocalConfig::config_path(tmp.path());
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+    config.schedule = "*/5 * * * *".to_string();
+    config.save(tmp.path()).unwrap();
+
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o644, "existing permissions must be preserved");
+    let reloaded = LocalConfig::load(tmp.path()).unwrap();
+    assert_eq!(reloaded.schedule, "*/5 * * * *");
+    let leftovers: Vec<_> = fs::read_dir(LocalConfig::commitbook_dir(tmp.path()))
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "no temporary files may remain");
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_write_failure_leaves_previous_file_intact() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "original = true\n").unwrap();
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o500)).unwrap();
+
+    let result = write_regular_text_atomic(&path, "replacement = true\n");
+
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    if nix_is_root() {
+        // Root ignores directory permission bits; the write succeeds there.
+        return;
+    }
+    assert!(result.is_err());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "original = true\n");
+    let leftovers: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "failed writes must not leave temp files"
+    );
+}
+
+#[cfg(unix)]
+fn nix_is_root() -> bool {
+    // SAFETY: geteuid has no preconditions and only reads process state.
+    unsafe { libc::geteuid() == 0 }
+}
+
+#[test]
+fn atomic_write_refuses_directory_destination() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::create_dir(&path).unwrap();
+
+    let error = write_regular_text_atomic(&path, "x = 1\n").unwrap_err();
+    assert!(error.to_string().contains("non-regular"), "{error}");
+    assert!(path.is_dir(), "destination directory must be untouched");
+}
+
+#[test]
+fn save_sweeps_stale_temp_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_repo_with_remote(tmp.path(), "origin");
+    let config = LocalConfig::init(tmp.path(), "hourly").unwrap();
+    let cb_dir = LocalConfig::commitbook_dir(tmp.path());
+    let stale = cb_dir.join(".config.toml.abc123.tmp");
+    fs::write(&stale, "partial").unwrap();
+    let unrelated = cb_dir.join("notes.tmp");
+    fs::write(&unrelated, "keep").unwrap();
+
+    config.save(tmp.path()).unwrap();
+
+    assert!(!stale.exists(), "stale config temp file must be swept");
+    assert!(unrelated.exists(), "unrelated files must be left alone");
+}

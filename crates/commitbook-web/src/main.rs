@@ -2,8 +2,6 @@ mod models;
 mod routes;
 
 use anyhow::{bail, Context, Result};
-use axum::routing::{get, post};
-use axum::Router;
 use clap::Parser;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,25 +38,8 @@ async fn main() -> Result<()> {
         );
     }
 
-    let state = Arc::new(AppState { repo_path });
-
-    let app = Router::new()
-        // HTML pages
-        .route("/", get(routes::dashboard))
-        .route("/logs", get(routes::logs_page))
-        .route("/config", get(routes::config_page))
-        // HTMX partials
-        .route("/htmx/status", get(routes::htmx_status))
-        .route("/htmx/providers", get(routes::htmx_providers))
-        .route("/htmx/logs", get(routes::htmx_logs))
-        // REST API
-        .route("/api/status", get(routes::api_status))
-        .route("/api/logs", get(routes::api_logs))
-        .route("/api/config", post(routes::api_config))
-        .route("/api/start", post(routes::api_start))
-        .route("/api/stop", post(routes::api_stop))
-        .route("/api/providers", get(routes::api_providers))
-        .with_state(state);
+    let state = Arc::new(AppState::new(repo_path));
+    let app = routes::build_router(state);
 
     let addr = format!("127.0.0.1:{}", port);
     println!("CommitBook Web: http://{}", addr);

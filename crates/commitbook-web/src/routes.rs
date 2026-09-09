@@ -1,7 +1,10 @@
 use axum::extract::{FromRequest, Query, Request, State};
-use axum::response::{Html, IntoResponse};
+use axum::http::StatusCode;
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{get, post};
 use axum::Form;
 use axum::Json;
+use axum::Router;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -9,14 +12,90 @@ use askama::Template;
 
 use commitbook_engine::ai::ProviderChain;
 use commitbook_engine::config::local::LocalConfig;
-use commitbook_engine::cron;
+use commitbook_engine::cron::{self, SchedulerAdapter, SystemScheduler};
 use commitbook_engine::git::GitRepo;
 use commitbook_engine::logger::FileLogger;
+use commitbook_engine::settings::{self, SchedulerContext, SettingsUpdate, SettingsUpdateError};
+use commitbook_engine::state::RepoLockContended;
 
 use crate::models::*;
 
 pub struct AppState {
     pub repo_path: PathBuf,
+    /// Scheduler used by start/stop and settings updates. Tests inject a fake.
+    pub scheduler: Arc<dyn SchedulerAdapter>,
+    /// Binary the scheduler job should run.
+    pub binary: PathBuf,
+}
+
+impl AppState {
+    pub fn new(repo_path: PathBuf) -> Self {
+        Self::with_scheduler(
+            repo_path,
+            Arc::new(SystemScheduler),
+            settings::current_binary(),
+        )
+    }
+
+    pub fn with_scheduler(
+        repo_path: PathBuf,
+        scheduler: Arc<dyn SchedulerAdapter>,
+        binary: PathBuf,
+    ) -> Self {
+        Self {
+            repo_path,
+            scheduler,
+            binary,
+        }
+    }
+}
+
+/// Build the full router. `main` and the tests share this so routes cannot
+/// drift between the binary and its test harness.
+pub fn build_router(state: Arc<AppState>) -> Router {
+    Router::new()
+        // HTML pages
+        .route("/", get(dashboard))
+        .route("/logs", get(logs_page))
+        .route("/config", get(config_page))
+        // HTMX partials
+        .route("/htmx/status", get(htmx_status))
+        .route("/htmx/providers", get(htmx_providers))
+        .route("/htmx/logs", get(htmx_logs))
+        // REST API
+        .route("/api/status", get(api_status))
+        .route("/api/logs", get(api_logs))
+        .route("/api/config", post(api_config))
+        .route("/api/start", post(api_start))
+        .route("/api/stop", post(api_stop))
+        .route("/api/providers", get(api_providers))
+        .with_state(state)
+}
+
+/// Run repository, lock, or scheduler work off the async executor.
+async fn blocking<T, F>(f: F) -> Result<T, StatusCode>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// HTTP status for an engine error surfaced by a mutation endpoint.
+fn mutation_error_status(error: &anyhow::Error) -> StatusCode {
+    if error.downcast_ref::<RepoLockContended>().is_some() {
+        StatusCode::CONFLICT
+    } else if error.downcast_ref::<SettingsUpdateError>().is_some() {
+        StatusCode::INTERNAL_SERVER_ERROR
+    } else {
+        StatusCode::BAD_REQUEST
+    }
+}
+
+fn action_json(status: StatusCode, success: bool, message: String) -> Response {
+    (status, Json(ActionResponse { success, message })).into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -304,10 +383,7 @@ pub async fn api_logs(
     })
 }
 
-pub async fn api_config(
-    State(state): State<Arc<AppState>>,
-    request: Request,
-) -> axum::response::Response {
+pub async fn api_config(State(state): State<Arc<AppState>>, request: Request) -> Response {
     let is_form = request
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
@@ -329,75 +405,105 @@ pub async fn api_config(
             Err(error) => return error.into_response(),
         }
     };
-    let result = (|| -> anyhow::Result<()> {
-        let mut config = LocalConfig::load(&state.repo_path)?;
+    let settings_update = SettingsUpdate {
+        schedule: update.schedule,
+        branch: update.branch,
+        auto_push: update.auto_push,
+        ai_messages: update.ai_messages,
+        enabled: None,
+    };
 
-        if let Some(schedule) = &update.schedule {
-            cron::validate_platform_schedule(schedule)?;
-            config.schedule = schedule.clone();
-        }
-        if let Some(ai_messages) = update.ai_messages {
-            config.commit.ai_messages = ai_messages;
-        }
-        if let Some(auto_push) = update.auto_push {
-            config.git.auto_push = auto_push;
-        }
-        if let Some(branch) = &update.branch {
-            config.git.branch = branch.clone();
-        }
+    let repo_path = state.repo_path.clone();
+    let scheduler = Arc::clone(&state.scheduler);
+    let binary = state.binary.clone();
+    let result = blocking(move || {
+        let context = SchedulerContext::new(scheduler.as_ref(), binary);
+        settings::update_settings(&repo_path, &settings_update, &context)
+    })
+    .await;
 
-        config.save(&state.repo_path)?;
-        Ok(())
-    })();
+    let (status, success, message) = match result {
+        Ok(Ok(outcome)) => {
+            let mut message = "Configuration saved.".to_string();
+            if outcome.scheduler_reinstalled {
+                message.push_str(" Scheduler reinstalled with the new schedule.");
+            }
+            (StatusCode::OK, true, message)
+        }
+        Ok(Err(error)) => (
+            mutation_error_status(&error),
+            false,
+            format!("Error: {error}"),
+        ),
+        Err(status) => (
+            status,
+            false,
+            "Error: configuration task failed".to_string(),
+        ),
+    };
 
-    match result {
-        Ok(()) => {
-            Html(r#"<div class="flash flash-success">Configuration saved.</div>"#.to_string())
-        }
-        Err(e) => {
-            let msg = escape_html(&e.to_string());
-            Html(format!(
-                r#"<div class="flash flash-error">Error: {}</div>"#,
-                msg
-            ))
-        }
+    if is_form {
+        // htmx swaps the flash into the page; it ignores non-2xx responses, so
+        // form submissions always answer 200 and carry the outcome in the body.
+        let class = if success {
+            "flash-success"
+        } else {
+            "flash-error"
+        };
+        return Html(format!(
+            r#"<div class="flash {}">{}</div>"#,
+            class,
+            escape_html(&message)
+        ))
+        .into_response();
     }
-    .into_response()
+    action_json(status, success, message)
 }
 
-pub async fn api_start(State(state): State<Arc<AppState>>) -> Json<ActionResponse> {
-    let result = (|| -> anyhow::Result<String> {
-        let config = LocalConfig::load(&state.repo_path)?;
-        let commitbook_bin = which::which("commitbook").unwrap_or_else(|_| {
-            let bin = std::env::current_exe().expect("cannot determine current exe");
-            bin.parent().map(|p| p.join("commitbook")).unwrap_or(bin)
-        });
-        cron::install(&state.repo_path, &config.schedule, &commitbook_bin)
-    })();
+async fn scheduler_action<F>(state: &AppState, action: F) -> Result<anyhow::Result<()>, StatusCode>
+where
+    F: FnOnce(&Path, &SchedulerContext<'_>) -> anyhow::Result<()> + Send + 'static,
+{
+    let repo_path = state.repo_path.clone();
+    let scheduler = Arc::clone(&state.scheduler);
+    let binary = state.binary.clone();
+    blocking(move || {
+        let context = SchedulerContext::new(scheduler.as_ref(), binary);
+        action(&repo_path, &context)
+    })
+    .await
+}
 
+fn scheduler_action_response(
+    result: Result<anyhow::Result<()>, StatusCode>,
+    success_message: &str,
+    failure_prefix: &str,
+) -> Response {
     match result {
-        Ok(_) => Json(ActionResponse {
-            success: true,
-            message: "Scheduler started".into(),
-        }),
-        Err(e) => Json(ActionResponse {
-            success: false,
-            message: format!("Failed to start: {}", e),
-        }),
+        Ok(Ok(())) => action_json(StatusCode::OK, true, success_message.to_string()),
+        Ok(Err(error)) => {
+            let status = if error.downcast_ref::<RepoLockContended>().is_some() {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            action_json(status, false, format!("{failure_prefix}: {error:#}"))
+        }
+        Err(status) => action_json(status, false, format!("{failure_prefix}: task failed")),
     }
 }
 
-pub async fn api_stop(State(state): State<Arc<AppState>>) -> Json<ActionResponse> {
-    match cron::uninstall(&state.repo_path, None) {
-        Ok(()) => Json(ActionResponse {
-            success: true,
-            message: "Scheduler stopped".into(),
-        }),
-        Err(e) => Json(ActionResponse {
-            success: false,
-            message: format!("Failed to stop: {}", e),
-        }),
-    }
+pub async fn api_start(State(state): State<Arc<AppState>>) -> Response {
+    let result = scheduler_action(&state, |repo_path, context| {
+        settings::start_scheduler(repo_path, context).map(|_| ())
+    })
+    .await;
+    scheduler_action_response(result, "Scheduler started", "Failed to start")
+}
+
+pub async fn api_stop(State(state): State<Arc<AppState>>) -> Response {
+    let result = scheduler_action(&state, settings::stop_scheduler).await;
+    scheduler_action_response(result, "Scheduler stopped", "Failed to stop")
 }
 
 pub async fn api_providers(State(state): State<Arc<AppState>>) -> Json<Vec<ProviderInfo>> {

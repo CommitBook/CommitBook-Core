@@ -5,6 +5,7 @@ pub mod cron;
 pub mod git;
 pub mod logger;
 pub mod platform;
+pub mod settings;
 pub mod state;
 pub mod sync;
 pub mod utils;

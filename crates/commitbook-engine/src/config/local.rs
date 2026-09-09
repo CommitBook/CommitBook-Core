@@ -333,7 +333,7 @@ impl LocalConfig {
         let content =
             toml::to_string_pretty(self).with_context(|| "Failed to serialize local config")?;
 
-        write_regular_text(&path, &content)
+        write_regular_text_atomic(&path, &content)
             .with_context(|| format!("Failed to write local config: {}", path.display()))?;
 
         Ok(())
@@ -459,6 +459,79 @@ fn write_regular_text(path: &Path, content: &str) -> Result<()> {
     file.sync_all()
         .with_context(|| format!("Failed to sync {}", path.display()))?;
     Ok(())
+}
+
+/// Replace `path` atomically: write a sibling temporary file, flush and sync
+/// it, carry over the existing permissions, then rename it over the
+/// destination. An interrupted write leaves the previous file intact, and a
+/// symlink or other non-regular destination is never followed or replaced.
+fn write_regular_text_atomic(path: &Path, content: &str) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Path has no parent directory: {}", path.display()))?;
+    require_real_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow::anyhow!("Path has no file name: {}", path.display()))?;
+
+    let existing_permissions = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            Some(metadata.permissions())
+        }
+        Ok(_) => bail!("Refusing to replace non-regular path: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| format!("Failed to inspect {}", path.display()))
+        }
+    };
+
+    // Leftovers from an interrupted earlier write live next to the committed
+    // config, so sweep them before creating a fresh one.
+    let temp_prefix = format!(".{file_name}.");
+    let temp_suffix = ".tmp";
+    sweep_stale_temp_files(parent, &temp_prefix, temp_suffix);
+
+    let mut temp = tempfile::Builder::new()
+        .prefix(&temp_prefix)
+        .suffix(temp_suffix)
+        .tempfile_in(parent)
+        .with_context(|| format!("Failed to create temporary file in {}", parent.display()))?;
+    temp.write_all(content.as_bytes())
+        .with_context(|| format!("Failed to write {}", temp.path().display()))?;
+    temp.as_file()
+        .sync_all()
+        .with_context(|| format!("Failed to sync {}", temp.path().display()))?;
+    if let Some(permissions) = existing_permissions {
+        temp.as_file()
+            .set_permissions(permissions)
+            .with_context(|| format!("Failed to preserve permissions of {}", path.display()))?;
+    }
+    // `persist` is a rename, so the destination is replaced as a directory
+    // entry rather than written through. On failure the temporary file is
+    // removed when the returned error drops it.
+    temp.persist(path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("Failed to replace {}", path.display()))?;
+    Ok(())
+}
+
+fn sweep_stale_temp_files(parent: &Path, prefix: &str, suffix: &str) {
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let looks_like_temp = name.len() > prefix.len() + suffix.len()
+            && name.starts_with(prefix)
+            && name.ends_with(suffix);
+        if looks_like_temp && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn infer_single_remote(repo_path: &Path) -> Result<String> {

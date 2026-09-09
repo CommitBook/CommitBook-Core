@@ -3,25 +3,24 @@ use colored::Colorize;
 use std::path::Path;
 
 use commitbook_engine::config::LocalConfig;
-use commitbook_engine::cron;
+use commitbook_engine::cron::{self, SystemScheduler};
 use commitbook_engine::git::GitRepo;
+use commitbook_engine::settings::{self, SchedulerContext};
 
 pub fn run(_cb_dir: &Path, repo_root: &Path) -> Result<()> {
     if !GitRepo::is_repo(repo_root) {
         bail!("Not a git repository: {}", repo_root.display());
     }
 
-    let config = LocalConfig::load(repo_root)?;
-
-    // Get the binary path.
-    let binary = std::env::current_exe().unwrap_or_else(|_| "commitbook".into());
-
-    // Install the scheduler.
-    let schedule = &config.schedule;
-    cron::install(repo_root, schedule, &binary)?;
+    let context = SchedulerContext::new(&SystemScheduler, settings::current_binary());
+    settings::start_scheduler(repo_root, &context)?;
+    let config = LocalConfig::load_read_only(repo_root)?;
 
     println!("  {} Scheduler started.", "OK".green().bold());
-    println!("  Schedule: {}", cron::describe_schedule(schedule).cyan());
+    println!(
+        "  Schedule: {}",
+        cron::describe_schedule(&config.schedule).cyan()
+    );
     println!("  Command: {}", "commitbook run".dimmed());
 
     Ok(())

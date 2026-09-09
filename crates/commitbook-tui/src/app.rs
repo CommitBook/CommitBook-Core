@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use commitbook_engine::config::local::LocalConfig;
-use commitbook_engine::cron;
+use commitbook_engine::cron::{self, SystemScheduler};
 use commitbook_engine::git::{ChangesSummary, GitRepo};
 use commitbook_engine::logger::FileLogger;
+use commitbook_engine::settings::{self, SchedulerContext};
 
 const TICK_RATE: Duration = Duration::from_secs(5);
 const POLL_RATE: Duration = Duration::from_millis(250);
@@ -57,6 +58,8 @@ pub struct App {
     pub current_branch: String,
     pub enabled: bool,
     pub log_level: String,
+    /// Outcome of the most recent start/stop action, cleared on success.
+    pub action_error: Option<String>,
     pub quit: bool,
 }
 
@@ -80,7 +83,14 @@ impl LogEntry {
 
 impl App {
     pub fn new(repo_path: &Path) -> Self {
-        let mut app = Self {
+        let mut app = Self::blank(repo_path);
+        app.refresh();
+        app
+    }
+
+    /// An app with empty state and no repository inspection performed.
+    pub fn blank(repo_path: &Path) -> Self {
+        Self {
             repo_path: repo_path.to_path_buf(),
             active_panel: Panel::Status,
             running: false,
@@ -96,10 +106,9 @@ impl App {
             current_branch: String::new(),
             enabled: true,
             log_level: "info".to_string(),
+            action_error: None,
             quit: false,
-        };
-        app.refresh();
-        app
+        }
     }
 
     pub fn refresh(&mut self) {
@@ -171,17 +180,13 @@ impl App {
     }
 
     fn toggle_scheduler(&mut self) {
-        if self.running {
-            let _ = cron::uninstall(&self.repo_path, None);
+        let context = SchedulerContext::new(&SystemScheduler, settings::current_binary());
+        let result = if self.running {
+            settings::stop_scheduler(&self.repo_path, &context)
         } else {
-            let commitbook_bin = which::which("commitbook").or_else(|_| {
-                std::env::current_exe()
-                    .map(|bin| bin.parent().map(|p| p.join("commitbook")).unwrap_or(bin))
-            });
-            if let Ok(bin) = commitbook_bin {
-                let _ = cron::install(&self.repo_path, &self.schedule, &bin);
-            }
-        }
+            settings::start_scheduler(&self.repo_path, &context).map(|_| ())
+        };
+        self.action_error = result.err().map(|error| format!("{error:#}"));
         self.refresh();
     }
 }

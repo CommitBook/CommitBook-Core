@@ -79,7 +79,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 
     let last_commit_text = app.last_commit.as_deref().unwrap_or("never");
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(vec![Span::raw("  State:    "), state_indicator]),
         Line::from(format!("  Enabled:  {}", enabled_text)),
         Line::from(format!("  Schedule: {}", app.schedule_desc)),
@@ -88,6 +88,13 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Line::raw(""),
         Line::from(format!("  Changes:  {}", changes_text)),
     ];
+    if let Some(error) = &app.action_error {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            format!("  Action failed: {error}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
 
     let paragraph = Paragraph::new(lines).block(block);
     f.render_widget(paragraph, area);
