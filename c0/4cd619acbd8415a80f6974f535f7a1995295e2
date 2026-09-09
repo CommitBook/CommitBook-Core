@@ -1,0 +1,68 @@
+crates/commitbook-web/src/routes_tests.rs
+  s_8711105e60417a::t_0d0a3a8c156e4b 153-154,160-234,289-308,310
+  s_8711105e60417a::t_486666f1ab9945 3-4,18-21,26-30,32
+crates/commitbook-tui/src/ui.rs
+  s_8711105e60417a::t_e0a5a532d0cb27 82,91-97
+crates/commitbook-web/templates/base.html
+  s_8711105e60417a::t_44a81df532f67f 6
+crates/commitbook-engine/src/config/local.rs
+  s_8711105e60417a::t_2a98726d246fdb 336,464-535
+  s_8711105e60417a::t_526a32e08c8fa6 536
+crates/commitbook-web/src/routes.rs
+  s_8711105e60417a::t_44a81df532f67f 438-442,448-452
+  s_8711105e60417a::t_486666f1ab9945 2-4,7,15,18-19,25-98,386,408-414,416-431,433-437,443,445-447,453-458,460,463-475,477-481,483-492,496-506
+crates/commitbook-engine/src/cron/fake.rs
+  s_8711105e60417a::t_44a81df532f67f 55-57
+  s_8711105e60417a::t_fdf20ed22857b1 1-54,58-122
+crates/commitbook-tui/src/app.rs
+  s_8711105e60417a::t_e0a5a532d0cb27 9,12,61-62,86-93,109,111,183-185,187-189
+crates/commitbook-engine/src/config/local_tests.rs
+  s_8711105e60417a::t_2a98726d246fdb 474-524,529-563
+  s_8711105e60417a::t_44a81df532f67f 525-528
+crates/commitbook-tui/src/app_tests.rs
+  s_8711105e60417a::t_e0a5a532d0cb27 36,45,57-75
+crates/commitbook-tui/src/ui_tests.rs
+  s_8711105e60417a::t_e0a5a532d0cb27 24-38,40
+crates/commitbook-web/src/main.rs
+  s_8711105e60417a::t_486666f1ab9945 41-42
+crates/commitbook-engine/src/cron/mod.rs
+  s_8711105e60417a::t_fdf20ed22857b1 12-41
+  s_8711105e60417a::t_44a81df532f67f 1
+  s_8711105e60417a::t_23be4ce5420999 42
+crates/commitbook-cli/src/commands/start.rs
+  s_8711105e60417a::t_0bbf4fd5741420 6,8,15-17,20-23
+crates/commitbook-engine/src/settings/settings_tests.rs
+  s_8711105e60417a::t_44a81df532f67f 30-33,42-43,61-66,78-81,129-132,160-163
+  s_8711105e60417a::t_ed1004d162cc5d 1-29,34-41,44-60,67-77,82-128,133-159,164-185
+crates/commitbook-cli/src/commands/schedule_tests.rs
+  s_8711105e60417a::t_486666f1ab9945 8-9,16-23
+  s_8711105e60417a::t_0bbf4fd5741420 1-7,24-61
+  s_8711105e60417a::t_44a81df532f67f 10-15
+crates/commitbook-engine/src/settings/mod.rs
+  s_8711105e60417a::t_ed1004d162cc5d 1-279
+crates/commitbook-engine/src/cron/fake_tests.rs
+  s_8711105e60417a::t_fdf20ed22857b1 1-24,28-30,34-40
+  s_8711105e60417a::t_44a81df532f67f 25-27,31-33
+crates/commitbook-cli/src/commands/stop.rs
+  s_8711105e60417a::t_0bbf4fd5741420 5-6,9-10
+crates/commitbook-cli/src/commands/schedule.rs
+  s_8711105e60417a::t_0bbf4fd5741420 5-6,9-10,15,17-19,23-41
+crates/commitbook-engine/src/lib.rs
+  s_8711105e60417a::t_ed1004d162cc5d 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "c04cd619acbd8415a80f6974f535f7a1995295e2",
+  "prompts": {},
+  "sessions": {
+    "s_8711105e60417a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4abb5f21-2d34-48a2-afa8-b52e96444d86",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
