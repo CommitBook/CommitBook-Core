@@ -154,6 +154,14 @@ summaries. Binary, symlink, and gitlink conflicts always remain manual.
 
 Apps' existing `ConflictListView` / `ConflictDetailView` activate when `Manual` mode returns conflict entries.
 
+## Optional review of AI resolutions
+
+`[conflict] review_ai_resolutions = true` changes what happens after the resolver returns. Instead of applying the resolution, the engine validates it (no leftover markers, not a binary or special file) and stores it in `.CommitBook/local/conflict-proposals.toml` together with the merge identity (HEAD and merge-parent OIDs) and each side's OID and mode. The index and working tree stay conflicted, the cycle ends as "awaiting review", and nothing is pushed.
+
+Later cycles reuse pending proposals and never regenerate rejected ones; an explicit regenerate action retries the resolver. Proposals for a different merge are dropped. The web editor shows the proposal next to the original sides and offers accept, edit and accept, reject, or manual resolution. Each displayed conflict carries a revision token over the merge identity, conflict sides, and current working-tree content; mutations revalidate it under the repository lock and reject stale requests. Native sync honors review mode by reporting pending reviews as manual conflicts through the existing result fields.
+
+Resolving the final conflict creates the merge commit locally. Publication is a separate step (`Sync now` or the scheduler) that follows `git.auto_push`.
+
 ## When to revisit
 
 Reasons to add a second algorithm (rebase) as opt-in:
@@ -216,5 +224,7 @@ Notebooks already synced under v2-shellout-rebase have linear histories. After t
 
 - `commitbook-engine/src/git/operations.rs`: owns libgit2 fetch, safe fast-forward, merge, and push primitives.
 - `commitbook-engine/src/git/conflicts.rs`: reads structured ancestor/local/remote index entries and applies explicit resolutions.
-- `commitbook-engine/src/sync/scheduler.rs`: the `SyncMode` parameter threads from FFI calls down to the merge handler.
+- `commitbook-engine/src/sync/scheduler.rs`: the `SyncMode` parameter threads from FFI calls down to the merge handler; records the failing stage and timestamps in `state.toml`.
+- `commitbook-engine/src/review.rs`: proposal storage, revision tokens, and accept/reject/regenerate actions.
+- `commitbook-engine/src/inspection.rs`: read-only repository status and commit preview shared by CLI, web, and TUI.
 - Both desktop and mobile share the same code path; no `#[cfg(target_os = ...)]` guards on this module.

@@ -34,12 +34,18 @@ cd ~/my-notes
 # Initialize CommitBook (once per repo)
 commitbook init
 
+# See what the next sync would commit (all non-ignored files, not only Markdown)
+commitbook preview
+
 # Run your first sync
 commitbook sync
 
 # Start scheduled syncs
 commitbook schedule hourly
 commitbook start
+
+# Check local commit, remote, and scheduler state
+commitbook status
 ```
 
 ## Documentation
