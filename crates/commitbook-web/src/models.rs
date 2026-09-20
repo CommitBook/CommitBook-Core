@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StatusResponse {
+    #[serde(default)]
+    pub repository: commitbook_engine::inspection::RepositoryStatus,
     pub running: bool,
     pub enabled: bool,
     pub schedule: String,
@@ -10,7 +12,7 @@ pub struct StatusResponse {
     pub current_branch: String,
     pub auto_push: bool,
     pub last_commit: Option<String>,
-    pub changes_total: usize,
+    pub changes_total: Option<usize>,
     pub changes_summary: String,
 }
 
@@ -40,6 +42,9 @@ pub struct LogsQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigUpdate {
+    pub review_ai_resolutions: Option<bool>,
+    pub resolver: Option<String>,
+    pub ai_messages: Option<bool>,
     pub schedule: Option<String>,
     pub auto_push: Option<bool>,
     pub branch: Option<String>,

@@ -9,6 +9,7 @@ use git2::{Config, Cred, CredentialType};
 pub trait CredentialProvider: Send + Sync {
     fn provide(
         &self,
+        config: &Config,
         url: &str,
         username_from_url: Option<&str>,
         allowed: CredentialType,
@@ -23,12 +24,12 @@ pub struct SystemCredentials;
 impl CredentialProvider for SystemCredentials {
     fn provide(
         &self,
+        config: &Config,
         url: &str,
         username_from_url: Option<&str>,
         allowed: CredentialType,
     ) -> Result<Cred> {
-        let config = Config::open_default()?;
-        let cred = Cred::credential_helper(&config, url, username_from_url).or_else(|_| {
+        let cred = Cred::credential_helper(config, url, username_from_url).or_else(|_| {
             if allowed.contains(CredentialType::SSH_KEY) {
                 Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
             } else if allowed.contains(CredentialType::DEFAULT) {
@@ -68,6 +69,7 @@ impl TokenCredentials {
 impl CredentialProvider for TokenCredentials {
     fn provide(
         &self,
+        _config: &Config,
         _url: &str,
         _username_from_url: Option<&str>,
         _allowed: CredentialType,
@@ -75,3 +77,7 @@ impl CredentialProvider for TokenCredentials {
         Ok(Cred::userpass_plaintext(&self.username, &self.token)?)
     }
 }
+
+#[cfg(test)]
+#[path = "credentials_tests.rs"]
+mod tests;

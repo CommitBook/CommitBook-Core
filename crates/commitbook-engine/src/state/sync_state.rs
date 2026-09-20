@@ -2,6 +2,13 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingInitPush {
+    pub commit_oid: String,
+    pub remote: String,
+    pub branch: String,
+}
+
 /// Sync state stored in `.CommitBook/local/state.toml`.
 ///
 /// Persistent across runs. `remote_head` from older versions of CommitBook
@@ -11,9 +18,19 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SyncState {
     #[serde(default)]
+    pub last_attempt_at: Option<String>,
+    #[serde(default)]
+    pub last_fetch_at: Option<String>,
+    #[serde(default)]
+    pub last_push_at: Option<String>,
+    #[serde(default)]
+    pub last_error_stage: Option<String>,
+    #[serde(default)]
     pub last_sync_at: Option<String>,
     #[serde(default)]
     pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_init_push: Option<PendingInitPush>,
 }
 
 impl SyncState {
@@ -33,8 +50,13 @@ impl SyncState {
         let path = local.join("state.toml");
         let content =
             toml::to_string_pretty(self).with_context(|| "Failed to serialize state.toml")?;
-        std::fs::write(&path, content)
-            .with_context(|| format!("Failed to write {}", path.display()))?;
+        use std::io::Write;
+        let mut temporary = tempfile::NamedTempFile::new_in(&local)?;
+        temporary.write_all(content.as_bytes())?;
+        temporary.as_file().sync_all()?;
+        temporary
+            .persist(&path)
+            .with_context(|| format!("Failed to atomically write {}", path.display()))?;
         Ok(())
     }
 }

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use git2::{Direction, Repository};
 use std::path::Path;
 
@@ -22,16 +22,27 @@ pub fn get_remote_url(repo_path: &Path, remote: &str) -> Result<String> {
     let r = repo
         .find_remote(remote)
         .with_context(|| format!("Remote '{}' not found", remote))?;
-    r.url()
-        .map(|s| s.to_string())
-        .with_context(|| format!("Remote '{}' has no URL", remote))
+    let url = r
+        .url()
+        .with_context(|| format!("Remote '{}' URL is not valid UTF-8", remote))?;
+    if url.is_empty() {
+        bail!("Remote '{}' has no URL", remote);
+    }
+    Ok(url.to_string())
 }
 
 /// List the names of all configured remotes in the repo.
 pub fn list_remote_names(repo_path: &Path) -> Result<Vec<String>> {
     let repo = Repository::open(repo_path).context("Failed to open repository")?;
     let remotes = repo.remotes().context("Failed to read git remotes")?;
-    Ok(remotes.iter().flatten().map(|s| s.to_string()).collect())
+    remotes
+        .iter()
+        .map(|name| {
+            name.context("Remote name is not valid UTF-8")?
+                .map(str::to_string)
+                .context("Remote disappeared while reading its name")
+        })
+        .collect()
 }
 
 #[cfg(test)]

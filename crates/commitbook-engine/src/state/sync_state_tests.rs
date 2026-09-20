@@ -21,6 +21,8 @@ fn test_save_and_load_roundtrip() {
     let state = SyncState {
         last_sync_at: Some("2026-04-09T10:00:00Z".to_string()),
         last_error: None,
+        pending_init_push: None,
+        ..Default::default()
     };
     state.save(tmp.path()).unwrap();
 
@@ -46,12 +48,16 @@ fn test_save_overwrites_existing() {
     let state1 = SyncState {
         last_sync_at: Some("2026-01-01T00:00:00Z".to_string()),
         last_error: Some("first error".to_string()),
+        pending_init_push: None,
+        ..Default::default()
     };
     state1.save(tmp.path()).unwrap();
 
     let state2 = SyncState {
         last_sync_at: Some("2026-04-09T12:00:00Z".to_string()),
         last_error: None,
+        pending_init_push: None,
+        ..Default::default()
     };
     state2.save(tmp.path()).unwrap();
 

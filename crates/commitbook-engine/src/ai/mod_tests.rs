@@ -251,3 +251,74 @@ fn test_check_availability() {
     assert!(!result[1].2); // "no" is not
     assert!(!result[2].2); // "missing" is not
 }
+
+#[cfg(unix)]
+mod run_with_prompt_tests {
+    use super::super::run_with_prompt;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    fn sh(script: &str) -> Command {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(script);
+        command
+    }
+
+    #[test]
+    fn run_with_prompt_echoes_multi_megabyte_stdin() {
+        // Well past the pipe buffer: the writer must run concurrently with
+        // the stdout reader or the child blocks on a full stdout pipe.
+        let prompt = "0123456789ABCDEF\n".repeat(256 * 1024);
+        let output = run_with_prompt(&mut sh("cat"), &prompt, Duration::from_secs(60)).unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, prompt.as_bytes());
+    }
+
+    #[test]
+    fn run_with_prompt_drains_large_stdout_and_stderr_concurrently() {
+        let script =
+            "yes 0123456789ABCDEF | head -c 3000000; yes FEDCBA9876543210 | head -c 3000000 >&2";
+        let output = run_with_prompt(&mut sh(script), "ignored", Duration::from_secs(60)).unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len(), 3_000_000);
+        assert_eq!(output.stderr.len(), 3_000_000);
+    }
+
+    #[test]
+    fn run_with_prompt_tolerates_child_that_exits_without_reading_stdin() {
+        let prompt = "x".repeat(1024 * 1024);
+        let output = run_with_prompt(
+            &mut sh("echo done; exit 0"),
+            &prompt,
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"done\n");
+    }
+
+    #[test]
+    fn run_with_prompt_kills_process_group_on_timeout() {
+        let started = Instant::now();
+        let error = run_with_prompt(
+            &mut sh("sleep 60; echo late"),
+            "ignored",
+            Duration::from_millis(200),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("timed out"), "{error:#}");
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn run_with_prompt_reports_non_zero_exit_with_stderr() {
+        let output = run_with_prompt(
+            &mut sh("echo boom >&2; exit 3"),
+            "ignored",
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        assert_eq!(output.status.code(), Some(3));
+        assert_eq!(output.stderr, b"boom\n");
+    }
+}

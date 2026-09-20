@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Conflicts{% endblock %}
+{% block content %}
+<div class="card"><h2>Review and resolve conflicts</h2>
+<p>Resolutions are saved locally. The last resolution completes the merge commit. A later sync can publish it when automatic pushing is enabled.</p>
+<button id="refresh">Refresh conflicts</button> <button id="sync">Sync now</button>
+<p id="message" role="status" aria-live="polite"></p></div>
+<div id="conflicts"></div>
+<script>
+const container = document.querySelector('#conflicts'), message = document.querySelector('#message');
+function element(tag, text, parent) { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (parent) parent.append(el); return el; }
+async function request(url, body) {
+ const response = await fetch(url, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+ const data = await response.json(); if (!response.ok) throw new Error(data.message || 'Request failed'); return data;
+}
+async function act(url, body) {
+ const buttons = document.querySelectorAll('button'); buttons.forEach(b => b.disabled = true);
+ try { const data = await request(url, body); message.textContent = data.message; await refresh(); }
+ catch(e) { message.textContent = e.message; }
+ finally { buttons.forEach(b => b.disabled = false); }
+}
+async function refresh() {
+ try {
+  const conflicts = await request('/api/conflicts'); container.replaceChildren();
+  if (!conflicts.length) element('p', 'No unresolved conflicts. Any completed merge is saved locally.', container);
+  for (const c of conflicts) {
+   const card = element('section', undefined, container); card.className = 'card';
+   element('h2', c.path, card); element('p', 'Conflict type: ' + c.conflict_type, card);
+   for (const [label, value, present] of [['Local', c.local, c.local_present], ['Remote', c.remote, c.remote_present], ['Ancestor', c.ancestor, c.ancestor_present]]) {
+    const detail = element('details', undefined, card); if (label !== 'Ancestor') detail.open = true;
+    element('summary', label, detail); const pre = element('pre', value === null ? (present ? 'Non-text side; use a side selection below.' : 'Deleted / absent side') : value, detail);
+    pre.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:20rem;overflow:auto;padding:.5rem';
+   }
+   const body = action => ({path:c.path, revision:c.revision, proposal_version:c.proposal_version, action});
+   function button(label, action, url='/api/conflicts/resolve') { const b = element('button', label, card); b.onclick = () => act(url, body(action)); return b; }
+   button('Use local','take_local'); button('Use remote','take_remote'); button('Delete file','delete');
+   if (!c.binary) {
+    const label = element('label', 'Resolved content', card); label.style.display = 'block';
+    const edit = element('textarea', undefined, label); edit.style.cssText = 'width:100%;min-height:14rem';
+    edit.value = c.proposal && !c.proposal_stale && !c.proposal.rejected ? (c.proposal.content ?? '') : (c.local ?? c.remote ?? '');
+    const both = element('button', 'Keep both in editor', card); both.onclick = () => edit.value = [c.local, c.remote].filter(v=>v!==null).join('\n');
+    const save = element('button', 'Save edited content', card); save.onclick = () => act('/api/conflicts/resolve', {...body('manual_edit'), content:edit.value});
+    if (c.proposal) {
+     element('p', 'AI proposal by '+c.proposal.provider+' • '+c.proposal.created_at+(c.proposal.rejected?' • rejected':'')+(c.proposal_stale?' • stale; regenerate or resolve manually':''), card);
+     const proposed = element('pre', c.proposal.content === null ? 'Proposed action: delete file' : c.proposal.content, card); proposed.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere';
+     if (!c.proposal_stale && !c.proposal.rejected) button('Accept AI proposal','accept','/api/conflicts/proposal');
+     if (!c.proposal.rejected) button('Reject proposal','reject','/api/conflicts/proposal');
+    }
+    button('Generate new AI proposal','regenerate','/api/conflicts/proposal');
+   }
+  }
+ } catch(e) { message.textContent = e.message; }
+}
+document.querySelector('#refresh').onclick = refresh;
+document.querySelector('#sync').onclick = () => act('/api/sync', {});
+refresh();
+</script>
+{% endblock %}

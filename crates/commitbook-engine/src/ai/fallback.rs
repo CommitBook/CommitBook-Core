@@ -28,14 +28,8 @@ impl CommitMessageProvider for FallbackProvider {
 }
 
 /// Generate a simple timestamp-based commit message.
-pub fn generate_timestamp_message(summary: &ChangesSummary) -> String {
-    let timestamp = datetime::now_formatted();
-
-    if summary.is_empty() {
-        return format!("Writing {}", timestamp);
-    }
-
-    format!("Writing {} ({})", timestamp, summary.to_summary_text())
+pub fn generate_timestamp_message(_summary: &ChangesSummary) -> String {
+    format!("Writing {}", datetime::now_formatted())
 }
 
 #[cfg(test)]

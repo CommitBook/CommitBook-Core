@@ -4,12 +4,23 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
-use super::wait_with_timeout;
+use super::conflict::{
+    build_resolve_prompt, finalize_resolved_text, ConflictResolution, ConflictResolver,
+};
+use crate::git::GitConflict;
 
 const CURSOR_RESOLVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub struct CursorProvider;
+
+/// Print mode reads the prompt from stdin; text output avoids JSON envelopes.
+pub(crate) fn command(repo_path: &Path) -> Command {
+    let mut command = Command::new("cursor-agent");
+    command
+        .args(["-p", "--output-format", "text"])
+        .current_dir(repo_path);
+    command
+}
 
 #[async_trait]
 impl ConflictResolver for CursorProvider {
@@ -27,21 +38,16 @@ impl ConflictResolver for CursorProvider {
 
     async fn resolve(
         &self,
-        file_path: &Path,
-        content_with_markers: &str,
+        conflict: &GitConflict,
         repo_path: &Path,
-    ) -> Result<String> {
-        let prompt = build_resolve_prompt(file_path, content_with_markers);
-        let child = Command::new("cursor-agent")
-            .args(["-p", &prompt])
-            .current_dir(repo_path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("Failed to start cursor-agent CLI")?;
-
-        let output = wait_with_timeout(child, CURSOR_RESOLVE_TIMEOUT)
-            .context("cursor-agent CLI timed out")?;
+    ) -> Result<ConflictResolution> {
+        let prompt = build_resolve_prompt(conflict)?;
+        let repo_path = repo_path.to_path_buf();
+        let output = tokio::task::spawn_blocking(move || {
+            super::run_with_prompt(&mut command(&repo_path), &prompt, CURSOR_RESOLVE_TIMEOUT)
+        })
+        .await
+        .context("spawn_blocking panicked")??;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -49,10 +55,10 @@ impl ConflictResolver for CursorProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        let resolved = strip_outer_code_fence(&raw);
-        if resolved.trim().is_empty() {
-            bail!("Empty resolution from cursor-agent CLI");
-        }
-        Ok(resolved)
+        finalize_resolved_text(&raw, "cursor-agent CLI")
     }
 }
+
+#[cfg(test)]
+#[path = "cursor_tests.rs"]
+mod tests;

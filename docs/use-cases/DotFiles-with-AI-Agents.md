@@ -23,7 +23,7 @@ You (or the agents themselves) edit these configs over time. Without version con
 2. Move config folders into it and symlink them back
 3. Let CommitBook auto-commit and push on a schedule
 
-Every config change (whether you make it or an agent does) is versioned and synced automatically.
+Every non-ignored config change (whether you make it or an agent does) is versioned and synced automatically.
 
 ## Setup
 
@@ -43,16 +43,17 @@ For each agent config folder you want to track:
 # Move the folder into the repo
 mv ~/.claude ~/dotfiles/.claude
 
-# Symlink it back so the agent still finds it
-ln -sf ~/dotfiles/.claude ~/.claude
+# Symlink it back so the agent still finds it. The destination was removed by
+# mv, so use ln -s rather than risking a nested link inside an existing folder.
+ln -s ~/dotfiles/.claude ~/.claude
 ```
 
 Repeat for other agents:
 
 ```bash
-mv ~/.cursor ~/dotfiles/.cursor && ln -sf ~/dotfiles/.cursor ~/.cursor
-mv ~/.codex ~/dotfiles/.codex && ln -sf ~/dotfiles/.codex ~/.codex
-mv ~/.copilot ~/dotfiles/.copilot && ln -sf ~/dotfiles/.copilot ~/.copilot
+mv ~/.cursor ~/dotfiles/.cursor && ln -s ~/dotfiles/.cursor ~/.cursor
+mv ~/.codex ~/dotfiles/.codex && ln -s ~/dotfiles/.codex ~/.codex
+mv ~/.copilot ~/dotfiles/.copilot && ln -s ~/dotfiles/.copilot ~/.copilot
 ```
 
 Verify the symlinks work:
@@ -73,6 +74,7 @@ cat > ~/dotfiles/.gitignore << 'EOF'
 **/credentials.json
 **/token
 **/secrets.*
+.codex/auth.json
 
 # Machine-specific state
 **/projects/
@@ -83,6 +85,16 @@ cat > ~/dotfiles/.gitignore << 'EOF'
 # OS files
 .DS_Store
 EOF
+```
+
+Codex stores account credentials in `~/.codex/auth.json`; never commit that
+file. Gitignore does not untrack a file that was already added, so check and
+remove it from the index before the first push if necessary:
+
+```bash
+cd ~/dotfiles
+git ls-files --error-unmatch .codex/auth.json >/dev/null 2>&1 && \
+  git rm --cached .codex/auth.json
 ```
 
 ### 4. Push to a remote
@@ -105,14 +117,16 @@ commitbook schedule every-4h   # Sync every 4 hours
 commitbook start               # Start the scheduler
 ```
 
-That's it. From now on, every config change lands in git automatically.
+That's it. From now on, every non-ignored config change lands in git automatically.
 
 ## What This Looks Like
 
 ```
 ~/dotfiles/                    # Git repo, managed by CommitBook
 ├── .CommitBook/               # CommitBook config
-│   └── config.toml
+│   ├── .gitignore              # Ignores /local/
+│   ├── config.toml
+│   └── local/                  # Device state; ignored
 ├── .gitignore
 ├── .claude/                   # Claude Code config (real files)
 │   ├── CLAUDE.md
@@ -133,10 +147,15 @@ That's it. From now on, every config change lands in git automatically.
 ```bash
 git clone git@github.com:you/dotfiles.git ~/dotfiles
 
-# Create symlinks
-ln -sf ~/dotfiles/.claude ~/.claude
-ln -sf ~/dotfiles/.cursor ~/.cursor
-ln -sf ~/dotfiles/.codex ~/.codex
+# Back up existing destinations before creating links. Forcing a symlink onto
+# an existing directory would otherwise create a nested link inside it.
+backup_stamp=$(date +%Y%m%d-%H%M%S)
+for name in .claude .cursor .codex; do
+  if [ -e "$HOME/$name" ] || [ -L "$HOME/$name" ]; then
+    mv "$HOME/$name" "$HOME/${name}.pre-dotfiles-$backup_stamp"
+  fi
+  ln -s "$HOME/dotfiles/$name" "$HOME/$name"
+done
 
 # Start syncing
 cd ~/dotfiles

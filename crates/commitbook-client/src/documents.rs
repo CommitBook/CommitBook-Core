@@ -1,66 +1,64 @@
-//! Document operations: walking markdown files in a clone, reading their
-//! content + revision SHA, and saving + staging + committing edits.
-//!
-//! Sync (push to remote) is `sync_commitbook`'s job; `save_document` only
-//! commits locally.
+//! Symlink-safe Markdown document operations inside a managed clone.
 
+use std::collections::HashSet;
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
 use std::path::Path;
 
-use commitbook_engine::commitbooks::registry::find_by_id;
 use commitbook_engine::git::GitRepo;
+use commitbook_engine::state::RepoLock;
 use sha2::{Digest, Sha256};
 
 use crate::errors::{CommitBookError, Result};
 use crate::types::{DocumentContent, DocumentSummary};
 
-/// Walk markdown files inside a clone and return summaries.
 pub fn list_documents(workspaces_root: &Path, commitbook_id: &str) -> Result<Vec<DocumentSummary>> {
-    let cb = find_by_id(workspaces_root, commitbook_id)
-        .map_err(|e| CommitBookError::database(format!("Registry scan: {e}")))?
-        .ok_or_else(|| {
-            CommitBookError::not_found(format!("CommitBook {commitbook_id} not found"))
-        })?;
-
-    let repo = GitRepo::open(&cb.local_path)
-        .map_err(|e| CommitBookError::database(format!("Open repo: {e}")))?;
-
-    // Use libgit2's status to know which markdown files are dirty.
-    let status = repo
-        .status_markdown()
-        .map_err(|e| CommitBookError::database(format!("Read status: {e}")))?;
-    let dirty_set: std::collections::HashSet<&str> = status
-        .modified
+    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
+    let repo = GitRepo::open(&commitbook.local_path)
+        .map_err(|error| CommitBookError::database(format!("Open repo: {error}")))?;
+    let changes = repo
+        .changes_summary()
+        .map_err(|error| CommitBookError::database(format!("Read status: {error}")))?;
+    let dirty: HashSet<&str> = changes
+        .new_files
         .iter()
-        .chain(status.added.iter())
-        .map(|s| s.as_str())
+        .chain(changes.modified_files.iter())
+        .chain(changes.deleted_files.iter())
+        .map(String::as_str)
         .collect();
 
-    // Walk the working tree for markdown files (gitignored hidden dirs skipped).
+    let git_repo = git2::Repository::open(&commitbook.local_path)
+        .map_err(|error| CommitBookError::database(format!("Open repo: {error}")))?;
     let mut files = Vec::new();
-    walk_markdown(&cb.local_path, &cb.local_path, &mut files);
+    walk_markdown(
+        &git_repo,
+        &commitbook.local_path,
+        &commitbook.local_path,
+        &mut files,
+    )?;
     files.sort();
 
-    let conflicted: std::collections::HashSet<String> = repo
+    let conflicted: HashSet<String> = repo
         .list_conflicted_paths()
         .unwrap_or_default()
         .into_iter()
         .collect();
 
-    let mut summaries = Vec::with_capacity(files.len());
-    for path in files {
-        let abs = cb.local_path.join(&path);
-        let content = std::fs::read(&abs).unwrap_or_default();
-        let mut hasher = Sha256::new();
-        hasher.update(&content);
-        let checksum = hex::encode(hasher.finalize());
-        summaries.push(DocumentSummary {
-            path: path.clone(),
-            dirty: dirty_set.contains(path.as_str()),
-            has_conflicts: conflicted.contains(&path),
-            checksum,
-        });
-    }
-    Ok(summaries)
+    files
+        .into_iter()
+        .map(|path| {
+            let abs = crate::paths::safe_document_path(&commitbook.local_path, &path, false)?;
+            let content = read_regular_nofollow(&abs)?;
+            let mut hasher = Sha256::new();
+            hasher.update(&content);
+            Ok(DocumentSummary {
+                path: path.clone(),
+                dirty: dirty.contains(path.as_str()),
+                has_conflicts: conflicted.contains(&path),
+                checksum: hex::encode(hasher.finalize()),
+            })
+        })
+        .collect()
 }
 
 pub fn read_document(
@@ -68,27 +66,20 @@ pub fn read_document(
     commitbook_id: &str,
     path: &str,
 ) -> Result<DocumentContent> {
-    let cb = find_by_id(workspaces_root, commitbook_id)
-        .map_err(|e| CommitBookError::database(format!("Registry scan: {e}")))?
-        .ok_or_else(|| {
-            CommitBookError::not_found(format!("CommitBook {commitbook_id} not found"))
-        })?;
-    let abs = safe_rel_join(&cb.local_path, path)?;
+    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
+    let abs = crate::paths::safe_document_path(&commitbook.local_path, path, false)?;
     if !abs.exists() {
         return Err(CommitBookError::not_found(format!(
             "Document {path} not found"
         )));
     }
-    let content = std::fs::read_to_string(&abs)
-        .map_err(|e| CommitBookError::database(format!("Read {path}: {e}")))?;
+    let content = String::from_utf8(read_regular_nofollow(&abs)?).map_err(|error| {
+        CommitBookError::invalid_input(format!("Document {path} is not valid UTF-8: {error}"))
+    })?;
 
-    // Revision = SHA of the last commit that changed this specific file, so
-    // callers can detect when the document moved underneath them. `None` for
-    // files that exist only in the working tree (never committed).
-    let repo = GitRepo::open(&cb.local_path)
-        .map_err(|e| CommitBookError::database(format!("Open repo: {e}")))?;
+    let repo = GitRepo::open(&commitbook.local_path)
+        .map_err(|error| CommitBookError::database(format!("Open repo: {error}")))?;
     let revision = repo.last_commit_touching(path).ok().flatten();
-
     Ok(DocumentContent {
         path: path.to_string(),
         content,
@@ -102,91 +93,139 @@ pub fn save_document(
     path: &str,
     content: &str,
 ) -> Result<()> {
-    let cb = find_by_id(workspaces_root, commitbook_id)
-        .map_err(|e| CommitBookError::database(format!("Registry scan: {e}")))?
-        .ok_or_else(|| {
-            CommitBookError::not_found(format!("CommitBook {commitbook_id} not found"))
-        })?;
-    let abs = safe_rel_join(&cb.local_path, path)?;
-    if let Some(parent) = abs.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| CommitBookError::database(format!("Create dirs: {e}")))?;
+    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
+    let _lock = RepoLock::acquire(&commitbook.local_path)
+        .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
+    let repo = GitRepo::open(&commitbook.local_path)
+        .map_err(|error| CommitBookError::database(format!("Open repo: {error}")))?;
+    let current_branch = repo
+        .current_branch()
+        .map_err(|error| CommitBookError::merge(format!("Read current branch: {error}")))?;
+    if current_branch != commitbook.branch {
+        return Err(CommitBookError::invalid_input(format!(
+            "Cannot save {path}: checked out branch {current_branch:?} does not match configured branch {:?}",
+            commitbook.branch
+        )));
     }
-    std::fs::write(&abs, content)
-        .map_err(|e| CommitBookError::database(format!("Write {path}: {e}")))?;
+    if repo.merge_in_progress() {
+        return Err(CommitBookError::merge(
+            "Cannot save a document while conflict resolution is in progress; resolve or abort the merge first",
+        ));
+    }
+    let abs = crate::paths::safe_document_path(&commitbook.local_path, path, true)?;
+    write_regular_nofollow(&abs, content.as_bytes())?;
 
-    // Stage + commit (no push; sync_commitbook handles pushing).
-    let repo = GitRepo::open(&cb.local_path)
-        .map_err(|e| CommitBookError::database(format!("Open repo: {e}")))?;
-    repo.stage_paths(&[path.to_string()])
-        .map_err(|e| CommitBookError::database(format!("Stage: {e}")))?;
-    if repo
-        .has_real_staged_changes()
-        .map_err(|e| CommitBookError::database(format!("Check changes: {e}")))?
-    {
-        let msg = format!("Update {path} via CommitBook");
-        repo.commit(&msg)
-            .map_err(|e| CommitBookError::database(format!("Commit: {e}")))?;
-    }
+    repo.commit_selected_paths_on_branch(
+        &[path],
+        &format!("Update {path} via CommitBook"),
+        &commitbook.branch,
+    )
+    .map_err(|error| CommitBookError::database(format!("Commit document: {error}")))?;
     Ok(())
 }
 
-/// Join a caller-supplied relative path onto the clone root, rejecting any
-/// path that could escape it: absolute paths, `.`/`..` or other non-normal
-/// segments, and any `.CommitBook` segment. Guards `read_document` /
-/// `save_document` against path traversal from an FFI caller.
-fn safe_rel_join(base: &Path, rel: &str) -> Result<std::path::PathBuf> {
-    let rel_path = Path::new(rel);
-    if rel_path.is_absolute() {
-        return Err(CommitBookError::invalid_input(format!(
-            "Absolute path not allowed: {rel}"
-        )));
+fn write_regular_nofollow(path: &Path, content: &[u8]) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
     }
-    for comp in rel_path.components() {
-        match comp {
-            std::path::Component::Normal(seg) => {
-                // Case-insensitive: on case-insensitive filesystems (default
-                // APFS/HFS+ on macOS) `.commitbook` resolves to the real
-                // `.CommitBook` directory, so an exact-case check is bypassable.
-                if seg.to_string_lossy().eq_ignore_ascii_case(".CommitBook") {
-                    return Err(CommitBookError::invalid_input(format!(
-                        "Path into .CommitBook not allowed: {rel}"
-                    )));
-                }
-            }
-            _ => {
-                return Err(CommitBookError::invalid_input(format!(
-                    "Illegal path segment in: {rel}"
-                )));
-            }
-        }
-    }
-    Ok(base.join(rel_path))
+    let mut file = options.open(path).map_err(|error| {
+        CommitBookError::database(format!(
+            "Open document without following symlinks {}: {error}",
+            path.display()
+        ))
+    })?;
+    file.write_all(content)
+        .map_err(|error| CommitBookError::database(format!("Write {}: {error}", path.display())))?;
+    file.sync_all()
+        .map_err(|error| CommitBookError::database(format!("Sync {}: {error}", path.display())))?;
+    Ok(())
 }
 
-fn walk_markdown(root: &Path, dir: &Path, out: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(rel) = path.strip_prefix(root) else {
-            continue;
-        };
-        let rel_str = rel.to_string_lossy();
-        // Skip hidden directories (anything starting with '.').
-        if rel_str.split('/').any(|seg| seg.starts_with('.')) {
+fn read_regular_nofollow(path: &Path) -> Result<Vec<u8>> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(path).map_err(|error| {
+        CommitBookError::database(format!(
+            "Open document without following symlinks {}: {error}",
+            path.display()
+        ))
+    })?;
+    let metadata = file.metadata().map_err(|error| {
+        CommitBookError::database(format!("Inspect {}: {error}", path.display()))
+    })?;
+    if !metadata.is_file() {
+        return Err(CommitBookError::invalid_input(format!(
+            "Document is not a regular file: {}",
+            path.display()
+        )));
+    }
+    let mut content = Vec::new();
+    file.read_to_end(&mut content)
+        .map_err(|error| CommitBookError::database(format!("Read {}: {error}", path.display())))?;
+    Ok(content)
+}
+
+fn walk_markdown(
+    repository: &git2::Repository,
+    root: &Path,
+    directory: &Path,
+    output: &mut Vec<String>,
+) -> Result<()> {
+    let entries = std::fs::read_dir(directory).map_err(|error| {
+        CommitBookError::database(format!("Read directory {}: {error}", directory.display()))
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            CommitBookError::database(format!("Read entry in {}: {error}", directory.display()))
+        })?;
+        let file_type = entry.file_type().map_err(|error| {
+            CommitBookError::database(format!("Inspect {}: {error}", entry.path().display()))
+        })?;
+        if file_type.is_symlink() {
             continue;
         }
-        if path.is_dir() {
-            walk_markdown(root, &path, out);
-        } else if let Some(ext) = path.extension() {
-            let lower = ext.to_string_lossy().to_lowercase();
-            if lower == "md" || lower == "markdown" {
-                out.push(rel_str.to_string());
-            }
+        let path = entry.path();
+        let relative = path.strip_prefix(root).map_err(|_| {
+            CommitBookError::invalid_input(format!("Path escaped clone: {}", path.display()))
+        })?;
+        let relative_str = relative.to_str().ok_or_else(|| {
+            CommitBookError::invalid_input(format!(
+                "Document path is not valid UTF-8: {}",
+                relative.display()
+            ))
+        })?;
+        if relative.components().any(|component| {
+            let value = component.as_os_str().to_string_lossy();
+            value.eq_ignore_ascii_case(".git") || value.eq_ignore_ascii_case(".CommitBook")
+        }) {
+            continue;
+        }
+        if repository.status_should_ignore(relative).map_err(|error| {
+            CommitBookError::database(format!(
+                "Check Git ignore status for {}: {error}",
+                relative.display()
+            ))
+        })? {
+            continue;
+        }
+        if file_type.is_dir() {
+            walk_markdown(repository, root, &path, output)?;
+        } else if file_type.is_file()
+            && crate::paths::validate_markdown_relative(relative_str).is_ok()
+        {
+            output.push(relative_str.to_string());
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1,31 +1,10 @@
 <div class="card">
     <h2>Status</h2>
-    <div class="kv">
-        <span class="label">State</span>
-        {% if running %}
-        <span class="badge badge-green">Running</span>
-        {% else %}
-        <span class="badge badge-red">Stopped</span>
-        {% endif %}
-    </div>
-    <div class="kv">
-        <span class="label">Schedule</span>
-        <span>{{ schedule_desc }}</span>
-    </div>
-    <div class="kv">
-        <span class="label">Branch</span>
-        <span>{{ current_branch }}</span>
-    </div>
-    <div class="kv">
-        <span class="label">Auto Push</span>
-        <span>{% if auto_push %}yes{% else %}no{% endif %}</span>
-    </div>
-    <div class="kv">
-        <span class="label">Last Commit</span>
-        <span>{{ last_commit }}</span>
-    </div>
-    <div class="kv">
-        <span class="label">Pending Changes</span>
-        <span>{% if changes_total > 0 %}{{ changes_total }} ({{ changes_summary }}){% else %}None{% endif %}</span>
-    </div>
+    <div class="kv"><span class="label">Scheduler</span><span>{% if running %}Running{% else %}Stopped{% endif %}</span></div>
+    <div class="kv"><span class="label">Schedule</span><span>{{ schedule_desc }}</span></div>
+    <div class="kv"><span class="label">Branch</span><span>{{ current_branch }}</span></div>
+    <div class="kv"><span class="label">Auto Push</span><span>{% if auto_push %}yes{% else %}no{% endif %}</span></div>
+    {% for line in status_lines %}<p>{{ line }}</p>{% endfor %}
+    <p><a href="/changes">Preview next local snapshot</a></p>
+    {% if needs_attention %}<p><a href="/conflicts">Review and resolve conflicts</a></p>{% endif %}
 </div>

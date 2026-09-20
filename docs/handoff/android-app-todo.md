@@ -31,6 +31,7 @@ Track that work upstream. The remaining items here only become actionable once t
   - `WorkspaceInput` → `CommitBookInput`. Drop `remoteUrl`, `localRoot`. Add `owner`, `repo` (renamed from `repoName`).
   - `WorkspaceSummary` → `CommitBookSummary`. Add `owner`, `repo`, `docCount`, `conflictCount`.
   - Add `DiscoveredCommitBook`, `RepoInfo`, `SyncMode { AiResolve, Manual }`.
+  - Add the structured AI conflict request/response types (including nullable error), explicit write/delete action, `ConflictResolutionContinuation`, and nullable ancestor/local/remote fields on `ConflictSummary`.
   - `SyncResultSummary`: add `committed: Boolean`, `conflictsResolved: Int`, `manualConflicts: Int`.
 
 - [ ] `app/src/main/java/com/commitbook/app/data/engine/CommitBookEngine.kt`:
@@ -42,10 +43,11 @@ Track that work upstream. The remaining items here only become actionable once t
 ## 3. Implement `RealEngine.kt` (mirror of Apple's RealEngine.swift)
 
 - [ ] New file `app/src/main/java/com/commitbook/app/data/engine/RealEngine.kt`. Wraps the UniFFI-generated `CommitBookEngineClient`.
-- [ ] Construct `CommitBookEngineClient(dbPath, workspacesRoot)` using:
+- [ ] Construct `CommitBookEngineClient(dbPath, workspacesRoot, conflictResolver)` using:
   - `dbPath` = `context.filesDir / "commitbook" / "db"` (private app data, not on `getExternalFilesDir`).
   - `workspacesRoot` = `context.filesDir / "commitbook" / "repos"`.
   - Create both directories on first run.
+- [ ] Implement `ConflictResolverCallback` in Kotlin. Its synchronous entry point starts the app's async HTTPS request and returns immediately; complete the supplied continuation with explicit content, deletion, or an error within 120 seconds. It never calls a desktop app. Pass `null` until configured and surface the engine's actionable error if an `AiResolve` sync encounters a conflict without it.
 - [ ] Map UniFFI types → app types via small adapters (the Kotlin equivalent of Apple's `FFIMapper.swift`).
 - [ ] Map UniFFI errors → app errors (Apple's `FFIErrorAdapter.swift` analogue).
 
@@ -78,7 +80,7 @@ Track that work upstream. The remaining items here only become actionable once t
   - Background WorkManager job: `AiResolve`.
   - User-tapped Sync button: `AiResolve` with a banner if `manualConflicts > 0`.
   - From the conflict review screen: `Manual`.
-- [ ] `ConflictListScreen.kt` / `ConflictDetailScreen.kt`: confirm resolution actions map to `take_local` / `take_remote` / `keep_both` / `manual_edit`.
+- [ ] `ConflictListScreen.kt` / `ConflictDetailScreen.kt`: render nullable sides and binary/special conflicts; map text actions to `take_local` / `take_remote` / `keep_both` / `manual_edit`, with an absent selected side meaning deletion.
 
 ## 9. CI / testing
 

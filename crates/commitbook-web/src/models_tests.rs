@@ -3,6 +3,7 @@ use super::*;
 #[test]
 fn test_status_response_serialization() {
     let status = StatusResponse {
+        repository: Default::default(),
         running: true,
         enabled: true,
         schedule: "0 * * * *".into(),
@@ -11,7 +12,7 @@ fn test_status_response_serialization() {
         current_branch: "main".into(),
         auto_push: true,
         last_commit: Some("2026-04-07T14:30:02Z".into()),
-        changes_total: 3,
+        changes_total: Some(3),
         changes_summary: "2 modified, 1 new".into(),
     };
     let v = serde_json::to_value(&status).unwrap();

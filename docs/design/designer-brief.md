@@ -2,9 +2,9 @@
 
 ## What CommitBook is
 
-CommitBook turns any git repository of markdown notes into a self-syncing notebook. A user writes notes in their editor of choice; CommitBook runs in the background and, on a schedule the user picks, commits their changes first (generating a commit message with an AI CLI such as Claude, Copilot, Codex, Gemini, or Cursor, whichever the user has installed), then fetches the latest from the remote, runs an in-process libgit2 3-way merge, and pushes. When the merge leaves conflict markers, CommitBook either invokes the configured AI resolver to rewrite the conflicted files or, in manual mode, leaves the markers for the user to resolve.
+CommitBook turns any git repository of markdown notes into a self-syncing notebook. A user writes notes in their editor of choice; CommitBook runs in the background and, on a schedule the user picks, commits all non-ignored Git changes first, then fetches the latest from the remote, runs an in-process libgit2 3-way merge, and pushes when auto-push is enabled. Desktop AI features invoke an installed CLI such as Claude, Copilot, Codex, Gemini, or Cursor. Mobile conflict resolution calls back into the same Swift/Kotlin app, which talks to its AI service from the phone; it never depends on a desktop app.
 
-Each repository is self-contained. There is no global config, no database, and no central server. State lives in a `.CommitBook/` directory inside the repo (`config.toml` is committed; everything else is gitignored). Initialization is explicit: `commitbook init` must be run before any other command works.
+Each repository is self-contained. There is no global config, no database, and no central server. State lives in a `.CommitBook/` directory inside the repo (`config.toml` and the nested `.gitignore` are committed; `/local/` is ignored). Initialization is explicit: `commitbook init` must be run before any other command works.
 
 The product spans four user-facing surfaces, all built on the same Rust engine (`commitbook-engine`):
 
@@ -29,7 +29,7 @@ These concepts recur across every surface. The design system needs a consistent 
 - **Document**: one markdown file inside a CommitBook. Has a path and content.
 - **Sync**: one cycle of (commit local changes) → (fetch and libgit2 3-way merge) → (push). Outcome is a `SyncResult` with five numbers the UI may want to surface: `committed` (bool), `pulled` (count), `pushed` (count), `conflictsResolved` (count, AI), `manualConflicts` (count, left for user), plus an `errors` list.
 - **Sync mode**: `aiResolve` (let the configured AI rewrite conflicted files) or `manual` (leave conflict markers in place). Picked per-sync; background syncs default to `aiResolve`, user-initiated syncs may prompt.
-- **Conflict**: a file where the merge left `<<<<<<<` markers. Has a path, a type, a status (open / resolved), local content, remote content, and an `openedAt`. Resolutions: take local, take remote, keep both, manual edit.
+- **Conflict**: a path with ancestor/local/remote Git index entries. Sides are nullable for add/delete conflicts, and binary or special entries remain manual. Resolutions: take local, take remote, keep both, delete, or manual edit.
 - **Schedule**: a 5-field cron expression with friendly presets (every 5/15/30 min, hourly, every 4h, daily at 9am, custom). Display the cron in plain English wherever it appears.
 - **Scheduler state**: running / stopped, plus enabled / disabled. These are independent (a CommitBook can be enabled but not currently running, or running but disabled mid-cycle).
 - **AI provider**: Claude, Copilot, Codex, Gemini, Cursor, or a fallback (timestamp-based message). The UI should show which providers are installed/available on the user's machine, and which one is currently selected for commit messages and for conflict resolution (these can differ).

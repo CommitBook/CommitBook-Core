@@ -3,6 +3,7 @@
 //! and conflicts) on top of `commitbook-engine`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::errors::{CommitBookError, Result};
 use crate::types::*;
@@ -12,11 +13,16 @@ pub struct CommitBookEngineClient {
     #[allow(dead_code)]
     pub(crate) db_path: PathBuf,
     pub(crate) workspaces_root: PathBuf,
+    pub(crate) conflict_resolver: Option<Arc<dyn ConflictResolverCallback>>,
 }
 
 impl CommitBookEngineClient {
     /// UniFFI-exposed constructor. UniFFI wraps the return in `Arc<>` itself.
-    pub fn new(db_path: String, workspaces_root: String) -> Result<Self> {
+    pub fn new(
+        db_path: String,
+        workspaces_root: String,
+        conflict_resolver: Option<Box<dyn ConflictResolverCallback>>,
+    ) -> Result<Self> {
         let db_path = PathBuf::from(db_path);
         let workspaces_root = PathBuf::from(workspaces_root);
         std::fs::create_dir_all(&workspaces_root).map_err(|e| {
@@ -25,9 +31,11 @@ impl CommitBookEngineClient {
                 workspaces_root.display()
             ))
         })?;
+        let workspaces_root = crate::paths::canonicalize_workspaces_root(&workspaces_root)?;
         Ok(Self {
             db_path,
             workspaces_root,
+            conflict_resolver: conflict_resolver.map(Arc::from),
         })
     }
 
@@ -59,6 +67,15 @@ impl CommitBookEngineClient {
 
                 let mut tasks = Vec::with_capacity(repos.len());
                 for repo in repos {
+                    if crate::paths::validate_init_input(
+                        &repo.owner,
+                        &repo.name,
+                        &repo.default_branch,
+                    )
+                    .is_err()
+                    {
+                        continue;
+                    }
                     let semaphore = semaphore.clone();
                     let token = token.clone();
                     let client = client.clone();
@@ -75,11 +92,11 @@ impl CommitBookEngineClient {
                         .unwrap_or(false);
                         let slug =
                             commitbook_engine::commitbooks::slug_for(&repo.owner, &repo.name);
-                        let already_local = workspaces_root
-                            .join(&slug)
-                            .join(".CommitBook")
-                            .join("config.toml")
-                            .exists();
+                        let clone_path = workspaces_root.join(&slug);
+                        let already_local =
+                            crate::paths::validate_managed_clone(&workspaces_root, &clone_path)
+                                .map(|path| path.join(".CommitBook/config.toml").is_file())
+                                .unwrap_or(false);
                         DiscoveredCommitBook {
                             owner: repo.owner,
                             repo: repo.name,
@@ -121,6 +138,7 @@ impl CommitBookEngineClient {
         input: CommitBookInput,
         token: String,
     ) -> Result<CommitBookSummary> {
+        crate::paths::validate_init_input(&input.owner, &input.repo, &input.branch)?;
         let workspaces_root = self.workspaces_root.clone();
         // Clone + init are blocking libgit2 calls; run them via spawn_blocking
         // on the shared runtime (the UDL poller has no ambient runtime).
@@ -156,13 +174,7 @@ impl CommitBookEngineClient {
     }
 
     pub fn get_commitbook(&self, commitbook_id: String) -> Result<CommitBookSummary> {
-        let cb = commitbook_engine::commitbooks::registry::find_by_id(
-            &self.workspaces_root,
-            &commitbook_id,
-        )?
-        .ok_or_else(|| {
-            CommitBookError::not_found(format!("CommitBook {commitbook_id} not found"))
-        })?;
+        let cb = crate::paths::find_managed_commitbook(&self.workspaces_root, &commitbook_id)?;
         Ok(CommitBookSummary {
             id: cb.id,
             owner: cb.owner,
@@ -178,20 +190,9 @@ impl CommitBookEngineClient {
     }
 
     pub fn delete_commitbook(&self, commitbook_id: String) -> Result<()> {
-        let cb = commitbook_engine::commitbooks::registry::find_by_id(
-            &self.workspaces_root,
-            &commitbook_id,
-        )?
-        .ok_or_else(|| {
-            CommitBookError::not_found(format!("CommitBook {commitbook_id} not found"))
-        })?;
-        // Guard against deleting anything outside the managed workspaces root.
-        if !cb.local_path.starts_with(&self.workspaces_root) {
-            return Err(CommitBookError::invalid_input(format!(
-                "Refusing to delete {}: outside workspaces root",
-                cb.local_path.display()
-            )));
-        }
+        let cb = crate::paths::find_managed_commitbook(&self.workspaces_root, &commitbook_id)?;
+        let _lock = commitbook_engine::state::RepoLock::acquire(&cb.local_path)
+            .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
         std::fs::remove_dir_all(&cb.local_path).map_err(|e| {
             CommitBookError::database(format!(
                 "Failed to delete clone at {}: {e}",
@@ -225,6 +226,7 @@ impl CommitBookEngineClient {
         token: String,
     ) -> Result<SyncResultSummary> {
         let workspaces_root = self.workspaces_root.clone();
+        let conflict_resolver = self.conflict_resolver.clone();
         // sync_one_commitbook is blocking libgit2 work; run it via
         // spawn_blocking on the shared runtime.
         crate::runtime::runtime()
@@ -235,6 +237,7 @@ impl CommitBookEngineClient {
                         &commitbook_id,
                         mode,
                         &token,
+                        conflict_resolver,
                     )
                 })
                 .await

@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       ref:
@@ -10,6 +13,13 @@ on:
       tag_name:
         description: Existing tag to publish
         required: true
+
+# On a tag push the workflow_dispatch inputs are empty, so fall back to the
+# pushed ref. RELEASE_REF is what we build from, RELEASE_TAG is what we publish.
+env:
+  RELEASE_REF: ${{ inputs.ref || github.ref }}
+  RELEASE_TAG: ${{ inputs.tag_name || github.ref_name }}
+  RELEASE_COMMITISH: ${{ inputs.ref || github.sha }}
 
 permissions:
   contents: write
@@ -32,12 +42,13 @@ jobs:
             use_cross: true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ env.RELEASE_REF }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Install cross
@@ -59,7 +70,7 @@ jobs:
           tar czf ../../../commitbook-${{ matrix.target }}.tar.gz commitbook
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: commitbook-${{ matrix.target }}
           path: commitbook-${{ matrix.target }}.tar.gz
@@ -69,14 +80,30 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      # Checked out into a subdirectory so install.sh can be published as a
+      # release asset without the repo tree colliding with the artifacts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
+          path: repo
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           merge-multiple: true
 
+      - name: Generate checksums
+        run: |
+          sha256sum commitbook-*.tar.gz > SHA256SUMS
+          cp repo/install.sh install.sh
+          cat SHA256SUMS
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          tag_name: ${{ inputs.tag_name }}
-          target_commitish: ${{ inputs.ref }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ env.RELEASE_COMMITISH }}
           generate_release_notes: true
-          files: commitbook-*.tar.gz
+          files: |
+            commitbook-*.tar.gz
+            SHA256SUMS
+            install.sh

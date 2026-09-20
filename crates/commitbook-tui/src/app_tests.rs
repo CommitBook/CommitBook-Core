@@ -33,24 +33,7 @@ fn test_log_entry_parse_invalid() {
 #[test]
 fn test_handle_key_quit() {
     let tmp = tempfile::tempdir().unwrap();
-    let mut app = App {
-        repo_path: tmp.path().to_path_buf(),
-        active_panel: Panel::Status,
-        running: false,
-        schedule: String::new(),
-        schedule_desc: String::new(),
-        auto_push: true,
-        branch: "main".into(),
-        last_commit: None,
-        log_lines: Vec::new(),
-        log_scroll: 0,
-        providers: Vec::new(),
-        changes: ChangesSummary::default(),
-        current_branch: "main".into(),
-        enabled: true,
-        log_level: "info".into(),
-        quit: false,
-    };
+    let mut app = App::blank(tmp.path());
 
     app.handle_key(KeyCode::Char('q'), KeyModifiers::NONE);
     assert!(app.quit);
@@ -59,24 +42,7 @@ fn test_handle_key_quit() {
 #[test]
 fn test_handle_key_tab() {
     let tmp = tempfile::tempdir().unwrap();
-    let mut app = App {
-        repo_path: tmp.path().to_path_buf(),
-        active_panel: Panel::Status,
-        running: false,
-        schedule: String::new(),
-        schedule_desc: String::new(),
-        auto_push: true,
-        branch: "main".into(),
-        last_commit: None,
-        log_lines: Vec::new(),
-        log_scroll: 0,
-        providers: Vec::new(),
-        changes: ChangesSummary::default(),
-        current_branch: "main".into(),
-        enabled: true,
-        log_level: "info".into(),
-        quit: false,
-    };
+    let mut app = App::blank(tmp.path());
 
     app.handle_key(KeyCode::Tab, KeyModifiers::NONE);
     assert_eq!(app.active_panel, Panel::Logs);
@@ -88,40 +54,25 @@ fn test_handle_key_tab() {
 #[test]
 fn test_handle_key_scroll() {
     let tmp = tempfile::tempdir().unwrap();
-    let mut app = App {
-        repo_path: tmp.path().to_path_buf(),
-        active_panel: Panel::Logs,
-        running: false,
-        schedule: String::new(),
-        schedule_desc: String::new(),
-        auto_push: true,
-        branch: "main".into(),
-        last_commit: None,
-        log_lines: vec![
-            LogEntry {
-                timestamp: "t1".into(),
-                level: "INFO".into(),
-                message: "m1".into(),
-            },
-            LogEntry {
-                timestamp: "t2".into(),
-                level: "INFO".into(),
-                message: "m2".into(),
-            },
-            LogEntry {
-                timestamp: "t3".into(),
-                level: "INFO".into(),
-                message: "m3".into(),
-            },
-        ],
-        log_scroll: 0,
-        providers: Vec::new(),
-        changes: ChangesSummary::default(),
-        current_branch: "main".into(),
-        enabled: true,
-        log_level: "info".into(),
-        quit: false,
-    };
+    let mut app = App::blank(tmp.path());
+    app.active_panel = Panel::Logs;
+    app.log_lines = vec![
+        LogEntry {
+            timestamp: "t1".into(),
+            level: "INFO".into(),
+            message: "m1".into(),
+        },
+        LogEntry {
+            timestamp: "t2".into(),
+            level: "INFO".into(),
+            message: "m2".into(),
+        },
+        LogEntry {
+            timestamp: "t3".into(),
+            level: "INFO".into(),
+            message: "m3".into(),
+        },
+    ];
 
     app.handle_key(KeyCode::Down, KeyModifiers::NONE);
     assert_eq!(app.log_scroll, 1);
@@ -132,4 +83,61 @@ fn test_handle_key_scroll() {
     // Can't scroll above 0
     app.handle_key(KeyCode::Up, KeyModifiers::NONE);
     assert_eq!(app.log_scroll, 0);
+}
+
+#[test]
+fn refresh_clears_provider_status_when_disabled_or_config_invalid() {
+    let tmp = tempfile::tempdir().unwrap();
+    LocalConfig::init(tmp.path(), "hourly").unwrap();
+    let mut app = App::new(tmp.path());
+    assert!(app.providers.is_empty());
+    for invalid_config in [false, true] {
+        app.providers = vec![("codex-cli".into(), "Codex".into(), true)];
+        if invalid_config {
+            std::fs::write(LocalConfig::config_path(tmp.path()), "invalid = [").unwrap();
+        }
+        app.refresh();
+        assert!(app.providers.is_empty());
+    }
+}
+
+#[test]
+fn preview_navigation_refreshes_and_returns_to_dashboard() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    LocalConfig::init(tmp.path(), "hourly").unwrap();
+    let mut app = App::new(tmp.path());
+    app.handle_key(KeyCode::Char('p'), KeyModifiers::NONE);
+    assert!(app.preview.is_some());
+    app.handle_key(KeyCode::Down, KeyModifiers::NONE);
+    assert_eq!(app.preview_scroll, 1);
+    std::fs::write(tmp.path().join("new.json"), "{}").unwrap();
+    app.handle_key(KeyCode::Char('r'), KeyModifiers::NONE);
+    assert!(app
+        .preview
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .any(|e| e.path == "new.json"));
+    app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+    assert!(app.preview.is_none());
+    assert!(!app.quit);
+    app.active_panel = Panel::Status;
+    app.handle_key(KeyCode::Down, KeyModifiers::NONE);
+    assert_eq!(app.status_scroll, 1);
+    app.handle_key(KeyCode::Up, KeyModifiers::NONE);
+    assert_eq!(app.status_scroll, 0);
+    app.auto_push = true;
+    app.enabled = true;
+    std::fs::write(LocalConfig::config_path(tmp.path()), "broken = [").unwrap();
+    app.refresh();
+    assert!(app.schedule.is_empty());
+    assert_eq!(app.branch, "unknown");
+    assert!(!app.auto_push);
+    assert!(!app.enabled);
 }

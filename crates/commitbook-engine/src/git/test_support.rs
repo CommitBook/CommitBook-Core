@@ -65,12 +65,7 @@ pub fn setup_repo_with_base(files: &[(&str, &str)]) -> BaseRepoFixture {
         repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
             .unwrap();
 
-        let branch = repo
-            .head()
-            .unwrap()
-            .shorthand()
-            .unwrap_or("main")
-            .to_string();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
         branch
     };
 
@@ -108,12 +103,7 @@ pub fn setup_repo_with_bare_remote() -> RepoFixture {
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
 
-        let branch = repo
-            .head()
-            .unwrap()
-            .shorthand()
-            .unwrap_or("main")
-            .to_string();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
 
         repo.remote("origin", &format!("file://{}", remote_dir.path().display()))
             .unwrap();

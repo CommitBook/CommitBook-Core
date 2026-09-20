@@ -4,16 +4,52 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use super::conflict::{build_resolve_prompt, strip_outer_code_fence, ConflictResolver};
-use super::{
-    clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
+use super::conflict::{
+    build_resolve_prompt, finalize_resolved_text, ConflictResolution, ConflictResolver,
 };
-use crate::git::ChangesSummary;
+use super::{
+    clean_message, looks_like_diff_narration, run_with_prompt, truncate, CommitMessageProvider,
+};
+use crate::git::{ChangesSummary, GitConflict};
 
 const CODEX_TIMEOUT: Duration = Duration::from_secs(30);
 const CODEX_RESOLVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub struct CodexProvider;
+
+fn command(repo_path: &Path, output_path: &Path) -> Command {
+    let mut command = Command::new("codex");
+    command
+        .args([
+            "exec",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--color",
+            "never",
+            "--output-last-message",
+        ])
+        .arg(output_path)
+        .arg("-")
+        .current_dir(repo_path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    command
+}
+
+fn run(prompt: &str, repo_path: &Path, timeout: Duration) -> Result<String> {
+    let output_file =
+        tempfile::NamedTempFile::new().context("Failed to create Codex output file")?;
+    let output = run_with_prompt(&mut command(repo_path, output_file.path()), prompt, timeout)?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("codex CLI failed: {}", stderr.trim());
+    }
+
+    std::fs::read_to_string(output_file.path())
+        .context("Failed to read the final response from codex CLI")
+}
 
 #[async_trait]
 impl CommitMessageProvider for CodexProvider {
@@ -40,22 +76,7 @@ impl CommitMessageProvider for CodexProvider {
             truncate(&diff_summary, 500)
         );
 
-        let child = Command::new("codex")
-            .args(["--quiet", &prompt])
-            .current_dir(repo_path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("Failed to start codex CLI")?;
-
-        let output = wait_with_timeout(child, CODEX_TIMEOUT).context("codex CLI timed out")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("codex CLI failed: {}", stderr.trim());
-        }
-
-        let raw = String::from_utf8_lossy(&output.stdout);
+        let raw = run(&prompt, repo_path, CODEX_TIMEOUT)?;
         let msg = clean_message(&raw);
 
         if msg.is_empty() {
@@ -85,33 +106,16 @@ impl ConflictResolver for CodexProvider {
 
     async fn resolve(
         &self,
-        file_path: &Path,
-        content_with_markers: &str,
+        conflict: &GitConflict,
         repo_path: &Path,
-    ) -> Result<String> {
-        let prompt = build_resolve_prompt(file_path, content_with_markers);
-        let child = Command::new("codex")
-            .args(["--quiet", &prompt])
-            .current_dir(repo_path)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("Failed to start codex CLI")?;
-
-        let output =
-            wait_with_timeout(child, CODEX_RESOLVE_TIMEOUT).context("codex CLI timed out")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("codex CLI failed: {}", stderr.trim());
-        }
-
-        let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        let resolved = strip_outer_code_fence(&raw);
-        if resolved.trim().is_empty() {
-            bail!("Empty resolution from codex CLI");
-        }
-        Ok(resolved)
+    ) -> Result<ConflictResolution> {
+        let prompt = build_resolve_prompt(conflict)?;
+        let repo_path = repo_path.to_path_buf();
+        let raw =
+            tokio::task::spawn_blocking(move || run(&prompt, &repo_path, CODEX_RESOLVE_TIMEOUT))
+                .await
+                .context("spawn_blocking panicked")??;
+        finalize_resolved_text(&raw, "codex CLI")
     }
 }
 

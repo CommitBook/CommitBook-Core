@@ -1,8 +1,7 @@
 use super::*;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use axum::routing::{get, post};
-use axum::Router;
+use axum::http::Request;
+use commitbook_engine::cron::FakeScheduler;
 use http_body_util::BodyExt;
 use std::process::Command as ProcessCommand;
 use tower::ServiceExt;
@@ -16,30 +15,21 @@ fn git_init(path: &Path) {
 }
 
 fn setup_test_app() -> (tempfile::TempDir, Router) {
+    setup_test_app_with(Arc::new(FakeScheduler::stopped()))
+}
+
+fn setup_test_app_with(scheduler: Arc<FakeScheduler>) -> (tempfile::TempDir, Router) {
     let tmp = tempfile::tempdir().unwrap();
     git_init(tmp.path());
     commitbook_engine::config::local::LocalConfig::init(tmp.path(), "0 * * * *").unwrap();
 
-    let state = Arc::new(AppState {
-        repo_path: tmp.path().to_path_buf(),
-    });
+    let state = Arc::new(AppState::with_scheduler(
+        tmp.path().to_path_buf(),
+        scheduler,
+        PathBuf::from("/opt/commitbook/bin/commitbook"),
+    ));
 
-    let app = Router::new()
-        .route("/", get(dashboard))
-        .route("/logs", get(logs_page))
-        .route("/config", get(config_page))
-        .route("/htmx/status", get(htmx_status))
-        .route("/htmx/providers", get(htmx_providers))
-        .route("/htmx/logs", get(htmx_logs))
-        .route("/api/status", get(api_status))
-        .route("/api/logs", get(api_logs))
-        .route("/api/config", post(api_config))
-        .route("/api/start", post(api_start))
-        .route("/api/stop", post(api_stop))
-        .route("/api/providers", get(api_providers))
-        .with_state(state);
-
-    (tmp, app)
+    (tmp, build_router(state))
 }
 
 async fn get_json<T: serde::de::DeserializeOwned>(app: Router, uri: &str) -> (StatusCode, T) {
@@ -160,14 +150,88 @@ async fn test_api_config_updates_schedule() {
 
 #[tokio::test]
 async fn test_api_config_rejects_invalid_cron() {
-    let (_tmp, app) = setup_test_app();
-    let (_, body) = post_json(
+    let (tmp, app) = setup_test_app();
+    let (status, body) = post_json(
         app,
         "/api/config",
         serde_json::json!({"schedule": "not a cron"}),
     )
     .await;
-    assert!(body.contains("Error"), "got: {}", body);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let action: ActionResponse = serde_json::from_str(&body).unwrap();
+    assert!(!action.success);
+    assert!(action.message.contains("Error"), "got: {}", body);
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
+    assert_eq!(config.schedule, "0 * * * *");
+}
+
+#[tokio::test]
+async fn config_update_reinstalls_running_scheduler() {
+    let fake = Arc::new(FakeScheduler::running("0 * * * *"));
+    let (tmp, app) = setup_test_app_with(Arc::clone(&fake));
+    let (status, body) = post_json(
+        app,
+        "/api/config",
+        serde_json::json!({"schedule": "*/15 * * * *"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Scheduler reinstalled"), "got: {body}");
+    assert_eq!(fake.installed_schedule().as_deref(), Some("*/15 * * * *"));
+    assert!(fake.calls().iter().any(|call| matches!(
+        call,
+        commitbook_engine::cron::fake::FakeCall::Install { binary, .. }
+            if binary == &PathBuf::from("/opt/commitbook/bin/commitbook")
+    )));
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
+    assert_eq!(config.schedule, "*/15 * * * *");
+}
+
+#[tokio::test]
+async fn config_update_reports_scheduler_failure_and_rolls_back() {
+    let fake = Arc::new(FakeScheduler::running("0 * * * *"));
+    fake.fail_next_install("launchctl load failed");
+    let (tmp, app) = setup_test_app_with(Arc::clone(&fake));
+    let (status, body) = post_json(
+        app,
+        "/api/config",
+        serde_json::json!({"schedule": "*/15 * * * *"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(body.contains("launchctl load failed"), "got: {body}");
+    assert!(body.contains("were restored"), "got: {body}");
+    assert_eq!(fake.installed_schedule().as_deref(), Some("0 * * * *"));
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
+    assert_eq!(config.schedule, "0 * * * *");
+}
+
+#[tokio::test]
+async fn config_update_rejected_while_repository_locked() {
+    let (tmp, app) = setup_test_app();
+    let _held = commitbook_engine::state::RepoLock::acquire(tmp.path()).unwrap();
+    let (status, body) = post_json(
+        app.clone(),
+        "/api/config",
+        serde_json::json!({"auto_push": false}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body.contains("already running"), "got: {body}");
+    let config = commitbook_engine::config::local::LocalConfig::load(tmp.path()).unwrap();
+    assert!(config.git.auto_push);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/start")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
 }
 
 #[tokio::test]
@@ -182,12 +246,11 @@ async fn test_api_config_partial_update() {
 }
 
 #[tokio::test]
-async fn test_api_providers_returns_list() {
+async fn test_api_providers_disabled_by_default() {
     let (_tmp, app) = setup_test_app();
     let (status, body): (_, Vec<ProviderInfo>) = get_json(app, "/api/providers").await;
     assert_eq!(status, StatusCode::OK);
-    // Should return at least one provider entry (even if unavailable)
-    assert!(!body.is_empty());
+    assert!(body.is_empty());
 }
 
 #[tokio::test]
@@ -223,12 +286,28 @@ fn test_escape_html_special_chars() {
 #[tokio::test]
 async fn test_api_config_error_is_escaped() {
     let (_tmp, app) = setup_test_app();
-    let (_, body) = post_json(
-        app,
-        "/api/config",
-        serde_json::json!({"schedule": "<script>alert(1)</script>"}),
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/config")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("schedule=%3Cscript%3Ealert(1)%3C%2Fscript%3E"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
     )
-    .await;
+    .unwrap();
     assert!(
         body.contains("&lt;script&gt;"),
         "error should be HTML-escaped, got: {}",
@@ -273,4 +352,414 @@ async fn test_dashboard_returns_html() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+async fn get_html(app: Router, uri: &str) -> String {
+    let response = app
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn config_ai_messages_json_and_form_save_and_reload() {
+    for content_type in ["application/json", "application/x-www-form-urlencoded"] {
+        let (tmp, app) = setup_test_app();
+        let initial = get_html(app.clone(), "/config").await;
+        assert!(initial.contains("AI commit messages"));
+        assert!(initial.contains(r#"value="false" selected>No"#));
+        for enabled in [true, false] {
+            let body = if content_type == "application/json" {
+                serde_json::json!({"ai_messages": enabled, "auto_push": false}).to_string()
+            } else {
+                format!("ai_messages={enabled}&auto_push=false&schedule=0+*+*+*+*&branch=main")
+            };
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/config")
+                        .header("content-type", content_type)
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let response_body = response.into_body().collect().await.unwrap().to_bytes();
+            assert!(String::from_utf8_lossy(&response_body).contains("Configuration saved."));
+            let config = LocalConfig::load(tmp.path()).unwrap();
+            assert_eq!(config.commit.ai_messages, enabled);
+            assert!(!config.git.auto_push);
+            let page = get_html(app.clone(), "/config").await;
+            assert!(page.contains(&format!(
+                r#"value="{enabled}" selected>{}"#,
+                if enabled { "Yes" } else { "No" }
+            )));
+        }
+    }
+}
+
+#[tokio::test]
+async fn config_partial_updates_preserve_ai_opt_in() {
+    let (tmp, app) = setup_test_app();
+    post_json(
+        app.clone(),
+        "/api/config",
+        serde_json::json!({"ai_messages": true}),
+    )
+    .await;
+    post_json(
+        app.clone(),
+        "/api/config",
+        serde_json::json!({"auto_push": false}),
+    )
+    .await;
+    assert!(LocalConfig::load(tmp.path()).unwrap().commit.ai_messages);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/config")
+                .header(
+                    "content-type",
+                    "application/x-www-form-urlencoded; charset=UTF-8",
+                )
+                .body(Body::from("auto_push=true"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let config = LocalConfig::load(tmp.path()).unwrap();
+    assert!(config.commit.ai_messages);
+    assert!(config.git.auto_push);
+}
+
+#[tokio::test]
+async fn config_rejects_invalid_ai_values_without_saving() {
+    for (content_type, body) in [
+        ("application/json", r#"{"ai_messages":"yes"}"#),
+        ("application/x-www-form-urlencoded", "ai_messages=yes"),
+    ] {
+        let (tmp, app) = setup_test_app();
+        let before = std::fs::read(LocalConfig::config_path(tmp.path())).unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/config")
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(response.status().is_client_error());
+        assert_eq!(
+            std::fs::read(LocalConfig::config_path(tmp.path())).unwrap(),
+            before
+        );
+    }
+}
+
+#[tokio::test]
+async fn provider_status_disabled_on_default_or_invalid_config() {
+    let (tmp, app) = setup_test_app();
+    for invalid_config in [false, true] {
+        if invalid_config {
+            std::fs::write(LocalConfig::config_path(tmp.path()), "invalid = [").unwrap();
+        }
+        for uri in ["/", "/htmx/providers"] {
+            let page = get_html(app.clone(), uri).await;
+            assert!(page.contains("AI commit messages disabled"));
+        }
+        let (_, providers): (_, Vec<ProviderInfo>) = get_json(app.clone(), "/api/providers").await;
+        assert!(providers.is_empty());
+    }
+}
+
+fn run_git(root: &Path, args: &[&str]) {
+    let result = ProcessCommand::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+fn conflict_app() -> (tempfile::TempDir, Router) {
+    let (tmp, app) = setup_test_app();
+    let root = tmp.path();
+    run_git(root, &["config", "user.name", "Test"]);
+    run_git(root, &["config", "user.email", "test@example.com"]);
+    run_git(root, &["config", "commit.gpgsign", "false"]);
+    run_git(root, &["checkout", "-b", "review-test"]);
+    let mut config = LocalConfig::load(root).unwrap();
+    config.git.branch = "review-test".into();
+    config.save(root).unwrap();
+    std::fs::write(root.join("note.md"), "base\n").unwrap();
+    run_git(root, &["add", "."]);
+    run_git(root, &["commit", "-m", "base"]);
+    run_git(root, &["checkout", "-b", "other"]);
+    std::fs::write(root.join("note.md"), "remote <script>alert(1)</script>\n").unwrap();
+    run_git(root, &["commit", "-am", "remote"]);
+    run_git(root, &["checkout", "review-test"]);
+    std::fs::write(root.join("note.md"), "local\n").unwrap();
+    run_git(root, &["commit", "-am", "local"]);
+    let result = ProcessCommand::new("git")
+        .args(["merge", "other"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    (tmp, app)
+}
+#[tokio::test]
+async fn conflict_endpoints_validate_revision_and_resolve_locally() {
+    let (tmp, app) = conflict_app();
+    let (_, views): (_, Vec<commitbook_engine::review::ConflictView>) =
+        get_json(app.clone(), "/api/conflicts").await;
+    assert_eq!(views.len(), 1);
+    assert!(views[0].local_present && views[0].remote_present);
+    let view = &views[0];
+    let stale = serde_json::json!({"path":view.path,"revision":"stale","action":"take_local"});
+    assert_eq!(
+        post_json(app.clone(), "/api/conflicts/resolve", stale)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+    let input = serde_json::json!({"path":view.path,"revision":view.revision,"action":"manual_edit","content":"edited resolution\n"});
+    {
+        let _lock = commitbook_engine::state::RepoLock::acquire(tmp.path()).unwrap();
+        assert_eq!(
+            post_json(app.clone(), "/api/conflicts/resolve", input.clone())
+                .await
+                .0,
+            StatusCode::CONFLICT
+        );
+    }
+    assert_eq!(
+        post_json(app.clone(), "/api/conflicts/resolve", input)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("note.md")).unwrap(),
+        "edited resolution\n"
+    );
+    let repo = commitbook_engine::git::GitRepo::open(tmp.path()).unwrap();
+    assert!(!repo.merge_in_progress());
+    let parents = ProcessCommand::new("git")
+        .args(["show", "-s", "--format=%P", "HEAD"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(parents.stdout)
+            .unwrap()
+            .split_whitespace()
+            .count(),
+        2
+    );
+}
+#[tokio::test]
+async fn preview_and_status_reads_do_not_repair_config_or_create_local_state() {
+    let (tmp, app) = setup_test_app();
+    let path = LocalConfig::config_path(tmp.path());
+    let original = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("config_version = \"1\"", "version = \"1\"");
+    std::fs::write(&path, &original).unwrap();
+    std::fs::remove_dir_all(LocalConfig::local_dir(tmp.path())).unwrap();
+    for endpoint in ["/api/status", "/api/changes", "/", "/config", "/changes"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(endpoint)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    assert!(!LocalConfig::local_dir(tmp.path()).exists());
+}
+#[tokio::test]
+async fn review_settings_support_json_and_form_and_preserve_defaults() {
+    let (tmp, app) = setup_test_app();
+    assert!(
+        !LocalConfig::load_read_only(tmp.path())
+            .unwrap()
+            .conflict
+            .review_ai_resolutions
+    );
+    assert_eq!(
+        post_json(
+            app.clone(),
+            "/api/config",
+            serde_json::json!({"review_ai_resolutions":true,"resolver":"codex"})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/config")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("review_ai_resolutions=false&resolver=manual"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let config = LocalConfig::load_read_only(tmp.path()).unwrap();
+    assert!(!config.conflict.review_ai_resolutions);
+    assert_eq!(config.conflict.resolver, "manual");
+    assert!(!config.commit.ai_messages);
+}
+
+struct FakeProposalResolver;
+
+#[async_trait::async_trait]
+impl commitbook_engine::ai::ConflictResolver for FakeProposalResolver {
+    fn name(&self) -> &str {
+        "fake"
+    }
+    fn key(&self) -> &str {
+        "fake"
+    }
+    fn is_available(&self) -> bool {
+        true
+    }
+    async fn resolve(
+        &self,
+        _: &commitbook_engine::git::GitConflict,
+        _: &Path,
+    ) -> anyhow::Result<commitbook_engine::ai::ConflictResolution> {
+        Ok(commitbook_engine::ai::ConflictResolution::WriteContent(
+            "proposed resolution\n".into(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn proposal_endpoints_reject_stale_proposal_version() {
+    let (tmp, app) = conflict_app();
+    let root = tmp.path();
+    let view = commitbook_engine::review::list(root).unwrap().remove(0);
+    {
+        let lock = commitbook_engine::state::RepoLock::acquire(root).unwrap();
+        commitbook_engine::review::propose_locked(
+            root,
+            &view.path,
+            &view.revision,
+            &FakeProposalResolver,
+            &lock,
+        )
+        .await
+        .unwrap();
+    }
+    let old = commitbook_engine::review::list(root).unwrap().remove(0);
+    {
+        let lock = commitbook_engine::state::RepoLock::acquire(root).unwrap();
+        commitbook_engine::review::propose_locked(
+            root,
+            &view.path,
+            &view.revision,
+            &FakeProposalResolver,
+            &lock,
+        )
+        .await
+        .unwrap();
+    }
+    let new = commitbook_engine::review::list(root).unwrap().remove(0);
+    assert_ne!(old.proposal_version, new.proposal_version);
+    for action in ["accept", "reject"] {
+        assert_eq!(
+            post_json(
+                app.clone(),
+                "/api/conflicts/proposal",
+                serde_json::json!({
+                    "path": old.path,
+                    "revision": old.revision,
+                    "proposal_version": old.proposal_version,
+                    "action": action
+                })
+            )
+            .await
+            .0,
+            StatusCode::CONFLICT
+        );
+    }
+    assert_eq!(
+        post_json(
+            app.clone(),
+            "/api/conflicts/proposal",
+            serde_json::json!({
+                "path": new.path,
+                "revision": new.revision,
+                "proposal_version": new.proposal_version,
+                "action": "accept"
+            })
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let repo = commitbook_engine::git::GitRepo::open(root).unwrap();
+    assert!(!repo.merge_in_progress());
+    assert_eq!(
+        std::fs::read_to_string(root.join("note.md")).unwrap(),
+        "proposed resolution\n"
+    );
+}
+
+#[tokio::test]
+async fn changes_api_lists_pending_snapshot_files() {
+    let (tmp, app) = setup_test_app();
+    let root = tmp.path();
+    run_git(root, &["config", "user.name", "Test"]);
+    run_git(root, &["config", "user.email", "test@example.com"]);
+    run_git(root, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(root.join("tracked.md"), "base\n").unwrap();
+    run_git(root, &["add", "tracked.md"]);
+    run_git(root, &["commit", "-m", "base"]);
+    std::fs::write(root.join("tracked.md"), "edited\n").unwrap();
+    std::fs::write(root.join("new.json"), "{}\n").unwrap();
+    let (status, preview): (_, commitbook_engine::inspection::CommitPreview) =
+        get_json(app, "/api/changes").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(preview
+        .entries
+        .iter()
+        .any(|e| e.path == "tracked.md" && e.change == "modified"));
+    assert!(preview
+        .entries
+        .iter()
+        .any(|e| e.path == "new.json" && e.change == "added"));
+    assert!(preview.policy.contains("non-Markdown"));
 }

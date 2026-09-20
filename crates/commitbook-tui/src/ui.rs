@@ -8,6 +8,44 @@ use crate::app::{App, Panel};
 
 pub fn draw(f: &mut Frame, app: &App) {
     let size = f.area();
+    if let Some(preview) = &app.preview {
+        let mut lines = vec![
+            Line::raw(preview.policy.clone()),
+            Line::raw(format!("Repository: {}", preview.repository)),
+            Line::raw(format!(
+                "Branch: {}  Remote: {}  Auto push: {}",
+                preview.branch.as_deref().unwrap_or("unknown"),
+                preview.remote.as_deref().unwrap_or("unknown"),
+                preview
+                    .auto_push
+                    .map(|v| if v { "yes" } else { "no" })
+                    .unwrap_or("unknown")
+            )),
+        ];
+        lines.extend(
+            preview
+                .blockers
+                .iter()
+                .map(|b| Line::raw(format!("Blocked: {b}"))),
+        );
+        lines.extend(preview.entries.iter().map(|e| {
+            Line::raw(format!(
+                "{} {} (staged: {}, unstaged: {})",
+                e.change, e.path, e.staged, e.unstaged
+            ))
+        }));
+        f.render_widget(
+            Paragraph::new(lines)
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .scroll((app.preview_scroll as u16, 0))
+                .block(panel_block(
+                    " Changes • Esc: dashboard • ↑↓: scroll • r: refresh ",
+                    true,
+                )),
+            size,
+        );
+        return;
+    }
 
     // Main layout: body + footer
     let outer = Layout::default()
@@ -79,7 +117,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 
     let last_commit_text = app.last_commit.as_deref().unwrap_or("never");
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(vec![Span::raw("  State:    "), state_indicator]),
         Line::from(format!("  Enabled:  {}", enabled_text)),
         Line::from(format!("  Schedule: {}", app.schedule_desc)),
@@ -88,8 +126,29 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Line::raw(""),
         Line::from(format!("  Changes:  {}", changes_text)),
     ];
+    if let Some(error) = &app.action_error {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            format!("  Action failed: {error}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
 
-    let paragraph = Paragraph::new(lines).block(block);
+    if let Some(status) = &app.repository_status {
+        lines = vec![Line::raw(format!(
+            "Scheduler: {} • {}",
+            if app.running { "running" } else { "stopped" },
+            app.schedule_desc
+        ))];
+        lines.extend(status.lines().into_iter().map(Line::raw));
+        if let Some(error) = &app.action_error {
+            lines.push(Line::raw(format!("Action failed: {error}")));
+        }
+    }
+    let paragraph = Paragraph::new(lines)
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .scroll((app.status_scroll as u16, 0))
+        .block(block);
     f.render_widget(paragraph, area);
 }
 
@@ -146,6 +205,17 @@ fn draw_config(f: &mut Frame, app: &App, area: Rect) {
     let active = app.active_panel == Panel::Config;
     let block = panel_block(" Config ", active);
 
+    if app
+        .repository_status
+        .as_ref()
+        .is_some_and(|s| s.schedule.is_none())
+    {
+        f.render_widget(
+            Paragraph::new("Configuration unavailable. See status diagnostics.").block(block),
+            area,
+        );
+        return;
+    }
     let lines = vec![
         Line::from(format!("  schedule:      {}", app.schedule)),
         Line::from(format!("  auto_push:     {}", app.auto_push)),
@@ -162,7 +232,7 @@ fn draw_providers(f: &mut Frame, app: &App, area: Rect) {
     let block = panel_block(" Providers ", active);
 
     if app.providers.is_empty() {
-        let paragraph = Paragraph::new("  No providers configured")
+        let paragraph = Paragraph::new("  AI commit messages disabled")
             .style(Style::default().fg(Color::DarkGray))
             .block(block);
         f.render_widget(paragraph, area);
@@ -229,9 +299,13 @@ fn draw_footer(f: &mut Frame, _app: &App, area: Rect) {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(":scroll logs"),
+        Span::raw(":scroll status/logs  p:preview"),
     ]);
 
     let paragraph = Paragraph::new(keys).style(Style::default().fg(Color::White));
     f.render_widget(paragraph, area);
 }
+
+#[cfg(test)]
+#[path = "ui_tests.rs"]
+mod tests;

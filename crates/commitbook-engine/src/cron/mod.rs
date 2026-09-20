@@ -1,3 +1,4 @@
+pub mod fake;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[allow(dead_code)]
 pub mod linux;
@@ -7,6 +8,37 @@ pub mod macos;
 
 use anyhow::Result;
 use std::path::Path;
+
+pub use fake::FakeScheduler;
+
+/// Abstraction over the platform scheduler (launchd or crontab) so settings
+/// operations and UI code can be exercised without touching the real one.
+pub trait SchedulerAdapter: Send + Sync {
+    /// Install or replace the job for `repo_root`. Returns the scheduler id.
+    fn install(&self, repo_root: &Path, schedule: &str, binary: &Path) -> Result<String>;
+    /// Remove the job for `repo_root`, if any.
+    fn uninstall(&self, repo_root: &Path, scheduler_id: Option<&str>) -> Result<()>;
+    /// Whether a job is currently loaded for `repo_root`.
+    fn is_loaded(&self, repo_root: &Path) -> bool;
+}
+
+/// The real platform scheduler, delegating to the free functions below.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SystemScheduler;
+
+impl SchedulerAdapter for SystemScheduler {
+    fn install(&self, repo_root: &Path, schedule: &str, binary: &Path) -> Result<String> {
+        install(repo_root, schedule, binary)
+    }
+
+    fn uninstall(&self, repo_root: &Path, scheduler_id: Option<&str>) -> Result<()> {
+        uninstall(repo_root, scheduler_id)
+    }
+
+    fn is_loaded(&self, repo_root: &Path) -> bool {
+        is_loaded(repo_root)
+    }
+}
 
 /// Cron schedule presets mapped to 5-field cron expressions.
 pub fn resolve_schedule(input: &str) -> String {
@@ -41,43 +73,80 @@ pub fn validate_cron_expression(expr: &str) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("Invalid {} field '{}': {}", label, part, e))?;
     }
 
+    // `*/N` restarts at each clock-field boundary. It is only a uniform
+    // "every N" interval when N divides that boundary exactly; for example,
+    // `*/7` has a four-minute gap between 00:56 and 01:00.
+    if let Some(step) = parts[0].strip_prefix("*/") {
+        let n: u32 = step.parse().expect("step was validated above");
+        if 60 % n != 0 {
+            anyhow::bail!(
+                "Minute interval {} does not divide evenly into 60; choose a divisor of 60",
+                n
+            );
+        }
+    }
+    if let Some(step) = parts[1].strip_prefix("*/") {
+        let n: u32 = step.parse().expect("step was validated above");
+        if 24 % n != 0 {
+            anyhow::bail!(
+                "Hour interval {} does not divide evenly into 24; choose a divisor of 24",
+                n
+            );
+        }
+    }
+
     Ok(())
 }
 
+/// Validate both cron syntax and whether this platform's scheduler can
+/// represent the schedule without changing its meaning.
+pub fn validate_platform_schedule(expr: &str) -> Result<()> {
+    validate_cron_expression(expr)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        macos::validate_schedule(expr)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
 /// Convert a cron expression to an interval in seconds (for launchd StartInterval).
-pub fn cron_to_interval_seconds(cron_expr: &str) -> u64 {
+pub fn cron_to_interval_seconds(cron_expr: &str) -> Result<u64> {
+    validate_cron_expression(cron_expr)?;
     let parts: Vec<&str> = cron_expr.split_whitespace().collect();
-    if parts.len() != 5 {
-        return 3600;
+
+    if parts.as_slice() == ["*", "*", "*", "*", "*"] {
+        return Ok(60);
     }
 
     let minute = parts[0];
     let hour = parts[1];
 
     // */N * * * * → every N minutes
-    if let Some(step) = minute.strip_prefix("*/") {
-        if let Ok(n) = step.parse::<u64>() {
-            if n > 0 {
-                return n * 60;
-            }
-        }
+    if parts[1..] == ["*", "*", "*", "*"] && minute.starts_with("*/") {
+        let n: u64 = minute[2..].parse().expect("cron was validated above");
+        return Ok(n * 60);
     }
 
     // 0 */N * * * → every N hours
-    if minute == "0" {
+    if minute == "0" && parts[2..] == ["*", "*", "*"] {
         if let Some(step) = hour.strip_prefix("*/") {
-            if let Ok(n) = step.parse::<u64>() {
-                if n > 0 {
-                    return n * 3600;
-                }
-            }
+            let n: u64 = step.parse().expect("cron was validated above");
+            return Ok(n * 3600);
         }
         if hour == "*" {
-            return 3600;
+            return Ok(3600);
         }
     }
 
-    3600 // default: hourly
+    anyhow::bail!(
+        "Cron expression '{}' is calendar-based and cannot be represented as a launchd interval",
+        cron_expr
+    )
 }
 
 /// Human-readable description of a cron expression.
@@ -96,11 +165,21 @@ pub fn describe_schedule(cron_expr: &str) -> String {
                 return cron_expr.to_string();
             }
             if let Some(step) = parts[0].strip_prefix("*/") {
-                return format!("Every {} minutes", step);
+                if step
+                    .parse::<u32>()
+                    .is_ok_and(|minutes| minutes > 0 && 60 % minutes == 0)
+                {
+                    return format!("Every {} minutes", step);
+                }
             }
             if parts[0] == "0" {
                 if let Some(step) = parts[1].strip_prefix("*/") {
-                    return format!("Every {} hours", step);
+                    if step
+                        .parse::<u32>()
+                        .is_ok_and(|hours| hours > 0 && 24 % hours == 0)
+                    {
+                        return format!("Every {} hours", step);
+                    }
                 }
             }
             format!("Cron: {}", cron_expr)
@@ -133,8 +212,8 @@ pub fn parse_human_interval(input: &str) -> Option<String> {
 
     match unit {
         "m" | "min" | "mins" | "minute" | "minutes" => {
-            // `*/N` covers 1..=59. 60+ would overflow; the user can write `1h`.
-            if (1..=59).contains(&n) {
+            // A step is a uniform interval only when it divides the hour.
+            if (1..=59).contains(&n) && 60 % n == 0 {
                 Some(format!("*/{n} * * * *"))
             } else {
                 None
@@ -143,7 +222,7 @@ pub fn parse_human_interval(input: &str) -> Option<String> {
         "h" | "hr" | "hrs" | "hour" | "hours" => {
             if n == 1 {
                 Some("0 * * * *".to_string())
-            } else if (2..=23).contains(&n) {
+            } else if (2..=23).contains(&n) && 24 % n == 0 {
                 Some(format!("0 */{n} * * *"))
             } else {
                 None

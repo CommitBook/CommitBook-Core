@@ -19,6 +19,13 @@ pub struct FileLogger {
 }
 
 impl FileLogger {
+    /// Inspect existing logs without creating directories.
+    pub fn read_only(repo_path: &Path, max_log_days: u32) -> Self {
+        Self {
+            logs_dir: repo_path.join(".CommitBook/local/logs"),
+            max_log_days,
+        }
+    }
     pub fn new(repo_path: &Path, max_log_days: u32) -> Result<Self> {
         let logs_dir = repo_path.join(".CommitBook").join("local").join("logs");
         fs::create_dir_all(&logs_dir)

@@ -1,6 +1,6 @@
 //! SSH/GPG commit signing on top of libgit2.
 //!
-//! Reads `commit.gpgsign`, `gpg.format`, `user.signingkey`, and
+//! Reads `commit.gpgsign`, `gpg.format`, optional `user.signingkey`, and
 //! `gpg.ssh.program` / `gpg.program` from libgit2's config (which honors
 //! the same `~/.gitconfig` system git reads). When signing is enabled,
 //! shells out to ssh-keygen or gpg with the unsigned commit object on
@@ -8,7 +8,9 @@
 //!
 //! Mobile (iOS/Android): always returns Ok(None). Sandbox forbids exec.
 
-use anyhow::{Context, Result};
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+use anyhow::Context;
+use anyhow::Result;
 use git2::Repository;
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -135,21 +137,14 @@ fn sign_ssh(config: &git2::Config, unsigned_bytes: &[u8]) -> Result<String> {
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn sign_gpg(config: &git2::Config, unsigned_bytes: &[u8]) -> Result<String> {
-    let signing_key = config
-        .get_string("user.signingkey")
-        .context("commit.gpgsign=true but user.signingkey not set")?;
+    let signing_key = config.get_string("user.signingkey").ok();
     let program = config
         .get_string("gpg.program")
         .unwrap_or_else(|_| "gpg".to_string());
 
-    let mut child = Command::new(&program)
-        .args([
-            "--sign",
-            "--armor",
-            "--detach-sign",
-            "--local-user",
-            &signing_key,
-        ])
+    let mut command = Command::new(&program);
+    command.args(gpg_arguments(signing_key.as_deref()));
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -171,6 +166,20 @@ fn sign_gpg(config: &git2::Config, unsigned_bytes: &[u8]) -> Result<String> {
     }
     let sig = String::from_utf8(output.stdout).context("gpg produced non-UTF8 sig")?;
     Ok(sig)
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn gpg_arguments(signing_key: Option<&str>) -> Vec<String> {
+    let mut arguments = vec![
+        "--sign".to_string(),
+        "--armor".to_string(),
+        "--detach-sign".to_string(),
+    ];
+    if let Some(signing_key) = signing_key {
+        arguments.push("--local-user".to_string());
+        arguments.push(signing_key.to_string());
+    }
+    arguments
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]

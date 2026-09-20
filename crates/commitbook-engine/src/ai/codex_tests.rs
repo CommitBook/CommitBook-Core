@@ -26,3 +26,28 @@ fn test_codex_is_available_returns_bool() {
     let _commit: bool = CommitMessageProvider::is_available(&provider);
     let _resolve: bool = ConflictResolver::is_available(&provider);
 }
+
+#[test]
+fn test_codex_command_uses_noninteractive_read_only_contract() {
+    let command = command(Path::new("/tmp/repo"), Path::new("/tmp/last-message"));
+    let args: Vec<String> = command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+
+    assert_eq!(
+        args,
+        [
+            "exec",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--color",
+            "never",
+            "--output-last-message",
+            "/tmp/last-message",
+            "-",
+        ]
+    );
+    assert!(!args.iter().any(|arg| arg == "--quiet"));
+}

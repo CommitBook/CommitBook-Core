@@ -33,6 +33,21 @@
                 <option value="false" {% if !auto_push %}selected{% endif %}>No</option>
             </select>
         </div>
+        <div class="form-row">
+            <label for="ai_messages">AI commit messages</label>
+            <select name="ai_messages" id="ai_messages" aria-describedby="ai-messages-help">
+                <option value="false" {% if !ai_messages %}selected{% endif %}>No</option>
+                <option value="true" {% if ai_messages %}selected{% endif %}>Yes</option>
+            </select>
+        </div>
+        <p id="ai-messages-help">No uses local timestamp text: Writing YYYY-MM-DD HH:MM:SS. Yes tries installed AI providers, with timestamp text as a fallback.</p>
+        <div class="form-row"><label for="resolver">Conflict resolver</label><select id="resolver" name="resolver">
+        <option value="{{ resolver }}" selected>{{ resolver }}</option>
+        <option value="manual">manual</option><option value="claude">claude</option><option value="codex">codex</option><option value="copilot">copilot</option><option value="gemini">gemini</option><option value="cursor">cursor</option></select></div>
+        <div class="form-row"><label for="review_ai_resolutions">Review AI resolutions</label><select id="review_ai_resolutions" name="review_ai_resolutions">
+        <option value="false" {% if !review_ai_resolutions %}selected{% endif %}>Apply automatically</option>
+        <option value="true" {% if review_ai_resolutions %}selected{% endif %}>Wait for review</option></select></div>
+        <p>Review stores AI proposals locally and pauses the merge until you resolve them. Existing proposals still require review after this setting is turned off.</p>
         <div class="actions">
             <button type="submit">Save</button>
         </div>

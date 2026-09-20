@@ -39,6 +39,21 @@ fn test_changes_summary_total() {
 }
 
 #[test]
+fn test_push_rejection_classifies_callback_non_fast_forward() {
+    let error = push_rejection_error("refs/heads/main: non-fast-forward");
+    assert!(error.chain().any(|cause| {
+        cause
+            .downcast_ref::<git2::Error>()
+            .is_some_and(|error| error.code() == git2::ErrorCode::NotFastForward)
+    }));
+
+    let rejected = push_rejection_error("refs/heads/main: pre-receive hook declined");
+    assert!(!rejected
+        .chain()
+        .any(|cause| cause.downcast_ref::<git2::Error>().is_some()));
+}
+
+#[test]
 fn test_changes_summary_text_empty() {
     let s = ChangesSummary::default();
     assert_eq!(s.to_summary_text(), "no changes");
@@ -143,6 +158,69 @@ fn test_stage_and_commit_lifecycle() {
 }
 
 #[test]
+fn test_commit_does_not_overwrite_an_external_ref_advance() {
+    let fx = setup_repo_with_base(&[("notes.md", "base\n")]);
+    let raw = git2::Repository::open(&fx.repo_root).unwrap();
+    let head = raw.head().unwrap().peel_to_commit().unwrap();
+    let tree = head.tree().unwrap();
+    let signature = raw.signature().unwrap();
+    let external_oid = raw
+        .commit(
+            None,
+            &signature,
+            &signature,
+            "external advance",
+            &tree,
+            &[&head],
+        )
+        .unwrap();
+    drop(tree);
+    drop(head);
+    drop(raw);
+
+    fs::write(fx.repo_root.join("notes.md"), "local\n").unwrap();
+    fx.repo().stage_all().unwrap();
+    set_commit_publish_advance_to(external_oid);
+    let error = fx.repo().commit("local commit").unwrap_err().to_string();
+
+    assert!(error.contains("refusing to overwrite external Git work"));
+    assert_eq!(
+        fx.repo().rev_parse("HEAD").unwrap(),
+        external_oid.to_string()
+    );
+}
+
+#[test]
+fn test_commit_does_not_publish_after_same_tip_branch_switch() {
+    let fx = setup_repo_with_base(&[("notes.md", "base\n")]);
+    let raw = git2::Repository::open(&fx.repo_root).unwrap();
+    let original_branch = fx.repo().current_branch().unwrap();
+    let original_oid = raw.head().unwrap().target().unwrap();
+    let original_commit = raw.find_commit(original_oid).unwrap();
+    raw.branch("other", &original_commit, false).unwrap();
+    drop(original_commit);
+    drop(raw);
+
+    fs::write(fx.repo_root.join("notes.md"), "local\n").unwrap();
+    fx.repo().stage_all().unwrap();
+    set_commit_publish_switch_head_to("refs/heads/other");
+    let error = fx.repo().commit("local commit").unwrap_err().to_string();
+
+    assert!(error.contains("HEAD changed"));
+    assert_eq!(fx.repo().current_branch().unwrap(), "other");
+    assert_eq!(
+        fx.repo()
+            .rev_parse(&format!("refs/heads/{original_branch}"))
+            .unwrap(),
+        original_oid.to_string()
+    );
+    assert_eq!(
+        fx.repo().rev_parse("refs/heads/other").unwrap(),
+        original_oid.to_string()
+    );
+}
+
+#[test]
 fn test_changes_summary_modified() {
     let (tmp, _repo) = create_temp_repo();
     let git_repo = GitRepo::open(tmp.path()).unwrap();
@@ -157,6 +235,26 @@ fn test_changes_summary_modified() {
     fs::write(&file_path, "v2").unwrap();
     let changes = git_repo.changes_summary().unwrap();
     assert_eq!(changes.modified_files.len(), 1);
+}
+
+#[test]
+fn test_diff_summary_is_empty_for_clean_repository() {
+    let fx = setup_repo_with_base(&[("notes.md", "clean\n")]);
+
+    // libgit2 1.9 formats an empty diff as a zero-change summary. Preserve the
+    // public empty-string result while exercising the former null-buffer path.
+    assert_eq!(fx.repo().diff_summary().unwrap(), "");
+}
+
+#[test]
+fn test_compiled_libgit2_supports_https_and_ssh_transports() {
+    let version = git2::Version::get();
+
+    assert!(
+        version.https(),
+        "libgit2 was compiled without HTTPS support"
+    );
+    assert!(version.ssh(), "libgit2 was compiled without SSH support");
 }
 
 #[test]
@@ -338,6 +436,7 @@ fn test_merge_ff_only_fast_forwards_when_linear() {
         .unwrap();
     assert!(advanced);
     assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), remote_sha);
+    assert!(!fx.repo.has_dirty_changes().unwrap());
 }
 
 #[test]
@@ -361,73 +460,6 @@ fn test_merge_ff_only_rejects_divergent() {
     assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), local_sha);
 }
 
-// --- status_markdown tests ---
-
-#[test]
-fn test_status_markdown_clean_working_tree() {
-    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
-    let status = fx.repo().status_markdown().unwrap();
-    assert!(status.is_empty());
-}
-
-#[test]
-fn test_status_markdown_modified() {
-    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
-    fs::write(fx.repo_root.join("notes.md"), "# modified\n").unwrap();
-
-    let status = fx.repo().status_markdown().unwrap();
-    assert_eq!(status.modified, vec!["notes.md".to_string()]);
-    assert!(status.added.is_empty());
-    assert!(status.deleted.is_empty());
-}
-
-#[test]
-fn test_status_markdown_added_untracked() {
-    let fx = setup_repo_with_base(&[]);
-    fs::write(fx.repo_root.join("new.md"), "# new\n").unwrap();
-
-    let status = fx.repo().status_markdown().unwrap();
-    assert_eq!(status.added, vec!["new.md".to_string()]);
-    assert!(status.modified.is_empty());
-    assert!(status.deleted.is_empty());
-}
-
-#[test]
-fn test_status_markdown_deleted() {
-    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
-    fs::remove_file(fx.repo_root.join("notes.md")).unwrap();
-
-    let status = fx.repo().status_markdown().unwrap();
-    assert_eq!(status.deleted, vec!["notes.md".to_string()]);
-    assert!(status.modified.is_empty());
-    assert!(status.added.is_empty());
-}
-
-#[test]
-fn test_status_markdown_skips_non_markdown() {
-    let fx = setup_repo_with_base(&[]);
-    fs::write(fx.repo_root.join("script.sh"), "#!/bin/bash\n").unwrap();
-    fs::write(fx.repo_root.join("image.png"), b"fake").unwrap();
-    fs::write(fx.repo_root.join("real.md"), "# real\n").unwrap();
-
-    let status = fx.repo().status_markdown().unwrap();
-    assert_eq!(status.added, vec!["real.md".to_string()]);
-    assert!(!status.added.iter().any(|p| p.ends_with(".sh")));
-    assert!(!status.added.iter().any(|p| p.ends_with(".png")));
-}
-
-#[test]
-fn test_status_markdown_skips_hidden_dirs() {
-    let fx = setup_repo_with_base(&[]);
-    fs::create_dir_all(fx.repo_root.join(".hidden")).unwrap();
-    fs::write(fx.repo_root.join(".hidden/secret.md"), "# secret\n").unwrap();
-    fs::write(fx.repo_root.join("visible.md"), "# visible\n").unwrap();
-
-    let status = fx.repo().status_markdown().unwrap();
-    assert_eq!(status.added, vec!["visible.md".to_string()]);
-    assert!(!status.added.iter().any(|p| p.contains(".hidden")));
-}
-
 #[test]
 fn test_changes_summary_deleted() {
     let (tmp, _repo) = create_temp_repo();
@@ -445,26 +477,141 @@ fn test_changes_summary_deleted() {
     assert_eq!(changes.deleted_files.len(), 1);
 }
 
-// --- has_dirty_markdown / merge_from_remote / list_conflicted_paths tests ---
-
 #[test]
-fn test_has_dirty_markdown_clean_repo() {
-    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
-    assert!(!fx.repo().has_dirty_markdown().unwrap());
-}
-
-#[test]
-fn test_has_dirty_markdown_modified_md() {
-    let fx = setup_repo_with_base(&[("notes.md", "# notes\n")]);
-    fs::write(fx.repo_root.join("notes.md"), "# modified\n").unwrap();
-    assert!(fx.repo().has_dirty_markdown().unwrap());
-}
-
-#[test]
-fn test_has_dirty_markdown_ignores_non_md() {
+fn test_has_dirty_changes_includes_hidden_and_non_markdown_files() {
     let fx = setup_repo_with_base(&[]);
-    fs::write(fx.repo_root.join("script.sh"), "#!/bin/bash\n").unwrap();
-    assert!(!fx.repo().has_dirty_markdown().unwrap());
+    fs::create_dir_all(fx.repo_root.join(".hidden")).unwrap();
+    fs::write(fx.repo_root.join(".hidden/data.bin"), b"data").unwrap();
+    assert!(fx.repo().has_dirty_changes().unwrap());
+}
+
+#[test]
+fn test_has_dirty_changes_excludes_gitignored_files() {
+    let fx = setup_repo_with_base(&[(".gitignore", "ignored/\n")]);
+    fs::create_dir_all(fx.repo_root.join("ignored")).unwrap();
+    fs::write(fx.repo_root.join("ignored/secret.txt"), "secret").unwrap();
+    assert!(!fx.repo().has_dirty_changes().unwrap());
+}
+
+#[test]
+fn test_commit_selected_paths_preserves_unrelated_staged_changes() {
+    let fx = setup_repo_with_base(&[("note.md", "old\n")]);
+    fs::write(fx.repo_root.join("note.md"), "staged user edit\n").unwrap();
+    fx.repo().stage_paths(&["note.md".to_string()]).unwrap();
+    fs::create_dir_all(fx.repo_root.join(".CommitBook")).unwrap();
+    fs::write(
+        fx.repo_root.join(".CommitBook/config.toml"),
+        "config_version = \"1\"\n",
+    )
+    .unwrap();
+    fs::write(fx.repo_root.join(".CommitBook/.gitignore"), "/local/\n").unwrap();
+
+    let repo = fx.repo();
+    let committed = repo
+        .commit_selected_paths(
+            &[".CommitBook/config.toml", ".CommitBook/.gitignore"],
+            "Initialize CommitBook metadata",
+        )
+        .unwrap();
+    assert!(committed.is_some());
+    assert_eq!(repo.show_file_at_ref("HEAD", "note.md").unwrap(), "old\n");
+    assert_eq!(
+        repo.show_file_at_ref("HEAD", ".CommitBook/.gitignore")
+            .unwrap(),
+        "/local/\n"
+    );
+    let status = git2::Repository::open(&fx.repo_root)
+        .unwrap()
+        .status_file(Path::new("note.md"))
+        .unwrap();
+    assert!(status.is_index_modified());
+}
+
+#[test]
+fn test_commit_selected_paths_clears_stale_staged_blob_when_worktree_matches_head() {
+    let fx = setup_repo_with_base(&[(".CommitBook/config.toml", "version = 1\n")]);
+    let config_path = fx.repo_root.join(".CommitBook/config.toml");
+    fs::write(&config_path, "staged stale value\n").unwrap();
+    fx.repo()
+        .stage_paths(&[".CommitBook/config.toml".to_string()])
+        .unwrap();
+    fs::write(&config_path, "version = 1\n").unwrap();
+    let branch = fx.repo().current_branch().unwrap();
+
+    let committed = fx
+        .repo()
+        .commit_selected_paths_on_branch(
+            &[".CommitBook/config.toml"],
+            "Repair CommitBook metadata",
+            &branch,
+        )
+        .unwrap();
+
+    assert!(committed.is_none());
+    let status = git2::Repository::open(&fx.repo_root)
+        .unwrap()
+        .status_file(Path::new(".CommitBook/config.toml"))
+        .unwrap();
+    assert_eq!(status, git2::Status::CURRENT);
+}
+
+#[test]
+fn test_commit_selected_paths_clears_staged_deletion_when_worktree_matches_head() {
+    let fx = setup_repo_with_base(&[(".CommitBook/config.toml", "version = 1\n")]);
+    let config_path = fx.repo_root.join(".CommitBook/config.toml");
+    fs::remove_file(&config_path).unwrap();
+    fx.repo().stage_all().unwrap();
+    fs::write(&config_path, "version = 1\n").unwrap();
+    let branch = fx.repo().current_branch().unwrap();
+
+    let committed = fx
+        .repo()
+        .commit_selected_paths_on_branch(
+            &[".CommitBook/config.toml"],
+            "Repair CommitBook metadata",
+            &branch,
+        )
+        .unwrap();
+
+    assert!(committed.is_none());
+    let status = git2::Repository::open(&fx.repo_root)
+        .unwrap()
+        .status_file(Path::new(".CommitBook/config.toml"))
+        .unwrap();
+    assert_eq!(status, git2::Status::CURRENT);
+}
+
+#[test]
+fn test_commit_selected_paths_on_branch_rejects_different_head() {
+    let fx = setup_repo_with_base(&[("note.md", "old\n")]);
+    let configured_branch = fx.repo().current_branch().unwrap();
+    let repo = git2::Repository::open(&fx.repo_root).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("other", &head, false).unwrap();
+    repo.set_head("refs/heads/other").unwrap();
+    drop(head);
+    drop(repo);
+    fs::create_dir_all(fx.repo_root.join(".CommitBook")).unwrap();
+    fs::write(
+        fx.repo_root.join(".CommitBook/config.toml"),
+        "config_version = \"1\"\n",
+    )
+    .unwrap();
+
+    let head_before = fx.repo().rev_parse("HEAD").unwrap();
+    let error = fx
+        .repo()
+        .commit_selected_paths_on_branch(
+            &[".CommitBook/config.toml"],
+            "Initialize CommitBook metadata",
+            &configured_branch,
+        )
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("does not match configured branch"));
+    assert_eq!(fx.repo().rev_parse("HEAD").unwrap(), head_before);
+    assert!(fx.repo().has_dirty_changes().unwrap());
 }
 
 #[test]
@@ -595,6 +742,23 @@ fn test_finalize_merge_commit_after_resolution() {
 }
 
 #[test]
+fn test_finalize_merge_commit_requires_merge_in_progress() {
+    let fx = setup_repo_with_base(&[("notes.md", "base\n")]);
+    fs::write(fx.repo_root.join("notes.md"), "staged edit\n").unwrap();
+    fx.repo().stage_paths(&["notes.md".to_string()]).unwrap();
+    let head_before = fx.repo().rev_parse("HEAD").unwrap();
+
+    let error = fx
+        .repo()
+        .finalize_merge_commit(None)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("no merge is in progress"));
+    assert_eq!(fx.repo().rev_parse("HEAD").unwrap(), head_before);
+}
+
+#[test]
 fn test_merge_abort_resets_conflicted_state() {
     let fx = setup_repo_with_bare_remote();
 
@@ -663,6 +827,241 @@ fn test_fast_forward_refuses_to_overwrite_dirty_tracked_file() {
 }
 
 #[test]
+fn test_fast_forward_preserves_unrelated_local_deletion() {
+    let fx = setup_repo_with_bare_remote();
+    fs::write(fx.repo_dir.path().join("keep.txt"), "tracked\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add tracked file").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "remote.md", "remote\n");
+    fs::remove_file(fx.repo_dir.path().join("keep.txt")).unwrap();
+
+    let outcome = fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
+    assert_eq!(outcome, MergeOutcome::Clean);
+    assert!(!fx.repo_dir.path().join("keep.txt").exists());
+    assert!(fx.repo_dir.path().join("remote.md").exists());
+}
+
+#[test]
+fn test_fast_forward_blocks_untracked_remote_addition_collision() {
+    let fx = setup_repo_with_bare_remote();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "collision.txt", "remote\n");
+    fs::write(fx.repo_dir.path().join("collision.txt"), "local\n").unwrap();
+
+    let error = fx
+        .repo
+        .merge_from_remote("origin", &fx.branch)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("collision.txt"));
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("collision.txt")).unwrap(),
+        "local\n"
+    );
+}
+
+#[test]
+fn test_fast_forward_blocks_ignored_remote_addition_collision() {
+    let fx = setup_repo_with_bare_remote();
+    fs::write(fx.repo_dir.path().join(".gitignore"), "collision.txt\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("ignore collision path").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    fs::write(other.path().join("collision.txt"), "remote\n").unwrap();
+    let other_repo = GitRepo::open(other.path()).unwrap();
+    other_repo
+        .stage_paths(&["collision.txt".to_string()])
+        .unwrap();
+    other_repo.commit("force tracked ignored path").unwrap();
+    other_repo.push("origin", &fx.branch).unwrap();
+
+    fs::write(fx.repo_dir.path().join("collision.txt"), "local ignored\n").unwrap();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let error = fx
+        .repo
+        .merge_from_remote("origin", &fx.branch)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("collision.txt"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("collision.txt")).unwrap(),
+        "local ignored\n"
+    );
+}
+
+#[test]
+fn test_fast_forward_blocks_staged_new_remote_addition_collision() {
+    let fx = setup_repo_with_bare_remote();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "collision.txt", "remote\n");
+    fs::write(fx.repo_dir.path().join("collision.txt"), "local\n").unwrap();
+    fx.repo.stage_paths(&["collision.txt".to_string()]).unwrap();
+
+    let error = fx
+        .repo
+        .merge_from_remote("origin", &fx.branch)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("collision.txt"));
+}
+
+#[test]
+fn test_fast_forward_blocking_parent_does_not_advance_head() {
+    let fx = setup_repo_with_bare_remote();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "folder/remote.md", "remote\n");
+    fs::write(fx.repo_dir.path().join("folder"), "blocking file\n").unwrap();
+
+    assert!(fx.repo.merge_from_remote("origin", &fx.branch).is_err());
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("folder")).unwrap(),
+        "blocking file\n"
+    );
+}
+
+#[test]
+fn test_fast_forward_checkout_failure_precedes_ref_advancement() {
+    let fx = setup_repo_with_bare_remote();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "remote.md", "remote\n");
+    set_fast_forward_failpoint(FastForwardFailpoint::BeforeCheckout);
+
+    let error = fx
+        .repo
+        .merge_from_remote("origin", &fx.branch)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("BeforeCheckout"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert!(!fx.repo_dir.path().join("remote.md").exists());
+}
+
+#[test]
+fn test_fast_forward_ref_publication_failure_rolls_back_checkout() {
+    let fx = setup_repo_with_bare_remote();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "remote.md", "remote\n");
+    set_fast_forward_failpoint(FastForwardFailpoint::BeforeRefPublication);
+
+    let error = fx.repo.merge_from_remote("origin", &fx.branch).unwrap_err();
+
+    assert!(format!("{error:#}").contains("BeforeRefPublication"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert!(!fx.repo_dir.path().join("remote.md").exists());
+    assert!(!fx.repo.has_dirty_changes().unwrap());
+}
+
+#[test]
+fn test_fast_forward_does_not_overwrite_external_branch_advance() {
+    let fx = setup_repo_with_bare_remote();
+    let raw = git2::Repository::open(fx.repo_dir.path()).unwrap();
+    let head = raw.head().unwrap().peel_to_commit().unwrap();
+    let tree = head.tree().unwrap();
+    let signature = raw.signature().unwrap();
+    let external_oid = raw
+        .commit(
+            None,
+            &signature,
+            &signature,
+            "external local commit",
+            &tree,
+            &[&head],
+        )
+        .unwrap();
+    drop(tree);
+    drop(head);
+    drop(raw);
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "remote.md", "remote\n");
+    set_fast_forward_external_advance_to(external_oid);
+
+    let error = fx
+        .repo
+        .merge_from_remote("origin", &fx.branch)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("refusing to overwrite external Git work"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), external_oid.to_string());
+    assert!(!fx.repo_dir.path().join("remote.md").exists());
+}
+
+#[test]
+fn test_fast_forward_does_not_update_same_tip_switched_branch() {
+    let fx = setup_repo_with_bare_remote();
+    let raw = git2::Repository::open(fx.repo_dir.path()).unwrap();
+    let original_oid = raw.head().unwrap().target().unwrap();
+    let original_commit = raw.find_commit(original_oid).unwrap();
+    raw.branch("other", &original_commit, false).unwrap();
+    drop(original_commit);
+    drop(raw);
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "remote.md", "remote\n");
+    set_fast_forward_switch_head_to("refs/heads/other");
+
+    let error = fx
+        .repo
+        .merge_from_remote("origin", &fx.branch)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("HEAD changed"));
+    assert_eq!(fx.repo.current_branch().unwrap(), "other");
+    assert_eq!(
+        fx.repo
+            .rev_parse(&format!("refs/heads/{}", fx.branch))
+            .unwrap(),
+        original_oid.to_string()
+    );
+    assert_eq!(
+        fx.repo.rev_parse("refs/heads/other").unwrap(),
+        original_oid.to_string()
+    );
+    assert!(!fx.repo_dir.path().join("remote.md").exists());
+}
+
+#[test]
+fn test_fast_forward_rechecks_ancestry_from_latest_head() {
+    let fx = setup_repo_with_bare_remote();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "remote.md", "remote\n");
+    fx.repo.fetch("origin", &fx.branch).unwrap();
+    let remote_oid =
+        git2::Oid::from_str(&fx.repo.rev_parse(&format!("origin/{}", fx.branch)).unwrap()).unwrap();
+
+    fs::write(fx.repo_dir.path().join("local.md"), "local\n").unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("external local advance").unwrap();
+    let local_oid = fx.repo.rev_parse("HEAD").unwrap();
+
+    let expected_head = fx.repo.capture_head_expectation().unwrap();
+    let error = fx
+        .repo
+        .fast_forward_to(remote_oid, &expected_head)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("no longer an ancestor"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), local_oid);
+    assert!(fx.repo_dir.path().join("local.md").exists());
+    assert!(!fx.repo_dir.path().join("remote.md").exists());
+}
+
+#[test]
 fn test_last_commit_touching_skips_merge_equal_to_parent() {
     let fx = setup_repo_with_bare_remote();
 
@@ -696,4 +1095,255 @@ fn test_last_commit_touching_skips_merge_equal_to_parent() {
         fx.repo.last_commit_touching("f.md").unwrap(),
         Some(edit_sha)
     );
+}
+
+// --- Fast-forward rollback hardening ---
+
+fn git_in(workdir: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(workdir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn index_oid(repo_root: &Path, path: &str) -> Option<git2::Oid> {
+    git2::Repository::open(repo_root)
+        .unwrap()
+        .index()
+        .unwrap()
+        .get_path(Path::new(path), 0)
+        .map(|entry| entry.id)
+}
+
+#[test]
+fn test_fast_forward_treats_wildcard_filename_literally() {
+    let fx = setup_repo_with_bare_remote();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "*.md", "literal star\n");
+    fs::write(fx.repo_dir.path().join("init.md"), "local edit\n").unwrap();
+
+    fx.repo.merge_from_remote("origin", &fx.branch).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("*.md")).unwrap(),
+        "literal star\n"
+    );
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("init.md")).unwrap(),
+        "local edit\n"
+    );
+}
+
+#[test]
+fn test_fast_forward_wildcard_rollback_leaves_unrelated_dirty_file() {
+    let fx = setup_repo_with_bare_remote();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "*.md", "literal star\n");
+    fs::write(fx.repo_dir.path().join("init.md"), "local edit\n").unwrap();
+    set_fast_forward_failpoint(FastForwardFailpoint::BeforeRefPublication);
+
+    let error = fx.repo.merge_from_remote("origin", &fx.branch).unwrap_err();
+
+    assert!(format!("{error:#}").contains("BeforeRefPublication"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert!(!fx.repo_dir.path().join("*.md").exists());
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("init.md")).unwrap(),
+        "local edit\n"
+    );
+}
+
+#[test]
+fn test_fast_forward_rollback_restores_modified_file_and_unrelated_index() {
+    let fx = setup_repo_with_bare_remote();
+    fs::write(fx.repo_dir.path().join("dirty.txt"), "base\n").unwrap();
+    fx.repo.stage_paths(&["dirty.txt".to_string()]).unwrap();
+    fx.repo.commit("add dirty.txt").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    commit_and_push_from(other.path(), &fx.branch, "init.md", "# remote v2\n");
+
+    fs::write(fx.repo_dir.path().join("staged.txt"), "staged\n").unwrap();
+    fx.repo.stage_paths(&["staged.txt".to_string()]).unwrap();
+    let staged_oid = index_oid(fx.repo_dir.path(), "staged.txt").unwrap();
+    fs::write(fx.repo_dir.path().join("dirty.txt"), "unstaged edit\n").unwrap();
+    set_fast_forward_failpoint(FastForwardFailpoint::BeforeRefPublication);
+
+    let error = fx.repo.merge_from_remote("origin", &fx.branch).unwrap_err();
+
+    assert!(format!("{error:#}").contains("BeforeRefPublication"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("init.md")).unwrap(),
+        "# init\n"
+    );
+    assert_eq!(
+        index_oid(fx.repo_dir.path(), "staged.txt"),
+        Some(staged_oid)
+    );
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("dirty.txt")).unwrap(),
+        "unstaged edit\n"
+    );
+    let status = git2::Repository::open(fx.repo_dir.path())
+        .unwrap()
+        .status_file(Path::new("init.md"))
+        .unwrap();
+    assert_eq!(status, git2::Status::CURRENT);
+}
+
+#[test]
+fn test_fast_forward_rollback_restores_deleted_path() {
+    let fx = setup_repo_with_bare_remote();
+    fs::write(fx.repo_dir.path().join("gone.txt"), "keep me\n").unwrap();
+    fx.repo.stage_paths(&["gone.txt".to_string()]).unwrap();
+    fx.repo.commit("add gone.txt").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+    let head_before = fx.repo.rev_parse("HEAD").unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    git_in(other.path(), &["rm", "-q", "gone.txt"]);
+    git_in(other.path(), &["commit", "-q", "-m", "delete gone.txt"]);
+    git_in(other.path(), &["push", "-q", "origin", &fx.branch]);
+    set_fast_forward_failpoint(FastForwardFailpoint::BeforeRefPublication);
+
+    let error = fx.repo.merge_from_remote("origin", &fx.branch).unwrap_err();
+
+    assert!(format!("{error:#}").contains("BeforeRefPublication"));
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head_before);
+    assert_eq!(
+        fs::read_to_string(fx.repo_dir.path().join("gone.txt")).unwrap(),
+        "keep me\n"
+    );
+    assert!(index_oid(fx.repo_dir.path(), "gone.txt").is_some());
+    assert!(!fx.repo.has_dirty_changes().unwrap());
+}
+
+// --- Selected-path commits honor Git filters and modes ---
+
+#[test]
+fn test_commit_selected_paths_applies_clean_filter_from_gitattributes() {
+    let fx = setup_repo_with_base(&[(".gitattributes", "*.md text eol=lf\n")]);
+    fs::write(fx.repo_root.join("note.md"), "line one\r\nline two\r\n").unwrap();
+
+    let committed = fx
+        .repo()
+        .commit_selected_paths(&["note.md"], "Add note")
+        .unwrap();
+
+    assert!(committed.is_some());
+    assert_eq!(
+        fx.repo().show_file_at_ref("HEAD", "note.md").unwrap(),
+        "line one\nline two\n"
+    );
+    let status = git2::Repository::open(&fx.repo_root)
+        .unwrap()
+        .status_file(Path::new("note.md"))
+        .unwrap();
+    assert_eq!(status, git2::Status::CURRENT);
+}
+
+#[cfg(unix)]
+#[test]
+fn test_commit_selected_paths_preserves_executable_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = setup_repo_with_base(&[("README.md", "base\n")]);
+    let script = fx.repo_root.join("run.sh");
+    fs::write(&script, "#!/bin/sh\necho hi\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    fx.repo()
+        .commit_selected_paths(&["run.sh"], "Add script")
+        .unwrap()
+        .expect("commit created");
+
+    let repo = git2::Repository::open(&fx.repo_root).unwrap();
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    assert_eq!(
+        tree.get_path(Path::new("run.sh")).unwrap().filemode(),
+        0o100755
+    );
+    assert_eq!(
+        repo.status_file(Path::new("run.sh")).unwrap(),
+        git2::Status::CURRENT
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_commit_selected_paths_commits_symlink_with_raw_target() {
+    let fx = setup_repo_with_base(&[("target.md", "base\n")]);
+    std::os::unix::fs::symlink("target.md", fx.repo_root.join("link.md")).unwrap();
+
+    fx.repo()
+        .commit_selected_paths(&["link.md"], "Add link")
+        .unwrap()
+        .expect("commit created");
+
+    let repo = git2::Repository::open(&fx.repo_root).unwrap();
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    let entry = tree.get_path(Path::new("link.md")).unwrap();
+    assert_eq!(entry.filemode(), 0o120000);
+    assert_eq!(repo.find_blob(entry.id()).unwrap().content(), b"target.md");
+    assert_eq!(
+        repo.status_file(Path::new("link.md")).unwrap(),
+        git2::Status::CURRENT
+    );
+}
+
+// --- push_commit_with ---
+
+#[test]
+fn test_push_commit_with_publishes_given_oid_not_branch_tip() {
+    let fx = setup_repo_with_bare_remote();
+    fs::write(fx.repo_dir.path().join("a.md"), "a\n").unwrap();
+    fx.repo.stage_paths(&["a.md".to_string()]).unwrap();
+    let _ = fx.repo.commit("a").unwrap();
+    let oid_a = fx.repo.rev_parse("HEAD").unwrap();
+    fs::write(fx.repo_dir.path().join("b.md"), "b\n").unwrap();
+    fx.repo.stage_paths(&["b.md".to_string()]).unwrap();
+    fx.repo.commit("b").unwrap();
+    let oid_b = fx.repo.rev_parse("HEAD").unwrap();
+    assert_ne!(oid_a, oid_b);
+
+    fx.repo
+        .push_commit_with("origin", &fx.branch, &oid_a, &SystemCredentials)
+        .unwrap();
+
+    let remote_tip = git2::Repository::open_bare(fx.remote_dir.path())
+        .unwrap()
+        .refname_to_id(&format!("refs/heads/{}", fx.branch))
+        .unwrap();
+    assert_eq!(remote_tip.to_string(), oid_a);
+}
+
+#[test]
+fn test_push_commit_with_rejects_non_commit_oid() {
+    let fx = setup_repo_with_bare_remote();
+    let tree_oid = git2::Repository::open(fx.repo_dir.path())
+        .unwrap()
+        .head()
+        .unwrap()
+        .peel_to_tree()
+        .unwrap()
+        .id()
+        .to_string();
+    let attempts = push_attempts();
+
+    assert!(fx
+        .repo
+        .push_commit_with("origin", &fx.branch, &tree_oid, &SystemCredentials)
+        .is_err());
+    assert!(fx
+        .repo
+        .push_commit_with("origin", &fx.branch, "not-an-oid", &SystemCredentials)
+        .is_err());
+    assert_eq!(push_attempts(), attempts);
 }

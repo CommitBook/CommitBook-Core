@@ -7,6 +7,18 @@ fn test_plist_label_prefix() {
 }
 
 #[test]
+fn test_legacy_plist_label_uses_old_prefix_and_same_hash() {
+    let repo = Path::new("/tmp/my-repo");
+    let current = plist_label(repo);
+    let legacy = legacy_plist_label(repo);
+    assert!(legacy.starts_with("com.commitbook."));
+    assert_eq!(
+        current.strip_prefix("com.zaai.commitbook."),
+        legacy.strip_prefix("com.commitbook.")
+    );
+}
+
+#[test]
 fn test_plist_label_deterministic() {
     let a = plist_label(Path::new("/tmp/my-repo"));
     let b = plist_label(Path::new("/tmp/my-repo"));
@@ -29,6 +41,14 @@ fn test_plist_path_format() {
 }
 
 #[test]
+fn test_plist_paths_cover_current_and_legacy_labels() {
+    let current = plist_path_for_label(Path::new("/Users/test"), "com.zaai.commitbook.abc");
+    let legacy = plist_path_for_label(Path::new("/Users/test"), "com.commitbook.abc");
+    assert!(current.ends_with("Library/LaunchAgents/com.zaai.commitbook.abc.plist"));
+    assert!(legacy.ends_with("Library/LaunchAgents/com.commitbook.abc.plist"));
+}
+
+#[test]
 fn test_xml_escape_special_chars() {
     assert_eq!(xml_escape("a&b"), "a&amp;b");
     assert_eq!(xml_escape("a<b>c"), "a&lt;b&gt;c");
@@ -43,7 +63,8 @@ fn test_generate_plist_escapes_paths() {
         Path::new("/tmp/my&repo"),
         "*/5 * * * *",
         Path::new("/usr/bin/commit<book"),
-    );
+    )
+    .unwrap();
     assert!(plist.contains("my&amp;repo"));
     assert!(plist.contains("commit&lt;book"));
     assert!(!plist.contains("my&repo"));
@@ -55,7 +76,8 @@ fn test_generate_plist_uses_run_subcommand() {
         Path::new("/tmp/repo"),
         "0 * * * *",
         Path::new("/usr/bin/commitbook"),
-    );
+    )
+    .unwrap();
     assert!(plist.contains("<string>run</string>"));
     assert!(!plist.contains("auto-commit"));
     assert!(!plist.contains("--repo"));
@@ -67,10 +89,35 @@ fn test_generate_plist_has_working_directory() {
         Path::new("/tmp/my&repo"),
         "0 * * * *",
         Path::new("/usr/bin/commitbook"),
-    );
+    )
+    .unwrap();
     assert!(plist.contains("<key>WorkingDirectory</key>"));
     // The repo path should appear escaped as WorkingDirectory value
     assert!(plist.contains("my&amp;repo"));
+}
+
+#[test]
+fn test_generate_plist_uses_calendar_for_daily_schedule() {
+    let plist = generate_plist(
+        Path::new("/tmp/repo"),
+        "30 9 * * *",
+        Path::new("/usr/bin/commitbook"),
+    )
+    .unwrap();
+    assert!(plist.contains("<key>StartCalendarInterval</key>"));
+    assert!(plist.contains("<key>Minute</key>\n            <integer>30</integer>"));
+    assert!(plist.contains("<key>Hour</key>\n            <integer>9</integer>"));
+    assert!(!plist.contains("<key>StartInterval</key>"));
+}
+
+#[test]
+fn test_generate_plist_rejects_unsupported_calendar_cron() {
+    let result = generate_plist(
+        Path::new("/tmp/repo"),
+        "0 9 * * 1-5",
+        Path::new("/usr/bin/commitbook"),
+    );
+    assert!(result.is_err());
 }
 
 #[test]
@@ -166,7 +213,8 @@ fn test_generate_plist_path_excludes_protected_roots() {
         Path::new("/tmp/repo"),
         "0 * * * *",
         Path::new("/usr/bin/commitbook"),
-    );
+    )
+    .unwrap();
     if let Some(home) = dirs::home_dir() {
         let home_str = home.to_string_lossy().to_string();
         for sub in &["Downloads", "Desktop", "Documents"] {

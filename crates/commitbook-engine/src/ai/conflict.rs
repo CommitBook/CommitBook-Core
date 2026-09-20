@@ -1,5 +1,5 @@
-//! Conflict resolvers, invoke an AI CLI to rewrite a file containing git
-//! conflict markers and return resolved content.
+//! Conflict resolvers receive the three structured index sides and return an
+//! explicit content-or-deletion resolution.
 //!
 //! Mirrors the `CommitMessageProvider` pattern in `super::mod`: each
 //! resolver wraps a CLI tool, the registry dispatches by config key, and
@@ -9,8 +9,16 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::path::Path;
 
+use crate::git::GitConflict;
+
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 use super::{claude, codex, copilot, cursor, gemini};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConflictResolution {
+    WriteContent(String),
+    DeleteFile,
+}
 
 /// Trait for AI-powered git-conflict resolution.
 #[async_trait]
@@ -24,14 +32,10 @@ pub trait ConflictResolver: Send + Sync {
     /// Check if this resolver's CLI tool is installed and reachable.
     fn is_available(&self) -> bool;
 
-    /// Resolve a single file containing `<<<<<<<` / `=======` / `>>>>>>>`
-    /// markers. Returns the file contents with all markers removed.
-    async fn resolve(
-        &self,
-        file_path: &Path,
-        content_with_markers: &str,
-        repo_path: &Path,
-    ) -> Result<String>;
+    /// Resolve one structured index conflict. Implementations intended for
+    /// text models should reject binary, symlink, and gitlink conflicts.
+    async fn resolve(&self, conflict: &GitConflict, repo_path: &Path)
+        -> Result<ConflictResolution>;
 }
 
 /// Registry of conflict resolvers keyed by config string.
@@ -111,20 +115,46 @@ pub(crate) fn strip_outer_code_fence(s: &str) -> String {
     inner.to_string()
 }
 
-/// Build the prompt sent to a resolver CLI for a single conflicted file.
+/// Turn a resolver CLI's raw stdout into a `WriteContent` resolution.
+///
+/// Strips an outer code fence, rejects empty output, and rejects output that
+/// still contains real conflict markers. The marker check delegates to
+/// `git::conflicts::has_conflict_markers`, which deliberately ignores a bare
+/// `=======` line because that is valid Markdown (a setext heading underline).
+pub(crate) fn finalize_resolved_text(raw: &str, cli_name: &str) -> Result<ConflictResolution> {
+    let resolved = strip_outer_code_fence(raw);
+    if resolved.trim().is_empty() {
+        anyhow::bail!("Empty resolution from {cli_name}");
+    }
+    if crate::git::conflicts::has_conflict_markers(&resolved) {
+        anyhow::bail!("{cli_name} left conflict markers in its response");
+    }
+    Ok(ConflictResolution::WriteContent(resolved))
+}
+
+/// Build the prompt sent to a resolver CLI for a single structured text
+/// conflict. Deleted sides are represented explicitly; no working-tree marker
+/// parsing is involved.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub(crate) fn build_resolve_prompt(file_path: &Path, content_with_markers: &str) -> String {
-    let display = file_path.display();
-    format!(
-        "Resolve all git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) \
-         in the file below. Output ONLY the resolved file contents with no \
-         markers, no commentary, no markdown fencing, exactly what should be \
-         written back to disk. Preserve all non-conflicting content verbatim.\n\
-         \n\
-         File: {display}\n\
-         \n\
-         {content_with_markers}"
-    )
+pub(crate) fn build_resolve_prompt(conflict: &GitConflict) -> Result<String> {
+    if conflict.is_binary_or_special() {
+        anyhow::bail!(
+            "Conflict {} is binary or special and cannot be resolved as text",
+            conflict.path
+        );
+    }
+    let ancestor = conflict.ancestor_text().unwrap_or("<deleted>");
+    let local = conflict.local_text().unwrap_or("<deleted>");
+    let remote = conflict.remote_text().unwrap_or("<deleted>");
+    Ok(format!(
+        "Resolve the three git index versions below into the final file. Output ONLY the \
+         resolved file contents with no commentary, no markdown fencing, and no conflict \
+         markers. Preserve non-conflicting content. If one side is <deleted>, decide whether \
+         the final file should remain based on the other versions; this text-only CLI cannot \
+         request deletion, so fail rather than returning an explanation when deletion is the \
+         only correct result.\n\nFile: {}\n\nANCESTOR:\n{}\n\nLOCAL:\n{}\n\nREMOTE:\n{}",
+        conflict.path, ancestor, local, remote
+    ))
 }
 
 #[cfg(test)]
