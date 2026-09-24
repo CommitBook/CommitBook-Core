@@ -60,7 +60,6 @@ commitbook preview     # List what the next sync would commit (read-only, --json
 commitbook schedule    # Change schedule
 commitbook doctor      # Health check
 commitbook log         # Activity log
-commitbook token       # Store (set) or remove (clear) the optional auth token
 commitbook completions # Generate shell completion scripts
 ```
 
