@@ -1,0 +1,21 @@
+Cargo.toml
+  s_cc204c8034ceab::t_3de61ea82cb593 13
+Cargo.lock
+  s_cc204c8034ceab::t_9354116b1a1f69 543,562,584,607,622
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3af2cdda13590e1fef821614ea18e178bdc836d9",
+  "prompts": {},
+  "sessions": {
+    "s_cc204c8034ceab": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2a49f263ffeyk7iYhhmLFxPUe",
+        "model": "unknown"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
