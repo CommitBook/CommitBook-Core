@@ -78,7 +78,7 @@ fn test_generate_plist_uses_run_subcommand() {
         Path::new("/usr/bin/commitbook"),
     )
     .unwrap();
-    assert!(plist.contains("<string>run</string>"));
+    assert!(plist.contains("<string>sync</string>"));
     assert!(!plist.contains("auto-commit"));
     assert!(!plist.contains("--repo"));
 }

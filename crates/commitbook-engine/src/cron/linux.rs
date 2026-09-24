@@ -14,7 +14,7 @@ pub(super) fn build_crontab_entry(
     let repo_str = repo_path.to_string_lossy();
     let bin_str = commitbook_bin.to_string_lossy();
     let comment = format!("{}{}", CRON_COMMENT_PREFIX, repo_str);
-    let entry = format!("{} cd \"{}\" && \"{}\" run", schedule, repo_str, bin_str);
+    let entry = format!("{} cd \"{}\" && \"{}\" sync", schedule, repo_str, bin_str);
     (comment, entry)
 }
 
@@ -45,8 +45,8 @@ pub(super) fn filter_crontab_lines(current: &str, repo_path: &Path) -> String {
     new_lines.join("\n")
 }
 
-/// Install a crontab entry for the repo. Returns "crontab:<repo_path>" as scheduler_id.
-pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<String> {
+/// Install a crontab entry for the repo.
+pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<()> {
     // Remove any existing entry first
     let _ = uninstall(repo_path);
 
@@ -61,7 +61,7 @@ pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Resul
 
     set_crontab(&new_crontab)?;
 
-    Ok(format!("crontab:{}", repo_path.to_string_lossy()))
+    Ok(())
 }
 
 /// Remove the crontab entry for the repo.
@@ -109,7 +109,7 @@ pub fn scheduled_binary(repo_path: &Path) -> Option<PathBuf> {
     crontab_binary(&get_current_crontab().ok()?, repo_path)
 }
 
-/// Parse the quoted binary out of a `cd "<repo>" && "<bin>" run` entry.
+/// Parse the quoted binary out of a `cd "<repo>" && "<bin>" sync` entry.
 pub(super) fn crontab_binary(crontab: &str, repo_path: &Path) -> Option<PathBuf> {
     let cd_arg = format!("cd \"{}\"", repo_path.to_string_lossy());
     let line = crontab

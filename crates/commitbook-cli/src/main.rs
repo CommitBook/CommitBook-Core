@@ -23,7 +23,7 @@ struct Cli {
     #[arg(short, long, global = true)]
     quiet: bool,
 
-    /// Output as JSON (for status, preview, doctor, log)
+    /// Output as JSON (for status, preview, devices, doctor, log)
     #[arg(long, global = true)]
     json: bool,
 
@@ -45,6 +45,20 @@ enum TokenAction {
     },
     /// Remove the stored token
     Clear,
+}
+
+#[derive(Subcommand)]
+enum DevicesAction {
+    /// Rename this device
+    Rename {
+        /// New name, e.g. "Work laptop"
+        name: String,
+    },
+    /// Remove another device, e.g. a retired computer
+    Remove {
+        /// Device id, as shown by `commitbook devices`
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -71,9 +85,15 @@ enum Commands {
     /// Show current sync state
     Status,
 
+    /// List the devices syncing this CommitBook
+    Devices {
+        #[command(subcommand)]
+        action: Option<DevicesAction>,
+    },
+
     /// Change the sync schedule
     Schedule {
-        /// Schedule: "hourly", "daily", "every-4h", or a cron expression
+        /// Schedule: "15m", "1h", "4h", "daily", or a cron expression
         expression: String,
     },
 
@@ -113,10 +133,6 @@ enum Commands {
     /// Generate man page
     #[command(hide = true)]
     Manpage,
-
-    /// Run a single sync cycle (used internally by scheduler)
-    #[command(hide = true)]
-    Run,
 }
 
 #[tokio::main]
@@ -174,6 +190,11 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Start => commands::start::run(&cb_dir, &repo_root)?,
         Commands::Stop => commands::stop::run(&cb_dir, &repo_root)?,
         Commands::Status => commands::status::run(&cb_dir, &repo_root, cli.json)?,
+        Commands::Devices { action } => match action {
+            None => commands::devices::list(&repo_root, cli.json)?,
+            Some(DevicesAction::Rename { name }) => commands::devices::rename(&repo_root, &name)?,
+            Some(DevicesAction::Remove { id }) => commands::devices::remove(&repo_root, &id)?,
+        },
         Commands::Schedule { expression } => {
             commands::schedule::run(&cb_dir, &repo_root, &expression)?;
         }
@@ -187,9 +208,6 @@ async fn run(cli: Cli) -> Result<()> {
             }
             TokenAction::Clear => commands::token::clear(&cb_dir)?,
         },
-        Commands::Run => {
-            commands::sync_cmd::run_scheduled(&repo_root).await?;
-        }
         Commands::Init { .. } | Commands::Completions { .. } | Commands::Manpage => unreachable!(),
     }
 

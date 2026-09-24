@@ -11,7 +11,7 @@ fn test_build_entry_format() {
     assert_eq!(comment, "# CommitBook: /tmp/repo");
     assert_eq!(
         entry,
-        "0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" run"
+        "0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" sync"
     );
 }
 
@@ -37,21 +37,21 @@ fn test_build_entry_paths_with_spaces() {
     assert_eq!(comment, "# CommitBook: /home/user/my notes");
     assert_eq!(
         entry,
-        "0 * * * * cd \"/home/user/my notes\" && \"/usr/local/bin/my commitbook\" run"
+        "0 * * * * cd \"/home/user/my notes\" && \"/usr/local/bin/my commitbook\" sync"
     );
 }
 
 #[test]
 fn test_filter_removes_entry() {
     let crontab =
-        "# CommitBook: /tmp/repo\n0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" run\n";
+        "# CommitBook: /tmp/repo\n0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" sync\n";
     let result = filter_crontab_lines(crontab, Path::new("/tmp/repo"));
     assert!(result.trim().is_empty());
 }
 
 #[test]
 fn test_filter_preserves_unrelated() {
-    let crontab = "0 9 * * * /usr/bin/backup\n# CommitBook: /tmp/repo\n0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" run\n30 * * * * /usr/bin/other-task";
+    let crontab = "0 9 * * * /usr/bin/backup\n# CommitBook: /tmp/repo\n0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" sync\n30 * * * * /usr/bin/other-task";
     let result = filter_crontab_lines(crontab, Path::new("/tmp/repo"));
     assert!(result.contains("/usr/bin/backup"));
     assert!(result.contains("/usr/bin/other-task"));
@@ -76,7 +76,7 @@ fn test_filter_no_prefix_false_positive() {
     // Filtering /tmp/repo must NOT remove an entry for /tmp/repository
     let crontab = concat!(
         "# CommitBook: /tmp/repository\n",
-        "0 * * * * cd \"/tmp/repository\" && \"/usr/bin/commitbook\" run\n",
+        "0 * * * * cd \"/tmp/repository\" && \"/usr/bin/commitbook\" sync\n",
     );
     let result = filter_crontab_lines(crontab, Path::new("/tmp/repo"));
     assert!(

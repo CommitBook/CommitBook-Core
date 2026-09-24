@@ -218,7 +218,7 @@ fn generate_plist(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Re
     <key>ProgramArguments</key>
     <array>
         <string>{bin}</string>
-        <string>run</string>
+        <string>sync</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{repo}</string>
@@ -273,8 +273,8 @@ fn unload_and_remove(path: &Path, label: &str) -> Result<()> {
     Ok(())
 }
 
-/// Install a launchd job for the repo. Returns the plist path as scheduler_id.
-pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<String> {
+/// Install a launchd job for the repo.
+pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<()> {
     let path = plist_path(repo_path);
     let legacy_path = legacy_plist_path(repo_path);
     // Render first so a bad schedule cannot remove a currently working job.
@@ -305,12 +305,11 @@ pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Resul
         anyhow::bail!("launchctl load failed: {}", stderr.trim());
     }
 
-    Ok(path.to_string_lossy().to_string())
+    Ok(())
 }
 
 /// Uninstall a launchd job for the repo.
-pub fn uninstall(repo_path: &Path, scheduler_id: Option<&str>) -> Result<()> {
-    let _ = scheduler_id;
+pub fn uninstall(repo_path: &Path) -> Result<()> {
     unload_and_remove(&plist_path(repo_path), &plist_label(repo_path))?;
     unload_and_remove(
         &legacy_plist_path(repo_path),

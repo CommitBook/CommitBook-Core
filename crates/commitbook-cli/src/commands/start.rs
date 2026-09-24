@@ -21,9 +21,9 @@ pub fn run(_cb_dir: &Path, repo_root: &Path) -> Result<()> {
     println!("  {} Scheduler started.", "OK".green().bold());
     println!(
         "  Schedule: {}",
-        cron::describe_schedule(&config.schedule).cyan()
+        cron::describe_schedule(&config.sync.schedule).cyan()
     );
-    println!("  Command: {}", "commitbook run".dimmed());
+    println!("  Command: {}", "commitbook sync".dimmed());
     if transient {
         println!(
             "  {} {} is a build artifact; the scheduler stops when it is removed. Install `commitbook` and run `commitbook start` from it.",
