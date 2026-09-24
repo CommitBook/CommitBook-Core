@@ -365,7 +365,7 @@ impl SchedulerHealth {
         match self {
             Self::Stopped => None,
             Self::Broken(reason) => Some(format!(
-                "Scheduler cannot run ({reason}). Run `commitbook doctor --fix` from an installed commitbook binary."
+                "Scheduler cannot run ({reason}). Run `commitbook doctor --fix` from an installed `commitbook` binary."
             )),
             Self::Running => {
                 let schedule = schedule?;

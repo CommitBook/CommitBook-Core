@@ -26,7 +26,7 @@ pub fn run(_cb_dir: &Path, repo_root: &Path) -> Result<()> {
     println!("  Command: {}", "commitbook run".dimmed());
     if transient {
         println!(
-            "  {} {} is a build artifact; the scheduler stops when it is removed. Install commitbook and run `commitbook start` from it.",
+            "  {} {} is a build artifact; the scheduler stops when it is removed. Install `commitbook` and run `commitbook start` from it.",
             "Warning:".yellow().bold(),
             binary.display()
         );

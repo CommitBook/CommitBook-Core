@@ -378,7 +378,7 @@ fn fix_plist_binary_path(repo_root: &Path) -> bool {
         println!(
             "    {}",
             format!(
-                "Warning: {} is a build artifact; install commitbook (e.g. `cargo install --path crates/commitbook-cli`) and rerun `doctor --fix` from it.",
+                "Warning: {} is a build artifact; install `commitbook` (e.g. `cargo install --path crates/commitbook-cli`) and rerun `doctor --fix` from it.",
                 current_exe.display()
             )
             .yellow()
