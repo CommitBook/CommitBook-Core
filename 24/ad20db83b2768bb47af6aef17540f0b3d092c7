@@ -1,0 +1,19 @@
+crates/commitbook-cli/src/main.rs
+  s_7a01579965ba54::t_88549165267e25 10-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "24ad20db83b2768bb47af6aef17540f0b3d092c7",
+  "prompts": {},
+  "sessions": {
+    "s_7a01579965ba54": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f7050a21-6eab-4bbc-ba23-40dc89982f6c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
