@@ -34,7 +34,7 @@ The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `Workspace
 - [ ] `Packages/CommitBookAppleCore/Sources/CommitBookAppleCore/Types.swift`:
   - `WorkspaceInput` → `CommitBookInput`. Trim fields: drop `remoteURL` (engine derives from `owner`+`repo`), `localRoot` (engine derives from `workspacesRoot` + slug). Keep `name`, `mode`, `provider`, `owner`, `repo` (renamed from `repoName`), `branch`.
   - `WorkspaceSummary` → `CommitBookSummary`. Add fields the engine returns: `owner: String`, `repo: String`, `docCount: Int`, `conflictCount: Int`. Note: `docCount`/`conflictCount` come back as `0` from `list_commitbooks`, populate them by calling `list_documents` / `list_conflicts` per book if the UI needs accurate counts.
-  - Add new types: `DiscoveredCommitBook { owner, repo, defaultBranch, isPrivate, hasDotCommitbook, alreadyLocal }`, `RepoInfo { owner, name, defaultBranch, isPrivate }`, `SyncMode { case aiResolve, manual }`.
+  - Add new types: `DiscoveredCommitBook { owner, repo, defaultBranch, isPrivate, hasDotCommitBook, alreadyLocal }`, `RepoInfo { owner, name, defaultBranch, isPrivate }`, `SyncMode { case aiResolve, manual }`.
   - Add `AiConflictRequest` (nullable ancestor/local/remote content plus conflict type and binary flag), `AiConflictResolutionAction { writeContent, deleteFile }`, `AiConflictResolution` (nullable content/error), and `ConflictResolutionContinuation`.
   - Update `ConflictSummary`: ancestor/local/remote content is nullable and binary/special conflicts are flagged explicitly.
   - `SyncResultSummary`: add `committed: Bool`, `conflictsResolved: Int`, `manualConflicts: Int` (engine returns these now).
