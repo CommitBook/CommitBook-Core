@@ -56,14 +56,17 @@ fn delete_never_follows_workspace_symlink() {
 
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
+    git2::Repository::init(outside.path())
+        .unwrap()
+        .remote("origin", "https://github.com/owner/repo.git")
+        .unwrap();
     commitbook_engine::commitbooks::init_dot_commitbook(
         outside.path(),
         "Outside",
-        "owner",
-        "repo",
         "main",
-        "github",
-        "pat",
+        "origin",
+        None,
+        commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
     symlink(outside.path(), root.path().join("owner__repo")).unwrap();

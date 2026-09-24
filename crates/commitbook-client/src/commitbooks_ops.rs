@@ -6,7 +6,8 @@ use std::path::Path;
 
 use commitbook_engine::commitbooks::publication::PublicationError;
 use commitbook_engine::commitbooks::{init_dot_commitbook, slug_for};
-use commitbook_engine::config::LocalConfig;
+use commitbook_engine::config::{Auth, LocalConfig};
+use commitbook_engine::git::remote::remote_identity;
 use commitbook_engine::git::GitRepo;
 use commitbook_engine::platform::{CredentialProvider, TokenCredentials};
 use commitbook_engine::state::RepoLock;
@@ -51,20 +52,32 @@ pub fn init_local_commitbook(
     let config = LocalConfig::load(&clone_path)
         .map_err(|e| CommitBookError::database(format!("Failed to load config: {e}")))?;
 
-    let cb_settings = config.commitbook.unwrap_or_default();
-    let name = if cb_settings.name.is_empty() {
-        input.name.clone()
-    } else {
-        cb_settings.name
+    // Identity comes from the remote URL; a remote without an owner (a bare
+    // local path) falls back to the requested repository.
+    let (owner, repo, provider) = match remote_identity(&clone_path, &config.git.remote) {
+        Ok(identity) if !identity.owner.is_empty() => (
+            identity.owner,
+            identity.repo,
+            identity.provider.as_str().to_string(),
+        ),
+        _ => (
+            input.owner.clone(),
+            input.repo.clone(),
+            input.provider.clone(),
+        ),
     };
+    let mode = commitbook_engine::devices::this_device(&clone_path)
+        .map_err(|e| CommitBookError::database(format!("Read this device: {e:#}")))?
+        .map(|(_, device)| device.auth.as_str().to_string())
+        .unwrap_or_else(|| input.mode.clone());
 
     Ok(CommitBookSummary {
-        id: format!("{}/{}", cb_settings.owner, cb_settings.repo),
-        owner: cb_settings.owner,
-        repo: cb_settings.repo,
-        name,
-        mode: cb_settings.mode,
-        provider: cb_settings.provider,
+        id: format!("{owner}/{repo}"),
+        owner,
+        repo,
+        name: config.commitbook.name,
+        mode,
+        provider,
         branch: config.git.branch,
         auto_sync: true,
         doc_count: 0,
@@ -330,14 +343,17 @@ fn ensure_commitbook_initialized(
             "Cannot publish CommitBook metadata: checked out branch {current_branch:?} does not match configured branch {expected_branch:?}"
         )));
     }
+    let auth: Auth = input
+        .mode
+        .parse()
+        .map_err(|error| CommitBookError::invalid_input(format!("{error:#}")))?;
     init_dot_commitbook(
         clone_path,
         &input.name,
-        &input.owner,
-        &input.repo,
         &input.branch,
-        &input.provider,
-        &input.mode,
+        remote,
+        input.device_name.as_deref(),
+        auth,
     )
     .map_err(|e| CommitBookError::database(format!("init_dot_commitbook: {e}")))?;
 
@@ -354,7 +370,6 @@ fn ensure_commitbook_initialized(
         &config.git.remote,
         &config.git.branch,
         "Initialize CommitBook",
-        config.git.auto_push,
         creds,
     )
     .map_err(|error| match error {
@@ -385,16 +400,35 @@ fn validate_existing_identity(clone_path: &Path, input: &CommitBookInput) -> Res
     if !LocalConfig::exists(clone_path) {
         return Ok(());
     }
-    let config = LocalConfig::load(clone_path)
+    // Surface an unreadable config before touching anything.
+    LocalConfig::load(clone_path)
         .map_err(|error| CommitBookError::database(format!("Load config: {error:#}")))?;
-    let Some(metadata) = config.commitbook else {
-        return Ok(());
+    // The clone's remote URLs say what it actually syncs with (committed
+    // files could name anything). A fresh clone's remote may not be renamed
+    // to the configured name yet, so every remote with an owner is checked.
+    let repository = git2::Repository::open(clone_path)
+        .map_err(|error| CommitBookError::database(format!("Open clone: {error}")))?;
+    let remotes = repository
+        .remotes()
+        .map_err(|error| CommitBookError::database(format!("List remotes: {error}")))?;
+    let identities: Vec<_> = remotes
+        .iter()
+        .flatten()
+        .flatten()
+        .filter_map(|name| remote_identity(clone_path, name).ok())
+        .filter(|identity| !identity.owner.is_empty())
+        .collect();
+    let matches = |identity: &commitbook_engine::git::remote::RemoteIdentity| {
+        identity.owner.eq_ignore_ascii_case(&input.owner)
+            && identity.repo.eq_ignore_ascii_case(&input.repo)
     };
-    if metadata.owner != input.owner || metadata.repo != input.repo {
-        return Err(CommitBookError::invalid_input(format!(
-            "Existing clone metadata identifies {}/{} but initialization requested {}/{}; move the clone to the correct managed directory or correct its .CommitBook/config.toml",
-            metadata.owner, metadata.repo, input.owner, input.repo
-        )));
+    if let Some(other) = identities.iter().find(|identity| !matches(identity)) {
+        if !identities.iter().any(matches) {
+            return Err(CommitBookError::invalid_input(format!(
+                "Existing clone syncs with {}/{} but initialization requested {}/{}; move the clone to the correct managed directory or fix its remote URL",
+                other.owner, other.repo, input.owner, input.repo
+            )));
+        }
     }
     Ok(())
 }

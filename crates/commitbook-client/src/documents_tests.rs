@@ -17,8 +17,17 @@ fn managed_clone() -> (tempfile::TempDir, std::path::PathBuf) {
     let clone = root.path().join("owner__notes");
     std::fs::create_dir(&clone).unwrap();
     init_repo(&clone);
+    git2::Repository::open(&clone)
+        .unwrap()
+        .remote("origin", "https://github.com/owner/notes.git")
+        .unwrap();
     commitbook_engine::commitbooks::init_dot_commitbook(
-        &clone, "Notes", "owner", "notes", "main", "github", "pat",
+        &clone,
+        "Notes",
+        "main",
+        "origin",
+        None,
+        commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
     std::fs::write(clone.join("base.md"), "base\n").unwrap();
