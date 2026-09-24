@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
+use std::io::{self, IsTerminal, Write};
 
 use commitbook_engine::commitbooks::publication::{
     publish_metadata, Publication, PublicationError,
@@ -56,13 +57,34 @@ fn initialize_and_publish(repo_root: &std::path::Path, remote_name: Option<&str>
     Ok(())
 }
 
+fn confirm_publish(remote: &str, branch: &str) -> Result<bool> {
+    print!("Commit and push CommitBook metadata to {remote}/{branch}? [Y/n] ");
+    io::stdout().flush()?;
+    let mut input = String::new();
+    // EOF (Ctrl-D) declines rather than being read as a plain Enter.
+    if io::stdin().read_line(&mut input)? == 0 {
+        println!();
+        return Ok(false);
+    }
+    Ok(accepts(&input))
+}
+
+/// Empty input (plain Enter) accepts; anything but `y`/`yes` declines.
+fn accepts(answer: &str) -> bool {
+    matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "" | "y" | "yes"
+    )
+}
+
 /// Initialize CommitBook in the current git repo.
 ///
 /// Requires: the current working directory is inside a git repo, and that repo
 /// has exactly one remote. The remote name (whatever the user chose to call it)
 /// is persisted in `.CommitBook/config.toml` so the sync layer doesn't have to
-/// assume `origin`.
-pub fn run_init() -> Result<()> {
+/// assume `origin`. A new initialization asks before committing and pushing
+/// the metadata unless `assume_yes` is set or stdin is not a terminal.
+pub fn run_init(assume_yes: bool) -> Result<()> {
     let repo_root = state::find_git_root()
         .context("CommitBook must be initialized inside a git repository.")?;
 
@@ -103,6 +125,16 @@ pub fn run_init() -> Result<()> {
             many.join(", ")
         ),
     };
+
+    // Ask before anything is written, so declining leaves the repo untouched.
+    // Without a terminal (scripts, CI) proceed as if confirmed.
+    if !assume_yes && io::stdin().is_terminal() {
+        let branch = GitRepo::open(&repo_root)?.current_branch()?;
+        if !confirm_publish(&remote_name, &branch)? {
+            println!("Aborted; nothing was written.");
+            return Ok(());
+        }
+    }
 
     initialize_and_publish(&repo_root, Some(&remote_name))?;
 

@@ -28,7 +28,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Initialize CommitBook in the current git repo
-    Init,
+    Init {
+        /// Skip the confirmation prompt before committing and pushing
+        #[arg(short, long)]
+        yes: bool,
+    },
 
     /// Commit locally and sync with remote
     Sync,
@@ -136,8 +140,8 @@ async fn run(cli: Cli) -> Result<()> {
             clap_mangen::Man::new(Cli::command()).render(&mut std::io::stdout())?;
             return Ok(());
         }
-        Commands::Init => {
-            return commands::init_cmd::run_init();
+        Commands::Init { yes } => {
+            return commands::init_cmd::run_init(*yes);
         }
         _ => {}
     }
@@ -165,7 +169,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Run => {
             commands::sync_cmd::run_scheduled(&repo_root).await?;
         }
-        Commands::Init | Commands::Completions { .. } | Commands::Manpage => unreachable!(),
+        Commands::Init { .. } | Commands::Completions { .. } | Commands::Manpage => unreachable!(),
     }
 
     Ok(())

@@ -51,7 +51,7 @@ All UI crates depend on `commitbook-engine`. No database: all state is file-base
 ## CLI Commands
 
 ```
-commitbook init        # Initialize .CommitBook/ (required before any other command)
+commitbook init        # Initialize .CommitBook/ (required first; asks before commit + push, --yes skips)
 commitbook sync        # Commit dirty changes + libgit2 merge + push
 commitbook start       # Install scheduler
 commitbook stop        # Stop scheduler

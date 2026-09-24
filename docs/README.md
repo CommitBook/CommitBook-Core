@@ -40,7 +40,7 @@ commitbook start
 
 | Command | Description |
 |---|---|
-| `commitbook init` | Initialize `.CommitBook/` (required before any other command) |
+| `commitbook init [--yes]` | Initialize `.CommitBook/` (required before any other command); asks before committing and pushing the metadata, `--yes` skips the question |
 | `commitbook sync` | Commit locally + fetch/merge, then optionally push |
 | `commitbook start` | Start the sync scheduler (launchd/cron) |
 | `commitbook stop` | Stop the sync scheduler |

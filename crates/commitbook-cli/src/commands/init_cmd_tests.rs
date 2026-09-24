@@ -227,3 +227,17 @@ fn init_with_auto_push_disabled_records_pending_without_pushing() {
         ".CommitBook/config.toml"
     ));
 }
+
+#[test]
+fn confirmation_accepts_enter_and_yes() {
+    for answer in ["", "\n", "y", "Y", "yes", " Yes \n"] {
+        assert!(accepts(answer), "{answer:?} should accept");
+    }
+}
+
+#[test]
+fn confirmation_declines_anything_else() {
+    for answer in ["n", "N\n", "no", "nope", "x"] {
+        assert!(!accepts(answer), "{answer:?} should decline");
+    }
+}
