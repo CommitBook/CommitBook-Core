@@ -26,6 +26,22 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum TokenAction {
+    /// Store a token in .CommitBook/local/auth.toml
+    Set {
+        /// Personal access token (prompted if omitted)
+        #[arg(long)]
+        token: Option<String>,
+
+        /// Provider name for the stored token (github, gitlab, etc.)
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Remove the stored token
+    Clear,
+}
+
+#[derive(Subcommand)]
 enum Commands {
     /// Initialize CommitBook in the current git repo
     Init {
@@ -74,15 +90,10 @@ enum Commands {
         tail: bool,
     },
 
-    /// Store an optional token for token-backed transports
-    Login {
-        /// Personal access token for token-backed transports
-        #[arg(long)]
-        token: Option<String>,
-
-        /// Provider name for the stored token (github, gitlab, etc.)
-        #[arg(long)]
-        provider: Option<String>,
+    /// Manage the optional token for token-backed transports
+    Token {
+        #[command(subcommand)]
+        action: TokenAction,
     },
 
     /// Generate shell completions
@@ -163,9 +174,12 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Log { lines, tail } => {
             commands::log::run(&cb_dir, &repo_root, lines, cli.json, tail)?;
         }
-        Commands::Login { token, provider } => {
-            commands::login::run(&cb_dir, &repo_root, token, provider).await?;
-        }
+        Commands::Token { action } => match action {
+            TokenAction::Set { token, provider } => {
+                commands::token::set(&cb_dir, &repo_root, token, provider).await?;
+            }
+            TokenAction::Clear => commands::token::clear(&cb_dir)?,
+        },
         Commands::Run => {
             commands::sync_cmd::run_scheduled(&repo_root).await?;
         }

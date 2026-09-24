@@ -49,8 +49,9 @@ commitbook start
 | `commitbook schedule <expr>` | Change the sync schedule |
 | `commitbook doctor` | Check system health and dependencies |
 | `commitbook log` | View recent activity log |
-| `commitbook login --token <T>` | Store an optional token for token-backed transports |
-| `commitbook login --provider github` | Label the stored token with a provider |
+| `commitbook token set --token <T>` | Store an optional token for token-backed transports |
+| `commitbook token set --provider github` | Label the stored token with a provider |
+| `commitbook token clear` | Remove the stored token |
 | `commitbook completions <shell>` | Generate shell completion scripts |
 
 ### Schedule Presets
@@ -201,7 +202,7 @@ Normal desktop sync does not require `auth.toml`. `commitbook sync` fetches and
 pushes through Git using your existing Git credentials, such as an SSH agent,
 macOS keychain, `.git-credentials`, or `.netrc`.
 
-`commitbook login` writes `.CommitBook/local/auth.toml` only for token-backed
+`commitbook token set` writes `.CommitBook/local/auth.toml` only for token-backed
 transports, such as direct GitHub API/PAT flows or hosts that cannot use the
 system Git credential helper.
 
@@ -210,6 +211,8 @@ system Git credential helper.
 provider = "github"
 token = "ghp_..."
 ```
+
+`commitbook token clear` deletes the file again.
 
 ## Logs
 

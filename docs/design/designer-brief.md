@@ -41,7 +41,7 @@ These concepts recur across every surface. The design system needs a consistent 
 
 ### 1. CLI (`commitbook`)
 
-Ten commands: `init`, `sync`, `start`, `stop`, `status`, `schedule <expr>`, `doctor [--fix]`, `log [-n] [-f]`, `login --token --provider`, `completions <shell>`.
+Ten commands: `init`, `sync`, `start`, `stop`, `status`, `schedule <expr>`, `doctor [--fix]`, `log [-n] [-f]`, `token set|clear`, `completions <shell>`.
 
 Output is colored text: bold cyan headers, green/yellow/red status glyphs, dimmed secondary text. A `--json` flag produces machine-readable output. There are no spinners, tables, or interactive prompts: everything is a single pass of structured text.
 

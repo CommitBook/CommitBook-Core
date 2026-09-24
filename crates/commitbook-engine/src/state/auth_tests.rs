@@ -83,3 +83,23 @@ fn test_save_sets_restrictive_permissions() {
     let perms = std::fs::metadata(&path).unwrap().permissions();
     assert_eq!(perms.mode() & 0o777, 0o600);
 }
+
+#[test]
+fn test_clear_removes_saved_token() {
+    let tmp = tempfile::tempdir().unwrap();
+    let auth = AuthConfig {
+        auth: AuthEntry {
+            provider: Some("github".into()),
+            token: Some("t".into()),
+        },
+    };
+    auth.save(tmp.path()).unwrap();
+    assert!(AuthConfig::clear(tmp.path()).unwrap());
+    assert!(!AuthConfig::load(tmp.path()).unwrap().has_token());
+}
+
+#[test]
+fn test_clear_missing_returns_false() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(!AuthConfig::clear(tmp.path()).unwrap());
+}

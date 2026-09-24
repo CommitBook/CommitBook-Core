@@ -46,6 +46,16 @@ impl AuthConfig {
         Ok(())
     }
 
+    /// Delete `auth.toml`. Returns whether a file was removed.
+    pub fn clear(commitbook_dir: &Path) -> Result<bool> {
+        let path = commitbook_dir.join("local").join("auth.toml");
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e).with_context(|| format!("Failed to remove {}", path.display())),
+        }
+    }
+
     pub fn has_token(&self) -> bool {
         self.auth.token.is_some()
     }

@@ -109,7 +109,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
             println!("{}", "not configured".dimmed());
             println!(
                 "    {}",
-                "Normal for desktop git sync; `commitbook login` is only needed for token-backed transports.".dimmed()
+                "Normal for desktop git sync; `commitbook token set` is only needed for token-backed transports.".dimmed()
             );
         }
         Err(_) => {

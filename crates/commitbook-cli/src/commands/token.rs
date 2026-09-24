@@ -3,9 +3,10 @@ use colored::Colorize;
 use std::io::{self, Write};
 use std::path::Path;
 
+use commitbook_engine::config::LocalConfig;
 use commitbook_engine::state::auth::{AuthConfig, AuthEntry};
 
-pub async fn run(
+pub async fn set(
     cb_dir: &Path,
     repo_root: &Path,
     token: Option<String>,
@@ -59,11 +60,25 @@ pub async fn run(
     Ok(())
 }
 
-/// Detect git provider from remote URL.
+pub fn clear(cb_dir: &Path) -> Result<()> {
+    if AuthConfig::clear(cb_dir)? {
+        println!(
+            "  {} Removed token from .CommitBook/local/auth.toml.",
+            "OK".green().bold()
+        );
+    } else {
+        println!("  {}", "No token stored.".dimmed());
+    }
+    Ok(())
+}
+
+/// Detect git provider from the configured remote's URL.
 fn detect_provider(repo_root: &Path) -> String {
-    // Try to detect from git remote URL.
+    let remote = LocalConfig::load_read_only(repo_root)
+        .map(|c| c.git.remote)
+        .unwrap_or_else(|_| "origin".to_string());
     if let Ok(output) = std::process::Command::new("git")
-        .args(["remote", "get-url", "origin"])
+        .args(["remote", "get-url", &remote])
         .current_dir(repo_root)
         .output()
     {
@@ -84,5 +99,5 @@ fn detect_provider(repo_root: &Path) -> String {
 }
 
 #[cfg(test)]
-#[path = "login_tests.rs"]
+#[path = "token_tests.rs"]
 mod tests;

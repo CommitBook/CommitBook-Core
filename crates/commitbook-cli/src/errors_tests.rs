@@ -21,7 +21,7 @@ fn test_humanize_auth() {
     let msg = humanize(&e);
     assert!(msg.contains("Authentication"), "unexpected: {msg}");
     assert!(msg.contains("Git credentials"), "unexpected: {msg}");
-    assert!(!msg.contains("commitbook login"), "unexpected: {msg}");
+    assert!(!msg.contains("commitbook token"), "unexpected: {msg}");
 }
 
 #[test]
