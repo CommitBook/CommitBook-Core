@@ -1,0 +1,111 @@
+crates/commitbook-engine/src/config/local_tests.rs
+  s_fd1c4d7260c332::t_d74c2216ddb179 130,132-135,137-143
+  s_fd1c4d7260c332::t_428dd8b6720fcc 118-121,123
+  s_fd1c4d7260c332::t_f47d8a45086f45 3-4,7-10,14-25,29-46,50,52-68,73-79,83,86,88,93-96,100,102-109,111-117,122,124,126,147,149-153,155-158,162,164-167,169-171,175,177-180,182-183,187-200,204-212,216-218,222,224,229,234-237,247,257,266,288,292,297,356
+  s_fd1c4d7260c332::t_670358e29e0253 69-72
+crates/commitbook-tui/src/ui.rs
+  s_fd1c4d7260c332::t_4fbc8aaf176943 18,227-229,241
+crates/commitbook-web/src/models.rs
+  s_fd1c4d7260c332::t_b655224cc16b00 53-57
+crates/commitbook-engine/src/inspection_tests.rs
+  s_fd1c4d7260c332::t_670358e29e0253 250-253
+  s_fd1c4d7260c332::t_30fc7c062231db 9-13,134,236-249,254
+  s_fd1c4d7260c332::t_df4db262a79afb 255
+crates/commitbook-web/templates/conflicts.html
+  s_fd1c4d7260c332::t_66151f960fb8ad 5
+crates/commitbook-engine/src/logger/file_logger_tests.rs
+  s_fd1c4d7260c332::t_5933ddf840e424 199
+  s_fd1c4d7260c332::t_219c85b6fa5823 5,12,194-198,200-204
+  s_fd1c4d7260c332::t_19c33c66ce3257 205
+crates/commitbook-web/templates/config.html
+  s_fd1c4d7260c332::t_6082c9efca0454 32-33,40-41,49-50,57-58
+  s_fd1c4d7260c332::t_66151f960fb8ad 13,16-22,30-31,34,38-39,42,45-48,51-56,59-67
+crates/commitbook-cli/src/commands/doctor.rs
+  s_fd1c4d7260c332::t_0de867d6868d94 6-7
+  s_fd1c4d7260c332::t_8684362bd0f3b2 128,157-161,166-210,212,421
+  s_fd1c4d7260c332::t_670358e29e0253 162-165
+crates/commitbook-web/templates/changes.html
+  s_fd1c4d7260c332::t_66151f960fb8ad 8
+crates/commitbook-web/src/routes_tests.rs
+  s_fd1c4d7260c332::t_670358e29e0253 421-424
+  s_fd1c4d7260c332::t_baa40d2d1b6452 24-28,82,152,169,184,191,208,210,220,226,244-249,253-254,385,389-420,425-428,433,438,450,457-458,462,464-466,481,498,598-601
+crates/commitbook-engine/src/logger/file_logger.rs
+  s_fd1c4d7260c332::t_95ec4ceee93a57 7,19-20,25,28,31,37,103-105,107,109,112
+crates/commitbook-cli/src/commands/preview.rs
+  s_fd1c4d7260c332::t_0de867d6868d94 10
+crates/commitbook-engine/src/state/mod_tests.rs
+  s_fd1c4d7260c332::t_9ae7edb7e9a438 63,77,90,111,124-125
+crates/commitbook-engine/src/config/values_tests.rs
+  s_fd1c4d7260c332::t_670358e29e0253 1-44
+crates/commitbook-cli/src/commands/schedule.rs
+  s_fd1c4d7260c332::t_0de867d6868d94 15
+crates/commitbook-engine/src/state/mod.rs
+  s_fd1c4d7260c332::t_02a5fdc059ee3f 60-63,66-76
+crates/commitbook-tui/src/app.rs
+  s_fd1c4d7260c332::t_c7135d8210ac3e 9
+  s_fd1c4d7260c332::t_4fbc8aaf176943 59-63,115-117,131,133-139,141-151,156-158,193,200,203,205,268
+crates/commitbook-tui/src/app_tests.rs
+  s_fd1c4d7260c332::t_d4adb62bf5cf3c 91,112,135-137,142-143
+crates/commitbook-engine/src/review.rs
+  s_fd1c4d7260c332::t_5f555741baaff4 369
+crates/commitbook-engine/src/settings/settings_tests.rs
+  s_fd1c4d7260c332::t_f9436dbec0b5b9 11,27-33,46-47,57,61,81-82,104,114,132,137,149,175,185,189-193,196-203
+crates/commitbook-engine/src/inspection.rs
+  s_fd1c4d7260c332::t_f0f4bf9aaf0424 202-205,217,231-232,236-242,273,361-382
+crates/commitbook-tui/src/ui_tests.rs
+  s_fd1c4d7260c332::t_d4adb62bf5cf3c 26-30,64-67
+crates/commitbook-engine/src/settings/mod.rs
+  s_fd1c4d7260c332::t_a2d0b99f791c99 12,21-25,110-111,113,156-157,161-162,164-166,168-170,172-174,176-178,180-182,184,205,207,219,229,238,243,258
+crates/commitbook-web/templates/partials/providers.html
+  s_fd1c4d7260c332::t_66151f960fb8ad 1,3
+crates/commitbook-engine/src/config/local.rs
+  s_fd1c4d7260c332::t_670358e29e0253 7,9-11,13-14,16-18,20-21,23-24,26-28,30-31,33-36,38-43,45-47,49-53,56-58,64-70,73-79,82-87,90-96,99-104,107-109,111-112,114,116,118,122-123,125-146,187,189-193,196-197,199,202-206,208-217,222-223,228-240,242-243,248-269,271-273,276,314-329,343-348,374,438
+  s_fd1c4d7260c332::t_d74c2216ddb179 330-342,349-356
+  s_fd1c4d7260c332::t_a6ca465f99d631 357
+crates/commitbook-cli/src/commands/schedule_tests.rs
+  s_fd1c4d7260c332::t_4f98a73c25312a 24,35,37,39-41,44
+crates/commitbook-web/src/routes.rs
+  s_fd1c4d7260c332::t_6082c9efca0454 135-153,340-341,347
+  s_fd1c4d7260c332::t_a45ac59b30271b 15
+  s_fd1c4d7260c332::t_670358e29e0253 342-346
+  s_fd1c4d7260c332::t_b655224cc16b00 134,239-240,242-248,251-252,272,337,339,451-455,666,672,677-680
+crates/commitbook-web/src/models_tests.rs
+  s_fd1c4d7260c332::t_baa40d2d1b6452 10,23,71-73
+crates/commitbook-engine/src/review_tests.rs
+  s_fd1c4d7260c332::t_219c85b6fa5823 241,294
+  s_fd1c4d7260c332::t_5933ddf840e424 28-31
+Cargo.lock
+  s_fd1c4d7260c332::t_188e30e4f2a90e 601,3225-3237
+crates/commitbook-engine/Cargo.toml
+  s_25e69a146037b0::t_1f73cdc8b3185e 31
+crates/commitbook-engine/src/config/mod.rs
+  s_fd1c4d7260c332::t_59b7c3831d25f7 2,5
+crates/commitbook-engine/src/config/values.rs
+  s_25e69a146037b0::t_e6dcdc223fdf37 1-219
+crates/commitbook-engine/src/cron/mod.rs
+  s_fd1c4d7260c332::t_2874c04cc84d87 19-20,22,32,36-37,59-103,150-152,161,167-169,203-205,308-310,329,332,342
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f2c945a282af6ecf49df707ffa3e3500ddb0425b",
+  "prompts": {},
+  "sessions": {
+    "s_25e69a146037b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e08a794-b207-43cd-ab2e-4839b62c4420",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_fd1c4d7260c332": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0930a712-b2b7-4e21-b481-d6b29023de16",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
