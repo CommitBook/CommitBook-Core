@@ -25,9 +25,9 @@ sha2 = "0.11.0"
 reqwest = { version = "0.13.5", features = ["json", "rustls"], default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync"] }
-uniffi = { version = "0.32.0", features = ["tokio", "cli"] }
+uniffi = { version = "0.32.2", features = ["tokio", "cli"] }
 
 [dev-dependencies]
 # pollster drives a future to completion on a plain thread with no ambient
@@ -37,7 +37,7 @@ pollster = "1.0.1"
 tempfile = "3.27.0"
 
 [build-dependencies]
-uniffi = { version = "0.32.0", features = ["build"] }
+uniffi = { version = "0.32.2", features = ["build"] }
 
 [[bin]]
 name = "uniffi-bindgen"
