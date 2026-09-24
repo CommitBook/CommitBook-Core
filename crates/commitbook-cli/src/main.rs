@@ -91,6 +91,7 @@ enum Commands {
     },
 
     /// Manage the optional token for token-backed transports
+    #[command(hide = true)]
     Token {
         #[command(subcommand)]
         action: TokenAction,
