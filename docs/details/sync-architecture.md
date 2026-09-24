@@ -24,18 +24,18 @@ No configuration option. No automatic fallback to a different algorithm. One pat
                           if index has no conflicts:
                               write_tree, commit with two parents (merge commit)
                           else:
-                              if [conflict] auto_merge_appends (default on):
-                                  resolve every text conflict whose hunks only add
-                                  lines on both sides (blank ancestor section) as
-                                  local additions + remote additions; if none remain,
-                                  create the merge commit
+                              if [conflicts] mode = "both":
+                                  resolve every text conflict in a note (.md,
+                                  .markdown, .txt) with a union merge: local
+                                  lines, then remote lines, no markers; if none
+                                  remain, create the merge commit
                               for the remaining conflicts, match SyncMode:
                                   AiResolve -> resolver.resolve(GitConflict) for each text conflict
                                                stage explicit content/deletion results,
                                                write_tree, create one resolved merge commit
                                   Manual    -> preserve merge state and return index-derived
                                                ConflictSummary entries
-7. if git.auto_push: push
+7. push
    on non-fast-forward race: refetch + repeat from step 5 (one retry)
 ```
 
@@ -150,7 +150,7 @@ pub enum SyncMode {
 
 Apps decide per-sync. Typical patterns:
 - Mobile apps default to `AiResolve` for transparent background sync. Opt into `Manual` from a "review conflicts" UI.
-- Desktop CLI defaults to whatever `[conflict] resolver` says: `manual` → `Manual`; otherwise → `AiResolve`.
+- Desktop sync follows `[conflicts] mode`: `both` and `manual` → `Manual` (after the keep-both pass for `both`); `ai` and `review` → `AiResolve` with `[conflicts] agent`.
 
 `AiResolve` can complete a conflict-free mobile sync without a callback. If a
 text conflict occurs and no callback is registered, the engine preserves the
@@ -159,25 +159,27 @@ summaries. Binary, symlink, and gitlink conflicts always remain manual.
 
 Apps' existing `ConflictListView` / `ConflictDetailView` activate when `Manual` mode returns conflict entries.
 
-## Append-only conflicts
+## Keeping both versions (`both` mode)
 
-Notebook conflicts are most often two devices appending to the same note while
-apart. Before any resolver runs, `GitRepo::try_resolve_append_only` probes a
-diff3 merge of the three index stages. When every conflicting hunk has an empty
-or whitespace-only ancestor section (nothing existing was edited or removed),
-it stages a libgit2 union merge: local additions first, then remote additions.
-Any other hunk, a delete/modify pair, or a binary or special file leaves the
-conflict untouched for the configured resolver or the user. The same pass also
-runs when a later cycle recovers a merge left in progress. Set
-`[conflict] auto_merge_appends = false` to treat these as ordinary conflicts.
+Notebook conflicts are most often two devices editing the same note while
+apart. With `[conflicts] mode = "both"` (the default), `GitRepo::try_resolve_both`
+stages a libgit2 union merge of the three index stages for every conflicted
+Markdown or plain-text note: each conflicting hunk keeps this device's lines,
+then the remote lines, without markers. The user deletes the version they
+don't want; `SyncOutcome.kept_both` and `state.toml` (`kept_both_paths`,
+`kept_both_at`) record the files so sync output, the log, and status can list
+them. Other file types (a union would corrupt JSON or YAML), delete/modify
+pairs, binary or special files, and text that itself looks like conflict
+markers are left for manual resolution. The same pass also runs when a later
+cycle recovers a merge left in progress.
 
 ## Optional review of AI resolutions
 
-`[conflict] review_ai_resolutions = true` changes what happens after the resolver returns. Instead of applying the resolution, the engine validates it (no leftover markers, not a binary or special file) and stores it in `.CommitBook/local/conflict-proposals.toml` together with the merge identity (HEAD and merge-parent OIDs) and each side's OID and mode. The index and working tree stay conflicted, the cycle ends as "awaiting review", and nothing is pushed.
+`[conflicts] mode = "review"` changes what happens after the resolver returns. Instead of applying the resolution, the engine validates it (no leftover markers, not a binary or special file) and stores it in `.CommitBook/local/conflict-proposals.toml` together with the merge identity (HEAD and merge-parent OIDs) and each side's OID and mode. The index and working tree stay conflicted, the cycle ends as "awaiting review", and nothing is pushed.
 
 Later cycles reuse pending proposals and never regenerate rejected ones; an explicit regenerate action retries the resolver. Proposals for a different merge are dropped. The web editor shows the proposal next to the original sides and offers accept, edit and accept, reject, or manual resolution. Each displayed conflict carries a revision token over the merge identity, conflict sides, and current working-tree content; mutations revalidate it under the repository lock and reject stale requests. Native sync honors review mode by reporting pending reviews as manual conflicts through the existing result fields.
 
-Resolving the final conflict creates the merge commit locally. Publication is a separate step (`Sync now` or the scheduler) that follows `git.auto_push`.
+Resolving the final conflict creates the merge commit locally. Publication is a separate step (`Sync now` or the scheduler).
 
 ## When to revisit
 

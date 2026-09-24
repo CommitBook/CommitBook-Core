@@ -28,11 +28,12 @@ All UI crates depend on `commitbook-engine`. No database: all state is file-base
 
 ## Architecture
 
-- **No database.** State lives in `.CommitBook/` (`config.toml` committed; `local/` gitignored).
+- **No database.** State lives in `.CommitBook/` (`config.toml` and `devices/` committed; `local/` gitignored).
 - **No global config.** Each repo is self-contained. No `~/.commitbook/`.
 - **Explicit init.** `commitbook init` is a separate command. Other commands hard-fail with "CommitBook is not initialized" if `.CommitBook/` is missing.
 - **Exactly one remote required.** `init` blocks if the repo has 0 or >1 remotes; the remote's name is persisted in `config.git.remote` (need not be `origin`).
-- **libgit2 merge-based sync.** Sync commits every dirty, non-ignored change first, then fetches, runs an in-process libgit2 3-way merge (fast-forward, true merge, or surfaced conflicts), then pushes, retrying once on a non-fast-forward push race. Same single code path on desktop and mobile. Conflicts surface at the merge step and are resolved by the configured AI CLI (or left as `<<<<<<<` markers in `manual` mode).
+- **libgit2 merge-based sync.** Sync commits every dirty, non-ignored change first, then fetches, runs an in-process libgit2 3-way merge (fast-forward, true merge, or surfaced conflicts), then pushes, retrying once on a non-fast-forward push race. Same single code path on desktop and mobile. Conflicts surface at the merge step and are handled per `[conflicts] mode` (see below). Sync always pushes; there is no local-only mode.
+- **One sync command.** The scheduler (launchd/cron) runs `commitbook sync`, the same command users run. Failures and a contended lock exit non-zero.
 - `.CommitBook/` folder always uses capital C and B.
 
 ### Key Modules (commitbook-engine)
@@ -41,7 +42,8 @@ All UI crates depend on `commitbook-engine`. No database: all state is file-base
 |---|---|
 | `sync/` | `sync_repository` orchestrator: commit dirty changes → fetch → libgit2 3-way merge → push |
 | `state/` | File-based state: `SyncState` (`last_sync_at`, `last_error`), `AuthConfig` |
-| `config/` | `LocalConfig` reads/writes `.CommitBook/config.toml` (incl. `[conflict]` and `[commit]`) |
+| `config/` | `LocalConfig` reads/writes `.CommitBook/config.toml` (comment-preserving via `toml_edit`); `values.rs` holds the enumerated values |
+| `devices/` | Committed per-device files `.CommitBook/devices/<id>.toml` (`name`, `platform`, `auth`) |
 | `ai/` | Commit-message providers + conflict resolvers: Claude, Codex, Copilot, Gemini, Cursor, fallback |
 | `git/` | Git operations via git2 (libgit2): fetch, merge, commit, push |
 | `cron/` | Scheduler: launchd (macOS), crontab (Linux) |
@@ -55,7 +57,8 @@ commitbook init        # Initialize .CommitBook/ (required first; asks before co
 commitbook sync        # Commit dirty changes + libgit2 merge + push
 commitbook start       # Install scheduler
 commitbook stop        # Stop scheduler
-commitbook status      # Show local commit, remote, scheduler, and last sync state
+commitbook status      # Show local commit, remote, scheduler, devices, and last sync state
+commitbook devices     # List devices; `rename <name>` renames this one, `remove <id>` another
 commitbook preview     # List what the next sync would commit (read-only, --json)
 commitbook schedule    # Change schedule
 commitbook doctor      # Health check
@@ -63,42 +66,54 @@ commitbook log         # Activity log
 commitbook completions # Generate shell completion scripts
 ```
 
-## Conflict resolution
+## Config file
 
-`.CommitBook/config.toml` `[conflict]` section selects the AI CLI invoked when
-the libgit2 3-way merge leaves conflict markers:
+`.CommitBook/config.toml` is committed and shared by every device. `init` writes it from a commented template; `LocalConfig::save` edits values in place so user comments survive. Unknown keys and invalid values are rejected. There is no legacy migration: a file without `[config] schema = 1` fails with "delete it and run `commitbook init`".
 
 ```toml
-[conflict]
-auto_merge_appends = true      # keep both sides when both only added lines (no AI)
-resolver = "manual"            # manual | claude | codex | copilot | gemini | cursor
-review_ai_resolutions = false  # true: store AI proposals for review instead of applying them
+[config]
+schema = 1              # file format; bumped only for incompatible layout changes
+
+[commitbook]
+name = "notes"
+
+[git]
+branch = "main"
+remote = "origin"       # provider/owner/repo are parsed from this remote's URL (git::remote::remote_identity)
+
+[sync]
+schedule = "1h"         # stored as picked (1h, 15m, daily) or cron; cron::to_cron converts at install
+
+[commit]
+mode = "timestamp"      # timestamp | ai
+agent = "any"           # any | claude | codex | copilot | gemini | cursor
+
+[conflicts]
+mode = "both"           # both | manual | ai | review
+agent = "claude"        # claude | codex | copilot | gemini | cursor
+
+[logs]
+keep = "30d"            # <N>d | forever
 ```
 
-Before any resolver runs, `auto_merge_appends` resolves conflicts whose hunks only add lines on both sides (blank ancestor section) by keeping local then remote additions (`GitRepo::try_resolve_append_only`). Edited lines, deletions, and binary files still go to the resolver or the user.
+## Conflict resolution
 
-`manual` (the default) leaves the markers in place; the user resolves with `git status` and re-runs `commitbook sync`, or uses the web dashboard `/conflicts` editor (use local, use remote, keep both, delete, save edited text). Any other value spawns the corresponding CLI to rewrite each conflicted file; the orchestrator stages the resolved files and finishes the merge commit.
+`[conflicts] mode` decides what happens when the libgit2 3-way merge leaves conflicts:
 
-With `review_ai_resolutions = true`, sync stores each AI proposal in `.CommitBook/local/conflict-proposals.toml` and stops without applying it or pushing. Pending and rejected proposals are not regenerated by later cycles; the web editor accepts, edits, rejects, or regenerates them. Turning review off does not approve stored proposals. Resolving the last conflict creates a local merge commit only; publication follows the normal `auto_push` policy.
+- `both` (default): conflicted Markdown/text notes (`.md`, `.markdown`, `.txt`) are resolved with a union merge that keeps both versions without markers, local first (`GitRepo::try_resolve_both`). The files are listed in `SyncOutcome.kept_both` and `state.toml` (`kept_both_paths`, `kept_both_at`). Other files, binary files, and delete/modify conflicts are handled like `manual`.
+- `manual`: markers stay in place; the user resolves with `git status` and re-runs `commitbook sync`, or uses the web dashboard `/conflicts` editor (use local, use remote, keep both, delete, save edited text).
+- `ai`: `[conflicts] agent` rewrites each conflicted file; the orchestrator stages the resolved files and finishes the merge commit.
+- `review`: sync stores each AI proposal in `.CommitBook/local/conflict-proposals.toml` and stops without applying it or pushing. Pending and rejected proposals are not regenerated by later cycles; the web editor accepts, edits, rejects, or regenerates them. Switching mode does not approve stored proposals. Resolving the last conflict creates a local merge commit; the next sync publishes it.
 
 ## Commit messages
 
-`.CommitBook/config.toml` `[commit]` section toggles AI-generated commit messages:
-
-```toml
-[commit]
-ai_messages = false  # false (default): always use the timestamp message, never spawn an AI CLI
-                     # true: try Copilot, Claude, Codex, then timestamp fallback
-```
-
-When `false`, `commitbook sync` uses only the deterministic `FallbackProvider`
-(a `Writing <timestamp> (...)` message) and never spawns an AI CLI. Key
-selection lives in `commit_provider_keys` (`commitbook-cli/src/commands/sync_cmd.rs`).
+`[commit] mode = "timestamp"` (default) uses only the deterministic `FallbackProvider` (a `Writing <timestamp> (...)` message) and never spawns an AI CLI. `mode = "ai"` asks `[commit] agent` (or, for `any`, Copilot, Claude, Codex, Gemini, Cursor in order), then falls back to the timestamp. Key selection lives in `commitbook_engine::ai::commit_provider_keys`.
 
 ## Status, preview, and settings
 
 - Scheduler state comes from `cron::health`: `stopped`, `running`, or `broken` when the job's binary no longer exists. `SchedulerHealth::warning` also flags a job with no sync attempt for three schedule intervals. `start` and `doctor --fix` warn when installing a `target/debug` or `target/release` binary.
 - `commitbook status`, the web `/api/status` endpoint, and the TUI all read the shared engine status service. It reports the real HEAD commit, dirty files, cached ahead/behind counts, merge/conflict state, pending AI reviews, and the `state.toml` timestamps. It never fetches, invokes AI, takes the lock, or rewrites config.
+- Status also lists the devices from `.CommitBook/devices/` and the notes where `both` mode last kept two versions.
 - `last_sync_at` marks a successful cycle, not a push. `last_attempt_at`, `last_fetch_at`, `last_push_at`, and `last_error_stage` distinguish attempts, remote checks, publication, and the failing stage.
 - `commitbook preview`, web `/changes`, and the TUI `p` screen show what normal staging would commit: every non-ignored Git file of any type, not only Markdown. Preview writes nothing.
 - Settings changes from CLI, web, and TUI go through `commitbook-engine/src/settings/` under the repository lock; config writes are atomic and an active scheduler is reinstalled (or rolled back) when the schedule changes.
@@ -113,15 +128,21 @@ selection lives in `commit_provider_keys` (`commitbook-cli/src/commands/sync_cmd
 
 ## .CommitBook/ Directory
 
-`config.toml` is the only committed file. Everything else lives under `local/`, which is gitignored as a single entry (`.CommitBook/local/`). Initialization auto-adds this entry to `.gitignore`.
+`config.toml`, `.gitignore`, and `devices/` are committed. Everything else lives under `local/`, which is gitignored as a single entry: initialization writes `/local/` into the committed `.CommitBook/.gitignore` (the repository-root `.gitignore` is never changed).
+
+Each device writes only its own `devices/<id>.toml`, and only when it registers (`commitbook init`, or the first sync on a clone that never ran init) or is renamed, so device files never conflict or cause commits on their own.
 
 ```
 .CommitBook/
   config.toml        # Human-editable settings (COMMITTED to git)
+  .gitignore         # Contains /local/ (COMMITTED to git)
+  devices/           # One file per device: name, platform, auth (COMMITTED to git)
   local/             # All local state (GITIGNORED via single entry)
+    device-id        # This device's id (names its devices/<id>.toml)
     auth.toml        # Credentials (0o600 permissions)
-    state.toml       # Sync state (last_sync_at, last_attempt_at, last_fetch_at, last_push_at, last_error, last_error_stage)
-    conflict-proposals.toml  # Stored AI conflict proposals awaiting review (when enabled)
+    state.toml       # Sync state (last_sync_at, last_attempt_at, last_fetch_at, last_push_at, last_error, last_error_stage, kept_both_paths, kept_both_at)
+    preferences.toml # Mobile per-device preferences (auto_sync)
+    conflict-proposals.toml  # Stored AI conflict proposals awaiting review (review mode)
     logs/            # Activity logs
       YYYY-MM-DD.log       # Daily JSON-lines log files
       launchd-stdout.log   # macOS scheduler stdout (when scheduled)
