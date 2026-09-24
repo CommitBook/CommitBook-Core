@@ -1,0 +1,46 @@
+crates/commitbook-client/src/client_tests.rs
+  s_fd1c4d7260c332::t_f60c8119de1184 59-62,67-69
+crates/commitbook-client/src/documents_tests.rs
+  s_fd1c4d7260c332::t_f60c8119de1184 20-23,25-30
+crates/commitbook-engine/src/git/remote_tests.rs
+  s_fd1c4d7260c332::t_670358e29e0253 39-48,53-54,80-84
+  s_fd1c4d7260c332::t_a4904a8e1b7ec4 27-38,49-52,55-79,85-106
+crates/commitbook-engine/src/commitbooks/registry_tests.rs
+  s_fd1c4d7260c332::t_a4904a8e1b7ec4 96
+  s_fd1c4d7260c332::t_6b78209a8ea46d 103
+  s_fd1c4d7260c332::t_670358e29e0253 119-122
+  s_fd1c4d7260c332::t_487ee618d26165 2,5,9-13,15-17,73-74,91,93-95,97-100,107,114,118,123-135,188,194-196,201,203-206,215,217-218,223-225,230-233
+crates/commitbook-engine/src/commitbooks/registry.rs
+  s_fd1c4d7260c332::t_5f555741baaff4 65-67,73-77,82-87
+  s_fd1c4d7260c332::t_6b78209a8ea46d 70-72
+  s_fd1c4d7260c332::t_320ac80371fe05 5,11-12
+crates/commitbook-client/src/commitbooks_ops_tests.rs
+  s_fd1c4d7260c332::t_40510b597e9884 11,15-19,39,43,60-65,83,90-92,96,118,121,125,128,147-148,150,161,170,182,188,202,206,209,223,236,275,287,291,295,321,338,388,408,412,416,436,470,484,490,502,581,665,668-669,675,681-683,708,717,722-725,730-732,742,744-745,750,753-754,756,758,762,767
+  s_fd1c4d7260c332::t_670358e29e0253 93-95,764-765
+crates/commitbook-client/src/commitbooks_ops.rs
+  s_fd1c4d7260c332::t_5afa5a2e39ee53 55-67,75-77,80,406-416,418-423,425-431
+  s_fd1c4d7260c332::t_e4d037ede075b0 9-10,69-72,78-79,346-349,354-356
+  s_fd1c4d7260c332::t_e23c7d7081f5e1 417
+  s_fd1c4d7260c332::t_9912366be2d98b 403-404
+crates/commitbook-engine/src/git/remote.rs
+  s_fd1c4d7260c332::t_670358e29e0253 56-60
+  s_fd1c4d7260c332::t_a4904a8e1b7ec4 2-3,6-55,61-66,68-114
+crates/commitbook-client/src/conflicts_tests.rs
+  s_fd1c4d7260c332::t_f60c8119de1184 49-52,54-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dbedf84396571462fa5428ffbb6a44ea3f9079aa",
+  "prompts": {},
+  "sessions": {
+    "s_fd1c4d7260c332": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0930a712-b2b7-4e21-b481-d6b29023de16",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
