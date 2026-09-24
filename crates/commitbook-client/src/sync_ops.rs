@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{bail, Result as AnyResult};
 use async_trait::async_trait;
 use commitbook_engine::ai::{ConflictResolution, ConflictResolver};
-use commitbook_engine::config::LocalConfig;
+use commitbook_engine::config::{ConflictMode, LocalConfig};
 use commitbook_engine::git::GitConflict;
 use commitbook_engine::platform::{Logger, TokenCredentials};
 use commitbook_engine::state::RepoLock;
@@ -156,8 +156,8 @@ pub fn sync_one_commitbook(
     let config = LocalConfig::load(&commitbook.local_path)
         .map_err(|error| CommitBookError::database(format!("Load config: {error}")))?;
     let mut options = SyncOptions::from(&config.git);
-    options.review_ai_resolutions = config.conflict.review_ai_resolutions;
-    options.auto_merge_appends = config.conflict.auto_merge_appends;
+    options.review_ai_resolutions = config.conflicts.mode == ConflictMode::Review;
+    options.keep_both = config.conflicts.mode == ConflictMode::Both;
 
     let host_resolver = callback.map(|callback| HostConflictResolver {
         commitbook_id: commitbook_id.to_string(),
@@ -201,7 +201,7 @@ pub fn sync_one_commitbook(
         committed: outcome.committed,
         pulled: outcome.pulled,
         pushed: outcome.pushed,
-        conflicts_resolved: outcome.conflicts_resolved + outcome.appends_merged,
+        conflicts_resolved: outcome.conflicts_resolved + outcome.kept_both.len() as u32,
         manual_conflicts: outcome.manual_conflicts,
         errors: outcome.errors,
     })

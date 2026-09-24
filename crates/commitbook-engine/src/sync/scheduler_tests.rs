@@ -100,7 +100,7 @@ fn setup_with_state() -> (RepoFixture, FileLogger) {
         ".CommitBook/local/\n",
     )
     .unwrap();
-    let logger = FileLogger::new(fx.repo_dir.path(), 30).unwrap();
+    let logger = FileLogger::new(fx.repo_dir.path(), crate::config::LogKeep::Days(30)).unwrap();
     (fx, logger)
 }
 
@@ -914,7 +914,7 @@ async fn first_sync_against_empty_remote_bootstraps_branch() {
         ".CommitBook/local/\n",
     )
     .unwrap();
-    let logger = FileLogger::new(repo_dir.path(), 30).unwrap();
+    let logger = FileLogger::new(repo_dir.path(), crate::config::LogKeep::Days(30)).unwrap();
 
     let outcome = sync_with_resolver(
         repo_dir.path(),
@@ -978,10 +978,9 @@ async fn default_commit_message_uses_writing_timestamp() {
 }
 
 fn record_pending_metadata(fx: &RepoFixture) -> String {
-    let mut config = crate::config::LocalConfig::new("0 * * * *");
-    config.git.branch = fx.branch.clone();
-    config.git.remote = "origin".to_string();
-    config.save(fx.repo_dir.path()).unwrap();
+    crate::config::LocalConfig::new("notes", &fx.branch, "origin")
+        .save(fx.repo_dir.path())
+        .unwrap();
     crate::config::LocalConfig::ensure_gitignore(fx.repo_dir.path()).unwrap();
     fx.repo
         .commit_selected_paths_on_branch(
@@ -1280,9 +1279,9 @@ const APPEND_BASE: &str = "# Notes\n\n- first\n";
 const APPEND_LOCAL: &str = "# Notes\n\n- first\n- local idea\n";
 const APPEND_REMOTE: &str = "# Notes\n\n- first\n- remote idea\n";
 
-fn options_with_auto_merge(fx: &RepoFixture, enabled: bool) -> SyncOptions {
+fn options_with_keep_both(fx: &RepoFixture, enabled: bool) -> SyncOptions {
     let mut options = SyncOptions::new("origin", &fx.branch, true);
-    options.auto_merge_appends = enabled;
+    options.keep_both = enabled;
     options
 }
 
@@ -1291,124 +1290,151 @@ fn remote_tip(fx: &RepoFixture) -> String {
     fx.repo.rev_parse(&format!("origin/{}", fx.branch)).unwrap()
 }
 
-#[tokio::test]
-async fn append_only_conflict_auto_merges_and_pushes_in_manual_mode() {
-    let (fx, logger) = setup_with_state();
-    diverge_files(
-        &fx,
-        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
-    );
-
-    let outcome = sync_with_resolver(
+async fn sync_keep_both(fx: &RepoFixture, logger: &FileLogger, enabled: bool) -> SyncOutcome {
+    sync_with_resolver(
         fx.repo_dir.path(),
-        &options_with_auto_merge(&fx, true),
+        &options_with_keep_both(fx, enabled),
         None,
         &SystemCredentials,
-        &logger,
+        logger,
         None,
     )
     .await
-    .unwrap();
+    .unwrap()
+}
+
+#[tokio::test]
+async fn both_mode_keeps_both_versions_of_an_edited_line_and_pushes() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[(
+            "notes.md",
+            "intro\nMeeting at 3pm\n",
+            "intro\nMeeting at 4pm\n",
+            "intro\nMeeting at 5pm\n",
+        )],
+    );
+
+    let outcome = sync_keep_both(&fx, &logger, true).await;
 
     assert!(outcome.errors.is_empty(), "{outcome:?}");
-    assert_eq!(outcome.appends_merged, 1);
+    assert_eq!(outcome.kept_both, vec!["notes.md"]);
     assert_eq!(outcome.manual_conflicts, 0);
     assert!(!fx.repo.merge_in_progress());
     assert_eq!(
         std::fs::read_to_string(fx.repo_dir.path().join("notes.md")).unwrap(),
-        "# Notes\n\n- first\n- local idea\n- remote idea\n"
+        "intro\nMeeting at 4pm\nMeeting at 5pm\n"
     );
     assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), remote_tip(&fx));
     let state = SyncState::load(&cb_dir_of(&fx)).unwrap();
     assert!(state.last_error.is_none());
     assert!(state.last_sync_at.is_some());
+    assert_eq!(state.kept_both_paths, vec!["notes.md"]);
+    assert!(state.kept_both_at.is_some());
 }
 
 #[tokio::test]
-async fn append_only_conflict_stays_manual_when_disabled() {
+async fn both_mode_keeps_both_additions() {
     let (fx, logger) = setup_with_state();
     diverge_files(
         &fx,
         &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
     );
 
-    let outcome = sync_with_resolver(
-        fx.repo_dir.path(),
-        &options_with_auto_merge(&fx, false),
-        None,
-        &SystemCredentials,
-        &logger,
-        None,
-    )
-    .await
-    .unwrap();
+    let outcome = sync_keep_both(&fx, &logger, true).await;
 
-    assert_eq!(outcome.appends_merged, 0);
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert_eq!(outcome.kept_both, vec!["notes.md"]);
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_dir.path().join("notes.md")).unwrap(),
+        "# Notes\n\n- first\n- local idea\n- remote idea\n"
+    );
+}
+
+#[tokio::test]
+async fn manual_mode_leaves_markers_even_for_additions() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
+    );
+
+    let outcome = sync_keep_both(&fx, &logger, false).await;
+
+    assert!(outcome.kept_both.is_empty());
     assert_eq!(outcome.manual_conflicts, 1);
     assert!(fx.repo.merge_in_progress());
 }
 
 #[tokio::test]
-async fn preserved_append_only_merge_is_completed_on_next_cycle() {
-    let (fx, logger) = setup_with_state();
-    diverge_files(
-        &fx,
-        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
-    );
-    let first = sync_with_resolver(
-        fx.repo_dir.path(),
-        &options_with_auto_merge(&fx, false),
-        None,
-        &SystemCredentials,
-        &logger,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(first.manual_conflicts, 1);
-
-    let second = sync_with_resolver(
-        fx.repo_dir.path(),
-        &options_with_auto_merge(&fx, true),
-        None,
-        &SystemCredentials,
-        &logger,
-        None,
-    )
-    .await
-    .unwrap();
-
-    assert!(second.errors.is_empty(), "{second:?}");
-    assert_eq!(second.appends_merged, 1);
-    assert!(!fx.repo.merge_in_progress());
-    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), remote_tip(&fx));
-}
-
-#[tokio::test]
-async fn edited_lines_still_need_resolution_next_to_auto_merged_appends() {
+async fn both_mode_leaves_structured_files_for_manual_resolution() {
     let (fx, logger) = setup_with_state();
     diverge_files(
         &fx,
         &[
             ("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE),
-            ("shared.md", "line A\n", "line A LOCAL\n", "line A REMOTE\n"),
+            (
+                "settings.json",
+                "{\"a\": 1}\n",
+                "{\"a\": 2}\n",
+                "{\"a\": 3}\n",
+            ),
         ],
     );
 
-    let outcome = sync_with_resolver(
-        fx.repo_dir.path(),
-        &options_with_auto_merge(&fx, true),
-        None,
-        &SystemCredentials,
-        &logger,
-        None,
-    )
-    .await
-    .unwrap();
+    let outcome = sync_keep_both(&fx, &logger, true).await;
 
-    assert_eq!(outcome.appends_merged, 1);
+    assert_eq!(outcome.kept_both, vec!["notes.md"]);
     assert_eq!(outcome.manual_conflicts, 1);
-    assert!(outcome.errors[0].contains("shared.md"), "{outcome:?}");
+    assert!(outcome.errors[0].contains("settings.json"), "{outcome:?}");
     assert!(fx.repo.merge_in_progress());
-    assert_eq!(fx.repo.list_conflicted_paths().unwrap(), vec!["shared.md"]);
+    assert_eq!(
+        fx.repo.list_conflicted_paths().unwrap(),
+        vec!["settings.json"]
+    );
+}
+
+#[tokio::test]
+async fn preserved_merge_is_completed_by_both_mode_on_next_cycle() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
+    );
+    let first = sync_keep_both(&fx, &logger, false).await;
+    assert_eq!(first.manual_conflicts, 1);
+
+    let second = sync_keep_both(&fx, &logger, true).await;
+
+    assert!(second.errors.is_empty(), "{second:?}");
+    assert_eq!(second.kept_both, vec!["notes.md"]);
+    assert!(!fx.repo.merge_in_progress());
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), remote_tip(&fx));
+}
+
+#[tokio::test]
+async fn config_driven_sync_registers_devices_that_every_clone_can_see() {
+    let (fx, _) = setup_with_state();
+    let config = crate::config::LocalConfig::new("notes", &fx.branch, "origin");
+    config.save(fx.repo_dir.path()).unwrap();
+    crate::config::LocalConfig::ensure_gitignore(fx.repo_dir.path()).unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("config").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    std::fs::create_dir_all(other.path().join(".CommitBook/local/logs")).unwrap();
+
+    for root in [fx.repo_dir.path(), other.path(), fx.repo_dir.path()] {
+        let logger = FileLogger::new(root, crate::config::LogKeep::Days(30)).unwrap();
+        let outcome = sync_repository(root, &config, &logger, None).await.unwrap();
+        assert!(outcome.errors.is_empty(), "{outcome:?}");
+    }
+
+    for root in [fx.repo_dir.path(), other.path()] {
+        let (devices, warnings) = crate::devices::list(root).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(devices.len(), 2, "{devices:?}");
+        assert_eq!(devices.iter().filter(|d| d.this_device).count(), 1);
+    }
 }

@@ -207,15 +207,15 @@ impl GitRepo {
         self.apply_resolution(path, Some((content.as_bytes(), mode, oid)), false, false)
     }
 
-    /// Resolve a text conflict whose conflicting hunks only add lines on both
-    /// sides (the ancestor section of every hunk is blank), keeping both
-    /// additions with the local side first. Returns `false` and changes
-    /// nothing for any other shape, e.g. when an existing line was edited.
-    pub fn try_resolve_append_only(&self, path: &str) -> Result<bool> {
+    /// Resolve a text conflict by keeping both versions of every conflicting
+    /// hunk, the local side first, without markers (`both` conflict mode).
+    /// Returns `false` and changes nothing for binary or special files,
+    /// delete/modify conflicts, and text that itself looks like markers.
+    pub fn try_resolve_both(&self, path: &str) -> Result<bool> {
         let Some(conflict) = self.find_conflict(path)? else {
             return Ok(false);
         };
-        let Some(merged) = append_only_union(&conflict)? else {
+        let Some(merged) = union_text(&conflict)? else {
             return Ok(false);
         };
         self.resolve_conflict_with_text(path, &merged)?;
@@ -459,13 +459,9 @@ fn write_symlink(path: &Path, _target: &[u8]) -> Result<()> {
     )
 }
 
-/// Marker width for the append-only probe merge, long enough that note text
-/// cannot be mistaken for a marker line.
-const PROBE_MARKER_SIZE: u16 = 32;
-
-/// Union of both sides when every conflicting hunk has a blank ancestor
-/// section; `None` for binary, delete, or edit conflicts.
-pub(crate) fn append_only_union(conflict: &GitConflict) -> Result<Option<String>> {
+/// Union of both sides: each conflicting hunk keeps the local lines, then
+/// the remote lines. `None` for binary, special, or delete/modify conflicts.
+pub(crate) fn union_text(conflict: &GitConflict) -> Result<Option<String>> {
     if conflict.is_binary_or_special() {
         return Ok(None);
     }
@@ -474,18 +470,11 @@ pub(crate) fn append_only_union(conflict: &GitConflict) -> Result<Option<String>
     };
     let ancestor = conflict.ancestor_text().unwrap_or("");
 
-    let mut probe = MergeFileOptions::new();
-    probe.style_diff3(true).marker_size(PROBE_MARKER_SIZE);
-    let probe = merge_text(&conflict.path, ancestor, local, remote, &mut probe)?;
-    if !conflict_bases_blank(&probe, PROBE_MARKER_SIZE as usize) {
-        return Ok(None);
-    }
-
     let mut union = MergeFileOptions::new();
     union.favor(FileFavor::Union);
     let merged = merge_text(&conflict.path, ancestor, local, remote, &mut union)?;
     // Note text that itself looks like markers would be rejected on staging;
-    // leave such files to the configured resolver instead.
+    // leave such files to manual resolution instead.
     Ok((!has_conflict_markers(&merged)).then_some(merged))
 }
 
@@ -506,42 +495,6 @@ fn merge_text(
         .with_context(|| format!("Failed to merge {path}"))?;
     String::from_utf8(result.content().to_vec())
         .with_context(|| format!("Merged {path} is not valid UTF-8"))
-}
-
-/// True when `merged` (diff3 style) has at least one conflict and every
-/// conflict's ancestor section is empty or whitespace-only.
-fn conflict_bases_blank(merged: &str, marker_size: usize) -> bool {
-    let start = "<".repeat(marker_size);
-    let base = "|".repeat(marker_size);
-    let split = "=".repeat(marker_size);
-    let end = ">".repeat(marker_size);
-    enum Region {
-        Outside,
-        Ours,
-        Base,
-        Theirs,
-    }
-    let mut region = Region::Outside;
-    let mut conflicts = 0;
-    for line in merged.lines() {
-        region = match region {
-            Region::Outside if line.starts_with(&start) => Region::Ours,
-            Region::Outside => Region::Outside,
-            Region::Ours if line.starts_with(&base) => Region::Base,
-            // diff3 always emits an ancestor marker; its absence is unexpected.
-            Region::Ours if line.starts_with(&split) => return false,
-            Region::Ours => Region::Ours,
-            Region::Base if line.starts_with(&split) => Region::Theirs,
-            Region::Base if !line.trim().is_empty() => return false,
-            Region::Base => Region::Base,
-            Region::Theirs if line.starts_with(&end) => {
-                conflicts += 1;
-                Region::Outside
-            }
-            Region::Theirs => Region::Theirs,
-        };
-    }
-    conflicts > 0 && matches!(region, Region::Outside)
 }
 
 pub fn has_conflict_markers(content: &str) -> bool {

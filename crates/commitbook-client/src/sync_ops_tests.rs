@@ -241,6 +241,11 @@ fn panicking_foreign_callback_becomes_resolver_failure() {
     assert!(error.to_string().contains("foreign callback panic"));
 }
 
+/// Bare remote path whose URL identifies `owner/repo`.
+fn remote_path(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    dir.path().join("owner").join("repo.git")
+}
+
 fn managed_sync_fixture() -> (
     tempfile::TempDir,
     tempfile::TempDir,
@@ -249,7 +254,7 @@ fn managed_sync_fixture() -> (
 ) {
     let root = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let clone = root.path().join("owner__repo");
     std::fs::create_dir(&clone).unwrap();
     let repository = git2::Repository::init(&clone).unwrap();
@@ -259,7 +264,12 @@ fn managed_sync_fixture() -> (
     config.set_bool("commit.gpgsign", false).unwrap();
     drop(config);
     commitbook_engine::commitbooks::init_dot_commitbook(
-        &clone, "Repo", "owner", "repo", "main", "github", "pat",
+        &clone,
+        "Repo",
+        "main",
+        "origin",
+        None,
+        commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
     std::fs::write(clone.join("shared.md"), "base\n").unwrap();
@@ -270,11 +280,13 @@ fn managed_sync_fixture() -> (
 
     let repository = git2::Repository::open(&clone).unwrap();
     repository
-        .remote("origin", remote.path().to_str().unwrap())
+        .remote("origin", remote_path(&remote).to_str().unwrap())
         .unwrap();
     let mut local_config = LocalConfig::load(&clone).unwrap();
     local_config.git.branch = branch.clone();
     local_config.git.remote = "origin".to_string();
+    // These tests exercise conflicts, so keep them from being auto-merged.
+    local_config.conflicts.mode = ConflictMode::Manual;
     local_config.save(&clone).unwrap();
     repo.commit_selected_paths(&[".CommitBook/config.toml"], "configure branch")
         .unwrap();
@@ -302,24 +314,11 @@ fn ai_mode_without_callback_allows_conflict_free_sync() {
 }
 
 #[test]
-fn sync_lock_contention_does_not_rewrite_legacy_config_during_lookup() {
-    let (root, _remote, clone, branch) = managed_sync_fixture();
+fn sync_lock_contention_leaves_config_untouched() {
+    let (root, _remote, clone, _branch) = managed_sync_fixture();
     let original = format!(
-        r#"schedule = "hourly"
-created_at = "now"
-
-[git]
-auto_push = true
-branch = "{branch}"
-remote = "origin"
-
-[commitbook]
-name = "Repo"
-owner = "owner"
-repo = "repo"
-provider = "github"
-mode = "pat"
-"#
+        "{}# hand-written comment\n",
+        std::fs::read_to_string(clone.join(".CommitBook/config.toml")).unwrap()
     );
     std::fs::write(clone.join(".CommitBook/config.toml"), &original).unwrap();
     let _lock = commitbook_engine::state::RepoLock::acquire(&clone).unwrap();
@@ -344,7 +343,7 @@ fn ai_mode_can_recover_preserved_merge_after_callback_is_configured() {
     let other = tempfile::tempdir().unwrap();
     let repository = git2::build::RepoBuilder::new()
         .branch(&branch)
-        .clone(remote.path().to_str().unwrap(), other.path())
+        .clone(remote_path(&remote).to_str().unwrap(), other.path())
         .unwrap();
     let mut config = repository.config().unwrap();
     config.set_str("user.name", "Remote").unwrap();
@@ -407,7 +406,7 @@ fn ai_mode_can_recover_preserved_merge_after_callback_is_configured() {
     let verification = tempfile::tempdir().unwrap();
     git2::build::RepoBuilder::new()
         .branch(&branch)
-        .clone(remote.path().to_str().unwrap(), verification.path())
+        .clone(remote_path(&remote).to_str().unwrap(), verification.path())
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(verification.path().join("shared.md")).unwrap(),
@@ -426,7 +425,7 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
     let other = tempfile::tempdir().unwrap();
     let repository = git2::build::RepoBuilder::new()
         .branch(&branch)
-        .clone(remote.path().to_str().unwrap(), other.path())
+        .clone(remote_path(&remote).to_str().unwrap(), other.path())
         .unwrap();
     let mut config = repository.config().unwrap();
     config.set_str("user.name", "Remote").unwrap();
@@ -469,7 +468,7 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
         error_message: None,
     });
     let mut config = LocalConfig::load(&clone).unwrap();
-    config.conflict.review_ai_resolutions = true;
+    config.conflicts.mode = ConflictMode::Review;
     config.save(&clone).unwrap();
     let recovered = sync_one_commitbook(
         root.path(),

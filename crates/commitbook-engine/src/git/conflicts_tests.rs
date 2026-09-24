@@ -485,7 +485,7 @@ const ABOUT_LOCAL: &str = "# 20260905\n\n## Request 1\n\n- Als Dreijähriger mit
 const ABOUT_REMOTE: &str = "# 20260905\n\n## Request 1\n\n- Als Dreijähriger mit Auto fahren\n- 2 Töchter\n- Math MG.com Hero image\n- In Liechtenstein I was skiing faster than driving a car\n";
 
 #[test]
-fn append_only_conflict_keeps_both_additions_local_first() {
+fn keep_both_keeps_both_additions_local_first() {
     let fixture = establish_conflict(
         "About.md",
         ABOUT_BASE.as_bytes(),
@@ -493,7 +493,7 @@ fn append_only_conflict_keeps_both_additions_local_first() {
         ABOUT_REMOTE.as_bytes(),
     );
 
-    assert!(fixture.repo.try_resolve_append_only("About.md").unwrap());
+    assert!(fixture.repo.try_resolve_both("About.md").unwrap());
 
     assert!(fixture.repo.list_conflicts_structured().unwrap().is_empty());
     let merged = std::fs::read_to_string(fixture.repo_dir.path().join("About.md")).unwrap();
@@ -507,24 +507,25 @@ fn append_only_conflict_keeps_both_additions_local_first() {
 }
 
 #[test]
-fn edited_line_conflict_is_not_append_only() {
+fn keep_both_keeps_both_versions_of_an_edited_line() {
     let fixture = establish_conflict(
         "shared.md",
-        b"intro\nshared line\noutro\n",
-        b"intro\nlocal rewrite\noutro\n",
-        b"intro\nremote rewrite\noutro\n",
+        b"intro\nMeeting at 3pm\noutro\n",
+        b"intro\nMeeting at 4pm\noutro\n",
+        b"intro\nMeeting at 5pm\noutro\n",
     );
 
-    assert!(!fixture.repo.try_resolve_append_only("shared.md").unwrap());
+    assert!(fixture.repo.try_resolve_both("shared.md").unwrap());
 
+    assert!(fixture.repo.list_conflicted_paths().unwrap().is_empty());
     assert_eq!(
-        fixture.repo.list_conflicted_paths().unwrap(),
-        vec!["shared.md"]
+        std::fs::read_to_string(fixture.repo_dir.path().join("shared.md")).unwrap(),
+        "intro\nMeeting at 4pm\nMeeting at 5pm\noutro\n"
     );
 }
 
 #[test]
-fn edit_against_append_is_not_append_only() {
+fn keep_both_handles_an_edit_against_an_append() {
     // Remote rewrites the last line while local appends after it.
     let fixture = establish_conflict(
         "shared.md",
@@ -533,15 +534,17 @@ fn edit_against_append_is_not_append_only() {
         b"one\nTWO\n",
     );
 
-    assert!(!fixture.repo.try_resolve_append_only("shared.md").unwrap());
-    assert_eq!(
-        fixture.repo.list_conflicted_paths().unwrap(),
-        vec!["shared.md"]
+    assert!(fixture.repo.try_resolve_both("shared.md").unwrap());
+    let merged = std::fs::read_to_string(fixture.repo_dir.path().join("shared.md")).unwrap();
+    assert!(!has_conflict_markers(&merged));
+    assert!(
+        merged.contains("three") && merged.contains("TWO"),
+        "{merged}"
     );
 }
 
 #[test]
-fn add_add_conflict_is_append_only() {
+fn keep_both_joins_an_add_add_conflict() {
     let fixture = setup_repo_with_bare_remote();
     std::fs::write(fixture.repo_dir.path().join("new.md"), "local\n").unwrap();
     fixture.repo.stage_all().unwrap();
@@ -557,7 +560,7 @@ fn add_add_conflict_is_append_only() {
         .merge_from_remote("origin", &fixture.branch)
         .unwrap();
 
-    assert!(fixture.repo.try_resolve_append_only("new.md").unwrap());
+    assert!(fixture.repo.try_resolve_both("new.md").unwrap());
     assert_eq!(
         std::fs::read_to_string(fixture.repo_dir.path().join("new.md")).unwrap(),
         "local\nremote\n"
@@ -565,10 +568,10 @@ fn add_add_conflict_is_append_only() {
 }
 
 #[test]
-fn binary_conflict_is_not_append_only() {
+fn keep_both_leaves_binary_conflicts() {
     let fixture = establish_conflict("blob.bin", b"\0base", b"\0base\0local", b"\0base\0remote");
 
-    assert!(!fixture.repo.try_resolve_append_only("blob.bin").unwrap());
+    assert!(!fixture.repo.try_resolve_both("blob.bin").unwrap());
     assert_eq!(
         fixture.repo.list_conflicted_paths().unwrap(),
         vec!["blob.bin"]
@@ -576,16 +579,17 @@ fn binary_conflict_is_not_append_only() {
 }
 
 #[test]
-fn conflict_bases_blank_parses_diff3_regions() {
-    let m = |c: char| c.to_string().repeat(7);
-    let (lt, bar, eq, gt) = (m('<'), m('|'), m('='), m('>'));
-    let blank = format!("a\n{lt} ours\nx\n{bar} base\n\n  \n{eq}\ny\n{gt} theirs\nb\n");
-    assert!(conflict_bases_blank(&blank, 7));
-    let edited = format!("{lt} ours\nx\n{bar} base\nold\n{eq}\ny\n{gt} theirs\n");
-    assert!(!conflict_bases_blank(&edited, 7));
-    let no_base = format!("{lt} ours\nx\n{eq}\ny\n{gt} theirs\n");
-    assert!(!conflict_bases_blank(&no_base, 7));
-    assert!(!conflict_bases_blank("no conflicts\n", 7));
-    let unterminated = format!("{lt} ours\nx\n{bar} base\n{eq}\ny\n");
-    assert!(!conflict_bases_blank(&unterminated, 7));
+fn keep_both_leaves_text_that_looks_like_markers() {
+    let fixture = establish_conflict(
+        "shared.md",
+        b"intro\nbase\n",
+        b"intro\n<<<<<<< quoted marker\n",
+        b"intro\nremote\n",
+    );
+
+    assert!(!fixture.repo.try_resolve_both("shared.md").unwrap());
+    assert_eq!(
+        fixture.repo.list_conflicted_paths().unwrap(),
+        vec!["shared.md"]
+    );
 }

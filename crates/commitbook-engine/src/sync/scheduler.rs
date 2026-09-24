@@ -9,7 +9,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::ai::{ConflictResolution, ConflictResolver, ResolverRegistry};
-use crate::config::{local::GitSettings, LocalConfig};
+use crate::config::{local::GitSettings, ConflictMode, LocalConfig};
 use crate::git::operations::MergeOutcome;
 use crate::git::GitRepo;
 use crate::platform::{CredentialProvider, Logger, SystemCredentials};
@@ -25,7 +25,8 @@ pub struct SyncOptions {
     pub branch: String,
     pub auto_push: bool,
     pub review_ai_resolutions: bool,
-    pub auto_merge_appends: bool,
+    /// `both` conflict mode: keep both versions of conflicting notes.
+    pub keep_both: bool,
 }
 
 impl SyncOptions {
@@ -35,7 +36,7 @@ impl SyncOptions {
             branch: branch.into(),
             auto_push,
             review_ai_resolutions: false,
-            auto_merge_appends: true,
+            keep_both: false,
         }
     }
 }
@@ -45,9 +46,11 @@ impl From<&GitSettings> for SyncOptions {
         Self {
             remote: settings.remote.clone(),
             branch: settings.branch.clone(),
-            auto_push: settings.auto_push,
+            // Sync always publishes; `auto_push` remains for tests and a
+            // possible future per-device setting.
+            auto_push: true,
             review_ai_resolutions: false,
-            auto_merge_appends: true,
+            keep_both: false,
         }
     }
 }
@@ -59,9 +62,9 @@ pub struct SyncOutcome {
     pub pushed: u32,
     pub pulled: u32,
     pub conflicts_resolved: u32,
-    /// Conflicts resolved without a resolver by keeping both sides'
-    /// added lines (see `merge_append_only`).
-    pub appends_merged: u32,
+    /// Notes whose conflicts were resolved by keeping both versions
+    /// (`both` mode); the user deletes the version they don't want.
+    pub kept_both: Vec<String>,
     pub manual_conflicts: u32,
     pub errors: Vec<String>,
 }
@@ -72,7 +75,7 @@ impl SyncOutcome {
             && self.pushed == 0
             && self.pulled == 0
             && self.conflicts_resolved == 0
-            && self.appends_merged == 0
+            && self.kept_both.is_empty()
             && self.manual_conflicts == 0
             && self.errors.is_empty()
     }
@@ -103,11 +106,20 @@ pub async fn sync_repository_locked(
     lock: &RepoLock,
 ) -> Result<SyncOutcome> {
     lock.ensure_matches(repo_root)?;
+    // Safety net for clones that never ran `init` on this device: register
+    // it with the default name so other devices can see it.
+    if crate::devices::this_device_id(repo_root)?.is_none() {
+        let auth = crate::devices::desktop_auth(repo_root, &config.git.remote);
+        crate::devices::register(repo_root, None, auth)?;
+    }
     let registry = ResolverRegistry::new();
-    let resolver = registry.get(&config.conflict.resolver);
+    let resolver = match config.conflicts.mode {
+        ConflictMode::Both | ConflictMode::Manual => None,
+        ConflictMode::Ai | ConflictMode::Review => registry.get(config.conflicts.agent.as_str()),
+    };
     let mut options = SyncOptions::from(&config.git);
-    options.review_ai_resolutions = config.conflict.review_ai_resolutions;
-    options.auto_merge_appends = config.conflict.auto_merge_appends;
+    options.review_ai_resolutions = config.conflicts.mode == ConflictMode::Review;
+    options.keep_both = config.conflicts.mode == ConflictMode::Both;
     sync_with_resolver_locked(
         repo_root,
         &options,
@@ -184,6 +196,12 @@ pub async fn sync_with_resolver_locked(
             _ => None,
         };
         current.last_error_stage = failure.as_ref().map(|_| stage.to_string());
+        if let Ok(outcome) = &result {
+            if !outcome.kept_both.is_empty() {
+                current.kept_both_paths = outcome.kept_both.clone();
+                current.kept_both_at = Some(crate::utils::datetime::now_iso());
+            }
+        }
         current.last_error = failure;
         if let Ok(outcome) = &result {
             if outcome.errors.is_empty() && outcome.manual_conflicts == 0 {
@@ -235,10 +253,10 @@ async fn sync_cycle(
         //    Guarding on merge_in_progress() makes this a no-op on retries.
         *stage = "merge";
         if repo.merge_in_progress() {
-            let unresolved = merge_append_only(
+            let unresolved = keep_both_notes(
                 &repo,
                 repo.list_conflicted_paths()?,
-                options.auto_merge_appends,
+                options.keep_both,
                 &mut outcome,
                 logger,
             );
@@ -287,7 +305,7 @@ async fn sync_cycle(
                     }
                 }
             } else {
-                // Markers already resolved by the user or the append-only
+                // Markers already resolved by the user or the keep-both
                 // pass: complete the merge.
                 repo.finalize_merge_commit_on_branch(None, &options.branch)?;
             }
@@ -364,13 +382,8 @@ async fn sync_cycle(
                 outcome.pulled += behind;
             }
             MergeOutcome::Conflicts(conflicted) => {
-                let conflicted = merge_append_only(
-                    &repo,
-                    conflicted,
-                    options.auto_merge_appends,
-                    &mut outcome,
-                    logger,
-                );
+                let conflicted =
+                    keep_both_notes(&repo, conflicted, options.keep_both, &mut outcome, logger);
                 if conflicted.is_empty() {
                     repo.finalize_merge_commit_on_branch(None, &options.branch)?;
                     outcome.pulled += behind;
@@ -479,11 +492,20 @@ fn is_non_fast_forward_push(error: &anyhow::Error) -> bool {
     })
 }
 
-/// Resolve conflicts where both sides only added lines (see
-/// `GitRepo::try_resolve_append_only`) when enabled. Returns the paths that
+/// Notes eligible for `both` mode. Structured files such as JSON or YAML
+/// would be corrupted by keeping two versions, so they fall back to manual.
+fn is_note_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    [".md", ".markdown", ".txt"]
+        .iter()
+        .any(|extension| lower.ends_with(extension))
+}
+
+/// In `both` mode, resolve conflicting notes by keeping both versions
+/// without markers (see `GitRepo::try_resolve_both`). Returns the paths that
 /// still need the configured resolver or the user. A failure on one path
 /// leaves it for those later steps instead of failing the cycle.
-fn merge_append_only(
+fn keep_both_notes(
     repo: &GitRepo,
     paths: Vec<String>,
     enabled: bool,
@@ -495,15 +517,21 @@ fn merge_append_only(
     }
     let mut remaining = Vec::new();
     for path in paths {
-        match repo.try_resolve_append_only(&path) {
+        if !is_note_path(&path) {
+            remaining.push(path);
+            continue;
+        }
+        match repo.try_resolve_both(&path) {
             Ok(true) => {
-                outcome.appends_merged += 1;
-                let _ = logger.info(&format!("Auto-merged append-only conflict: {path}"));
+                let _ = logger.warn(&format!(
+                    "Kept both versions in {path}; delete the one you don't want"
+                ));
+                outcome.kept_both.push(path);
             }
             Ok(false) => remaining.push(path),
             Err(error) => {
                 let _ = logger.warn(&format!(
-                    "Append-only merge of {path} failed ({error:#}); leaving it for conflict resolution"
+                    "Keeping both versions of {path} failed ({error:#}); leaving it for manual resolution"
                 ));
                 remaining.push(path);
             }

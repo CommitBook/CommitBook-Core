@@ -29,6 +29,12 @@ pub struct SyncState {
     pub last_sync_at: Option<String>,
     #[serde(default)]
     pub last_error: Option<String>,
+    /// Notes where the most recent `both`-mode merge kept two versions.
+    /// Replaced by the next cycle that keeps both; cleared by nothing else.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_both_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_both_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_init_push: Option<PendingInitPush>,
 }
