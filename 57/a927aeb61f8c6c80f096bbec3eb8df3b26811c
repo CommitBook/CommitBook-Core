@@ -1,0 +1,23 @@
+crates/commitbook-cli/src/commands/doctor.rs
+  s_975a063706ec02::t_c1bac9d0a46215 381
+crates/commitbook-cli/src/commands/start.rs
+  s_975a063706ec02::t_c1bac9d0a46215 29
+crates/commitbook-engine/src/cron/mod.rs
+  s_975a063706ec02::t_c1bac9d0a46215 368
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "57a927aeb61f8c6c80f096bbec3eb8df3b26811c",
+  "prompts": {},
+  "sessions": {
+    "s_975a063706ec02": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6f706c04-5803-4621-89a1-462987f993f3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
