@@ -16,10 +16,10 @@ pub use fake::FakeScheduler;
 /// Abstraction over the platform scheduler (launchd or crontab) so settings
 /// operations and UI code can be exercised without touching the real one.
 pub trait SchedulerAdapter: Send + Sync {
-    /// Install or replace the job for `repo_root`. Returns the scheduler id.
-    fn install(&self, repo_root: &Path, schedule: &str, binary: &Path) -> Result<String>;
+    /// Install or replace the job for `repo_root`.
+    fn install(&self, repo_root: &Path, schedule: &str, binary: &Path) -> Result<()>;
     /// Remove the job for `repo_root`, if any.
-    fn uninstall(&self, repo_root: &Path, scheduler_id: Option<&str>) -> Result<()>;
+    fn uninstall(&self, repo_root: &Path) -> Result<()>;
     /// Whether a job is currently loaded for `repo_root`.
     fn is_loaded(&self, repo_root: &Path) -> bool;
 }
@@ -29,12 +29,12 @@ pub trait SchedulerAdapter: Send + Sync {
 pub struct SystemScheduler;
 
 impl SchedulerAdapter for SystemScheduler {
-    fn install(&self, repo_root: &Path, schedule: &str, binary: &Path) -> Result<String> {
+    fn install(&self, repo_root: &Path, schedule: &str, binary: &Path) -> Result<()> {
         install(repo_root, schedule, binary)
     }
 
-    fn uninstall(&self, repo_root: &Path, scheduler_id: Option<&str>) -> Result<()> {
-        uninstall(repo_root, scheduler_id)
+    fn uninstall(&self, repo_root: &Path) -> Result<()> {
+        uninstall(repo_root)
     }
 
     fn is_loaded(&self, repo_root: &Path) -> bool {
@@ -54,6 +54,51 @@ pub fn resolve_schedule(input: &str) -> String {
         "daily" => "0 9 * * *".to_string(),
         _ => input.to_string(),
     }
+}
+
+/// Convert a stored schedule (`1h`, `15m`, `daily`, a preset alias such as
+/// `hourly`, or a cron expression) into a validated cron expression.
+pub fn to_cron(schedule: &str) -> Result<String> {
+    let trimmed = schedule.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("Schedule must not be empty");
+    }
+    let preset = resolve_schedule(trimmed);
+    if preset != trimmed {
+        return Ok(preset);
+    }
+    if let Some(expression) = parse_human_interval(trimmed) {
+        return Ok(expression);
+    }
+    validate_cron_expression(trimmed)?;
+    Ok(trimmed.to_string())
+}
+
+/// The short form stored in `config.toml` for a cron expression that has
+/// one (`*/15 * * * *` is `15m`, `0 9 * * *` is `daily`), else `None`.
+pub fn short_form(cron_expr: &str) -> Option<String> {
+    let parts: Vec<&str> = cron_expr.split_whitespace().collect();
+    match parts.as_slice() {
+        ["0", "9", "*", "*", "*"] => Some("daily".to_string()),
+        ["0", "*", "*", "*", "*"] => Some("1h".to_string()),
+        [minute, "*", "*", "*", "*"] => {
+            let n: u32 = minute.strip_prefix("*/")?.parse().ok()?;
+            (n > 0 && 60 % n == 0).then(|| format!("{n}m"))
+        }
+        ["0", hour, "*", "*", "*"] => {
+            let n: u32 = hour.strip_prefix("*/")?.parse().ok()?;
+            (n > 1 && 24 % n == 0).then(|| format!("{n}h"))
+        }
+        _ => None,
+    }
+}
+
+/// Normalize user input for storage: validate it for this platform, then
+/// keep the short form when one exists, otherwise the cron expression.
+pub fn normalize_schedule(input: &str) -> Result<String> {
+    let cron_expr = to_cron(input)?;
+    validate_platform_schedule(&cron_expr)?;
+    Ok(short_form(&cron_expr).unwrap_or(cron_expr))
 }
 
 /// Validate a 5-field cron expression.
@@ -102,8 +147,9 @@ pub fn validate_cron_expression(expr: &str) -> Result<()> {
 
 /// Validate both cron syntax and whether this platform's scheduler can
 /// represent the schedule without changing its meaning.
-pub fn validate_platform_schedule(expr: &str) -> Result<()> {
-    validate_cron_expression(expr)?;
+pub fn validate_platform_schedule(schedule: &str) -> Result<()> {
+    let expr = to_cron(schedule)?;
+    let expr = expr.as_str();
 
     #[cfg(target_os = "macos")]
     {
@@ -112,13 +158,15 @@ pub fn validate_platform_schedule(expr: &str) -> Result<()> {
 
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = expr;
         Ok(())
     }
 }
 
 /// Convert a cron expression to an interval in seconds (for launchd StartInterval).
-pub fn cron_to_interval_seconds(cron_expr: &str) -> Result<u64> {
-    validate_cron_expression(cron_expr)?;
+pub fn cron_to_interval_seconds(schedule: &str) -> Result<u64> {
+    let cron_expr = to_cron(schedule)?;
+    let cron_expr = cron_expr.as_str();
     let parts: Vec<&str> = cron_expr.split_whitespace().collect();
 
     if parts.as_slice() == ["*", "*", "*", "*", "*"] {
@@ -152,7 +200,9 @@ pub fn cron_to_interval_seconds(cron_expr: &str) -> Result<u64> {
 }
 
 /// Human-readable description of a cron expression.
-pub fn describe_schedule(cron_expr: &str) -> String {
+pub fn describe_schedule(schedule: &str) -> String {
+    let cron_expr = to_cron(schedule).unwrap_or_else(|_| schedule.to_string());
+    let cron_expr = cron_expr.as_str();
     match cron_expr {
         "*/5 * * * *" => "Every 5 minutes".to_string(),
         "*/15 * * * *" => "Every 15 minutes".to_string(),
@@ -255,7 +305,9 @@ pub fn list_presets() -> &'static str {
 }
 
 /// Install a scheduler job for a repo. Platform-specific.
-pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<String> {
+pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<()> {
+    let schedule = to_cron(schedule)?;
+    let schedule = schedule.as_str();
     #[cfg(target_os = "macos")]
     {
         macos::install(repo_path, schedule, commitbook_bin)
@@ -274,21 +326,20 @@ pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Resul
 }
 
 /// Remove a scheduler job for a repo. Platform-specific.
-pub fn uninstall(repo_path: &Path, scheduler_id: Option<&str>) -> Result<()> {
+pub fn uninstall(repo_path: &Path) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        macos::uninstall(repo_path, scheduler_id)
+        macos::uninstall(repo_path)
     }
 
     #[cfg(target_os = "linux")]
     {
-        let _ = scheduler_id;
         linux::uninstall(repo_path)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
-        let _ = (repo_path, scheduler_id);
+        let _ = repo_path;
         anyhow::bail!("Unsupported operating system for scheduling")
     }
 }

@@ -12,6 +12,7 @@ use askama::Template;
 
 use commitbook_engine::ai::ProviderChain;
 use commitbook_engine::config::local::LocalConfig;
+use commitbook_engine::config::{Agent, CommitAgent, CommitMode, ConflictMode};
 use commitbook_engine::cron::{self, SchedulerAdapter, SystemScheduler};
 use commitbook_engine::inspection::RepositoryStatus;
 use commitbook_engine::logger::FileLogger;
@@ -118,7 +119,6 @@ struct DashboardTemplate {
     scheduler_label: &'static str,
     schedule_desc: String,
     current_branch: String,
-    auto_push: bool,
     providers: Vec<ProviderInfo>,
 }
 
@@ -129,13 +129,28 @@ struct LogsTemplate {}
 #[derive(Template)]
 #[template(path = "config.html")]
 struct ConfigTemplate {
-    auto_merge_appends: bool,
-    review_ai_resolutions: bool,
-    resolver: String,
-    ai_messages: bool,
     schedule: String,
     branch: String,
-    auto_push: bool,
+    log_keep: String,
+    commit_modes: Vec<Choice>,
+    commit_agents: Vec<Choice>,
+    conflict_modes: Vec<Choice>,
+    conflict_agents: Vec<Choice>,
+}
+
+/// One `<option>` of a settings `<select>`.
+struct Choice {
+    value: &'static str,
+    selected: bool,
+}
+
+fn choices<T: Copy + PartialEq>(all: &[T], current: T, text: fn(T) -> &'static str) -> Vec<Choice> {
+    all.iter()
+        .map(|&value| Choice {
+            value: text(value),
+            selected: value == current,
+        })
+        .collect()
 }
 
 #[derive(Template)]
@@ -146,7 +161,6 @@ struct StatusPartial {
     scheduler_label: &'static str,
     schedule_desc: String,
     current_branch: String,
-    auto_push: bool,
 }
 
 #[derive(Template)]
@@ -201,7 +215,6 @@ fn load_status(repo_path: &Path) -> StatusResponse {
         running: scheduler.is_loaded(),
         scheduler,
         scheduler_warning,
-        enabled: repository.enabled.unwrap_or(false),
         schedule: repository.schedule.clone().unwrap_or_default(),
         schedule_desc: repository
             .schedule
@@ -216,7 +229,6 @@ fn load_status(repo_path: &Path) -> StatusResponse {
             .current_branch
             .clone()
             .unwrap_or_else(|| "unknown".into()),
-        auto_push: repository.auto_push.unwrap_or(false),
         last_commit: repository.last_commit.clone(),
         changes_total: repository.changes_total,
         changes_summary: repository.local_status.clone(),
@@ -224,21 +236,20 @@ fn load_status(repo_path: &Path) -> StatusResponse {
     }
 }
 
+/// Commit-message agents the configured `[commit]` settings would try;
+/// empty in `timestamp` mode.
 fn load_providers(repo_path: &Path) -> Vec<ProviderInfo> {
-    let ai_messages = LocalConfig::load_read_only(repo_path)
-        .map(|config| config.commit.ai_messages)
-        .unwrap_or(false);
-    if !ai_messages {
+    let Ok(config) = LocalConfig::load_read_only(repo_path) else {
+        return Vec::new();
+    };
+    let mut keys =
+        commitbook_engine::ai::commit_provider_keys(config.commit.mode, config.commit.agent);
+    keys.retain(|key| key != "fallback");
+    if keys.is_empty() {
         return Vec::new();
     }
-    let chain = ProviderChain::new();
-    let default_keys = vec![
-        "gh-copilot".to_string(),
-        "claude-cli".to_string(),
-        "codex-cli".to_string(),
-    ];
-    chain
-        .check_availability(&default_keys)
+    ProviderChain::new()
+        .check_availability(&keys)
         .into_iter()
         .map(|(key, name, available)| ProviderInfo {
             key,
@@ -258,7 +269,7 @@ fn load_log_entries_filtered(
     offset: usize,
     level: Option<&str>,
 ) -> Vec<LogEntry> {
-    let logger = FileLogger::read_only(repo_path, 30);
+    let logger = FileLogger::read_only(repo_path);
 
     let lines = logger
         .read_entries_filtered(limit, offset, level)
@@ -295,7 +306,6 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> Result<Html<String
         scheduler_label: scheduler_label(&status.scheduler),
         schedule_desc: status.schedule_desc,
         current_branch: status.current_branch,
-        auto_push: status.auto_push,
         providers,
     };
     Ok(Html(tpl.render().unwrap_or_else(|e| {
@@ -324,13 +334,17 @@ pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoRespons
         Err(_) => return Html("Configuration inspection failed".into()),
     };
     let tpl = ConfigTemplate {
-        auto_merge_appends: config.conflict.auto_merge_appends,
-        review_ai_resolutions: config.conflict.review_ai_resolutions,
-        resolver: config.conflict.resolver,
-        ai_messages: config.commit.ai_messages,
-        schedule: config.schedule,
+        schedule: config.sync.schedule,
         branch: config.git.branch,
-        auto_push: config.git.auto_push,
+        log_keep: config.logs.keep.to_string(),
+        commit_modes: choices(CommitMode::ALL, config.commit.mode, CommitMode::as_str),
+        commit_agents: choices(CommitAgent::ALL, config.commit.agent, CommitAgent::as_str),
+        conflict_modes: choices(
+            ConflictMode::ALL,
+            config.conflicts.mode,
+            ConflictMode::as_str,
+        ),
+        conflict_agents: choices(Agent::ALL, config.conflicts.agent, Agent::as_str),
     };
     Html(
         tpl.render()
@@ -352,7 +366,6 @@ pub async fn htmx_status(State(state): State<Arc<AppState>>) -> Result<Html<Stri
         scheduler_label: scheduler_label(&status.scheduler),
         schedule_desc: status.schedule_desc,
         current_branch: status.current_branch,
-        auto_push: status.auto_push,
     };
     Ok(Html(tpl.render().unwrap_or_else(|e| {
         format!("Template error: {}", escape_html(&e.to_string()))
@@ -435,12 +448,11 @@ pub async fn api_config(State(state): State<Arc<AppState>>, request: Request) ->
     let settings_update = SettingsUpdate {
         schedule: update.schedule,
         branch: update.branch,
-        auto_push: update.auto_push,
-        ai_messages: update.ai_messages,
-        enabled: None,
-        review_ai_resolutions: update.review_ai_resolutions,
-        resolver: update.resolver,
-        auto_merge_appends: update.auto_merge_appends,
+        commit_mode: update.commit_mode,
+        commit_agent: update.commit_agent,
+        conflict_mode: update.conflict_mode,
+        conflict_agent: update.conflict_agent,
+        log_keep: update.log_keep,
     };
 
     let repo_path = state.repo_path.clone();
@@ -651,19 +663,21 @@ pub async fn api_sync(State(state): State<Arc<AppState>>) -> Result<Response, St
     let result = blocking(move || -> anyhow::Result<_> {
         let lock = commitbook_engine::state::RepoLock::acquire(&state.repo_path)?;
         let config = LocalConfig::load(&state.repo_path)?;
-        let logger = FileLogger::new(&state.repo_path, config.logging.max_log_days)?;
+        let logger = FileLogger::new(&state.repo_path, config.logs.keep)?;
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
             .block_on(async {
                 let repo = commitbook_engine::git::GitRepo::open(&state.repo_path)?;
-                let message = if config.commit.ai_messages
+                let message = if config.commit.mode == CommitMode::Ai
                     && !repo.merge_in_progress()
                     && repo.has_dirty_changes()?
                 {
                     let chain = ProviderChain::new();
-                    let keys =
-                        ["gh-copilot", "claude-cli", "codex-cli", "fallback"].map(str::to_string);
+                    let keys = commitbook_engine::ai::commit_provider_keys(
+                        config.commit.mode,
+                        config.commit.agent,
+                    );
                     Some(
                         chain
                             .generate(&repo.changes_summary()?, &keys, &state.repo_path)

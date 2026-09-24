@@ -17,7 +17,6 @@ pub struct CommitPreview {
     pub repository: String,
     pub branch: Option<String>,
     pub remote: Option<String>,
-    pub auto_push: Option<bool>,
     pub policy: String,
     pub entries: Vec<PreviewEntry>,
     pub blockers: Vec<String>,
@@ -137,7 +136,6 @@ pub fn preview(root: &Path) -> CommitPreview {
         repository: root.display().to_string(),
         branch: None,
         remote: None,
-        auto_push: None,
         policy: INCLUSION_POLICY.into(),
         entries: vec![],
         blockers: vec![],
@@ -146,7 +144,6 @@ pub fn preview(root: &Path) -> CommitPreview {
         Ok(c) => {
             result.branch = Some(c.git.branch);
             result.remote = Some(c.git.remote);
-            result.auto_push = Some(c.git.auto_push);
         }
         Err(e) => result
             .blockers
@@ -186,8 +183,6 @@ pub struct RepositoryStatus {
     pub branch: Option<String>,
     pub remote: Option<String>,
     pub current_branch: Option<String>,
-    pub auto_push: Option<bool>,
-    pub enabled: Option<bool>,
     pub schedule: Option<String>,
     pub head_oid: Option<String>,
     pub last_commit: Option<String>,
@@ -204,6 +199,10 @@ pub struct RepositoryStatus {
     pub last_push_at: Option<String>,
     pub last_error: Option<String>,
     pub last_error_stage: Option<String>,
+    /// Notes where the last `both`-mode merge kept two versions, and when.
+    pub kept_both_paths: Vec<String>,
+    pub kept_both_at: Option<String>,
+    pub devices: Vec<crate::devices::DeviceEntry>,
     pub diagnostics: Vec<String>,
     pub local_status: String,
     pub remote_status: String,
@@ -215,9 +214,7 @@ impl RepositoryStatus {
             Ok(c) => {
                 s.branch = Some(c.git.branch);
                 s.remote = Some(c.git.remote);
-                s.auto_push = Some(c.git.auto_push);
-                s.enabled = Some(c.enabled);
-                s.schedule = Some(c.schedule);
+                s.schedule = Some(c.sync.schedule);
             }
             Err(e) => s
                 .diagnostics
@@ -231,8 +228,17 @@ impl RepositoryStatus {
                 s.last_push_at = state.last_push_at;
                 s.last_error = state.last_error;
                 s.last_error_stage = state.last_error_stage;
+                s.kept_both_paths = state.kept_both_paths;
+                s.kept_both_at = state.kept_both_at;
             }
             Err(e) => s.diagnostics.push(format!("Cannot load sync state: {e:#}")),
+        }
+        match crate::devices::list(root) {
+            Ok((devices, warnings)) => {
+                s.devices = devices;
+                s.diagnostics.extend(warnings);
+            }
+            Err(e) => s.diagnostics.push(format!("Cannot list devices: {e:#}")),
         }
         if let Err(e) = s.read_git(root) {
             s.diagnostics
@@ -264,12 +270,7 @@ impl RepositoryStatus {
             "Remote status unknown; inspection needs attention".into()
         } else if s.ahead.is_some_and(|n| n > 0) {
             format!(
-                "{} ({} commits){}",
-                if s.auto_push == Some(false) {
-                    "Commits kept local"
-                } else {
-                    "Waiting to upload"
-                },
+                "Waiting to upload ({} commits){}",
                 s.ahead.unwrap(),
                 if s.behind.is_some_and(|n| n > 0) {
                     "; remote updates available"
@@ -357,6 +358,28 @@ impl RepositoryStatus {
                 self.last_push_at.as_deref().unwrap_or("unknown")
             ),
         ];
+        if !self.devices.is_empty() {
+            let names: Vec<&str> = self
+                .devices
+                .iter()
+                .map(|d| d.device.name.as_str())
+                .collect();
+            lines.push(format!(
+                "Devices: {} ({})",
+                self.devices.len(),
+                names.join(", ")
+            ));
+        }
+        if !self.kept_both_paths.is_empty() {
+            lines.push(format!(
+                "Both versions kept{}; delete the one you don't want in: {}",
+                self.kept_both_at
+                    .as_deref()
+                    .map(|at| format!(" at {at}"))
+                    .unwrap_or_default(),
+                self.kept_both_paths.join(", ")
+            ));
+        }
         if let Some(e) = &self.last_error {
             lines.push(format!(
                 "Last error ({}): {e}",

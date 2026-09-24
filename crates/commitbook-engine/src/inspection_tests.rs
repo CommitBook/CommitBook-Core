@@ -6,9 +6,11 @@ fn setup() -> BaseRepoFixture {
         ("delete.txt", "delete me\n"),
         (".gitignore", ".CommitBook/local/\nignored*\n"),
     ]);
-    let mut config = LocalConfig::init(&fx.repo_root, "hourly").unwrap();
-    config.git.branch = fx.branch.clone();
-    config.save(&fx.repo_root).unwrap();
+    LocalConfig::init(
+        &fx.repo_root,
+        &LocalConfig::new("notes", &fx.branch, "origin"),
+    )
+    .unwrap();
     fx.repo().stage_all().unwrap();
     fx.repo().commit("settings").unwrap();
     fx
@@ -118,11 +120,6 @@ fn status_reports_cached_ahead_behind_and_branch_mismatch() {
     assert_eq!(s.ahead, Some(1));
     assert!(s.remote_status.contains("Waiting to upload"));
     let mut config = LocalConfig::load_read_only(&fx.repo_root).unwrap();
-    config.git.auto_push = false;
-    config.save(&fx.repo_root).unwrap();
-    assert!(RepositoryStatus::read(&fx.repo_root)
-        .remote_status
-        .contains("Commits kept local"));
     config.git.branch = "different".into();
     config.save(&fx.repo_root).unwrap();
     assert!(RepositoryStatus::read(&fx.repo_root)
@@ -134,7 +131,7 @@ fn status_reports_cached_ahead_behind_and_branch_mismatch() {
 fn unborn_repo_has_no_invented_commit() {
     let tmp = tempfile::tempdir().unwrap();
     git2::Repository::init(tmp.path()).unwrap();
-    LocalConfig::init(tmp.path(), "hourly").unwrap();
+    LocalConfig::init(tmp.path(), &LocalConfig::new("notes", "main", "origin")).unwrap();
     let s = RepositoryStatus::read(tmp.path());
     assert!(s.head_oid.is_none());
     assert!(s.last_commit.is_none());
@@ -235,4 +232,24 @@ fn preview_matches_staging_when_ignore_rules_interact_with_index() {
             "staged_addition={staged_addition}"
         );
     }
+}
+#[test]
+fn status_lists_devices_and_notes_where_both_versions_were_kept() {
+    let fx = setup();
+    crate::devices::register(&fx.repo_root, Some("Laptop"), crate::config::Auth::Ssh).unwrap();
+    let cb_dir = LocalConfig::commitbook_dir(&fx.repo_root);
+    let mut state = SyncState::load(&cb_dir).unwrap();
+    state.kept_both_paths = vec!["journal.md".into()];
+    state.kept_both_at = Some("2026-09-25T10:00:00Z".into());
+    state.save(&cb_dir).unwrap();
+
+    let status = RepositoryStatus::read(&fx.repo_root);
+    assert_eq!(status.devices.len(), 1);
+    let lines = status.lines().join("\n");
+    assert!(lines.contains("Devices: 1 (Laptop)"), "{lines}");
+    assert!(
+        lines.contains("Both versions kept at 2026-09-25T10:00:00Z"),
+        "{lines}"
+    );
+    assert!(lines.contains("journal.md"), "{lines}");
 }

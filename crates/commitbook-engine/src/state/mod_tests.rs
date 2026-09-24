@@ -60,7 +60,7 @@ fn test_initialize_creates_structure() {
     // Create a fake .git so initialize finds a git repo.
     std::fs::create_dir_all(repo.join(".git")).unwrap();
 
-    initialize(repo, "origin").unwrap();
+    initialize(repo, "origin", "main").unwrap();
 
     assert!(repo.join(".CommitBook").is_dir());
     assert!(repo.join(".CommitBook/local").is_dir());
@@ -74,7 +74,7 @@ fn test_initialize_updates_gitignore() {
     let repo = tmp.path();
     std::fs::create_dir_all(repo.join(".git")).unwrap();
 
-    initialize(repo, "origin").unwrap();
+    initialize(repo, "origin", "main").unwrap();
 
     let gitignore = std::fs::read_to_string(repo.join(".CommitBook/.gitignore")).unwrap();
     assert_eq!(gitignore, "/local/\n");
@@ -87,7 +87,7 @@ fn test_initialize_persists_remote_name() {
     let repo = tmp.path();
     std::fs::create_dir_all(repo.join(".git")).unwrap();
 
-    initialize(repo, "upstream").unwrap();
+    initialize(repo, "upstream", "main").unwrap();
 
     let config = crate::config::LocalConfig::load(repo).unwrap();
     assert_eq!(config.git.remote, "upstream");
@@ -108,7 +108,7 @@ fn test_initialize_does_not_overwrite_existing_config() {
     )
     .unwrap();
 
-    initialize(repo, "origin").unwrap();
+    initialize(repo, "origin", "main").unwrap();
 
     // Config should not be overwritten.
     let content = std::fs::read_to_string(cb_dir.join("config.toml")).unwrap();
@@ -121,8 +121,8 @@ fn test_initialize_idempotent() {
     let repo = tmp.path();
     std::fs::create_dir_all(repo.join(".git")).unwrap();
 
-    initialize(repo, "origin").unwrap();
-    initialize(repo, "origin").unwrap(); // Should not error.
+    initialize(repo, "origin", "main").unwrap();
+    initialize(repo, "origin", "main").unwrap(); // Should not error.
 
     assert!(repo.join(".CommitBook/config.toml").exists());
 }

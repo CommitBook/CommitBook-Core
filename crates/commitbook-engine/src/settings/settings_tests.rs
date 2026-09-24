@@ -8,7 +8,7 @@ fn init_repo() -> tempfile::TempDir {
     let repo = git2::Repository::init(tmp.path()).unwrap();
     repo.remote("origin", "https://example.invalid/notes.git")
         .unwrap();
-    LocalConfig::init(tmp.path(), "0 * * * *").unwrap();
+    LocalConfig::init(tmp.path(), &LocalConfig::new("notes", "main", "origin")).unwrap();
     tmp
 }
 
@@ -24,13 +24,13 @@ fn schedule_update(schedule: &str) -> SettingsUpdate {
 }
 
 #[test]
-fn normalize_schedule_accepts_presets_intervals_and_cron() {
-    assert_eq!(normalize_schedule("hourly").unwrap(), "0 * * * *");
-    assert_eq!(normalize_schedule("5m").unwrap(), "*/5 * * * *");
-    assert_eq!(
-        normalize_schedule(" */15 * * * * ").unwrap(),
-        "*/15 * * * *"
-    );
+fn normalize_schedule_stores_short_forms_and_custom_cron() {
+    assert_eq!(normalize_schedule("hourly").unwrap(), "1h");
+    assert_eq!(normalize_schedule("every-5m").unwrap(), "5m");
+    assert_eq!(normalize_schedule(" */15 * * * * ").unwrap(), "15m");
+    assert_eq!(normalize_schedule("0 9 * * *").unwrap(), "daily");
+    assert_eq!(normalize_schedule("2hours").unwrap(), "2h");
+    assert_eq!(normalize_schedule("30 * * * *").unwrap(), "30 * * * *");
     assert!(normalize_schedule("not a cron").is_err());
     assert!(normalize_schedule("").is_err());
 }
@@ -43,11 +43,8 @@ fn update_saves_and_skips_scheduler_when_stopped() {
         update_settings(tmp.path(), &schedule_update("every-5m"), &context(&fake)).unwrap();
     assert!(outcome.schedule_changed);
     assert!(!outcome.scheduler_reinstalled);
-    assert_eq!(outcome.config.schedule, "*/5 * * * *");
-    assert_eq!(
-        LocalConfig::load(tmp.path()).unwrap().schedule,
-        "*/5 * * * *"
-    );
+    assert_eq!(outcome.config.sync.schedule, "5m");
+    assert_eq!(LocalConfig::load(tmp.path()).unwrap().sync.schedule, "5m");
     assert_eq!(fake.install_count(), 0);
 }
 
@@ -57,11 +54,11 @@ fn update_reinstalls_active_scheduler_with_new_schedule() {
     let fake = FakeScheduler::running("0 * * * *");
     let outcome = update_settings(tmp.path(), &schedule_update("5m"), &context(&fake)).unwrap();
     assert!(outcome.scheduler_reinstalled);
-    assert_eq!(fake.installed_schedule().as_deref(), Some("*/5 * * * *"));
+    assert_eq!(fake.installed_schedule().as_deref(), Some("5m"));
     assert!(fake
         .calls()
         .contains(&crate::cron::fake::FakeCall::Install {
-            schedule: "*/5 * * * *".into(),
+            schedule: "5m".into(),
             binary: PathBuf::from("/usr/local/bin/commitbook"),
         }));
 }
@@ -81,8 +78,8 @@ fn install_failure_restores_old_config_and_old_job() {
         .contains("launchctl load failed"));
     assert!(details.rollback.is_none());
     assert!(error.to_string().contains("were restored"));
-    assert_eq!(LocalConfig::load(tmp.path()).unwrap().schedule, "0 * * * *");
-    assert_eq!(fake.installed_schedule().as_deref(), Some("0 * * * *"));
+    assert_eq!(LocalConfig::load(tmp.path()).unwrap().sync.schedule, "1h");
+    assert_eq!(fake.installed_schedule().as_deref(), Some("1h"));
     assert_eq!(fake.install_count(), 2);
 }
 
@@ -104,7 +101,7 @@ fn install_and_rollback_failures_are_both_reported() {
     assert!(message.contains("old job rejected"), "{message}");
     assert!(!message.contains("were restored"), "{message}");
     // The configuration itself was rolled back even though the job was not.
-    assert_eq!(LocalConfig::load(tmp.path()).unwrap().schedule, "0 * * * *");
+    assert_eq!(LocalConfig::load(tmp.path()).unwrap().sync.schedule, "1h");
 }
 
 #[test]
@@ -114,7 +111,7 @@ fn concurrent_mutation_is_rejected() {
     let fake = FakeScheduler::stopped();
     let error = update_settings(tmp.path(), &schedule_update("5m"), &context(&fake)).unwrap_err();
     assert!(error.downcast_ref::<RepoLockContended>().is_some());
-    assert_eq!(LocalConfig::load(tmp.path()).unwrap().schedule, "0 * * * *");
+    assert_eq!(LocalConfig::load(tmp.path()).unwrap().sync.schedule, "1h");
 }
 
 #[test]
@@ -132,12 +129,12 @@ fn unchanged_schedule_does_not_touch_scheduler() {
     );
 
     let update = SettingsUpdate {
-        auto_push: Some(false),
+        commit_mode: Some(CommitMode::Ai),
         ..Default::default()
     };
     let outcome = update_settings(tmp.path(), &update, &context(&fake)).unwrap();
     assert!(!outcome.schedule_changed);
-    assert!(!outcome.config.git.auto_push);
+    assert_eq!(outcome.config.commit.mode, CommitMode::Ai);
     assert_eq!(fake.install_count(), 0);
 }
 
@@ -149,7 +146,7 @@ fn invalid_branch_is_rejected_before_save() {
     for branch in ["", "has space", "bad..name", "-leading"] {
         let update = SettingsUpdate {
             branch: Some(branch.to_string()),
-            auto_push: Some(false),
+            commit_mode: Some(CommitMode::Ai),
             ..Default::default()
         };
         assert!(
@@ -175,7 +172,7 @@ fn start_and_stop_go_through_the_adapter() {
     let tmp = init_repo();
     let fake = FakeScheduler::stopped();
     start_scheduler(tmp.path(), &context(&fake)).unwrap();
-    assert_eq!(fake.installed_schedule().as_deref(), Some("0 * * * *"));
+    assert_eq!(fake.installed_schedule().as_deref(), Some("1h"));
     stop_scheduler(tmp.path(), &context(&fake)).unwrap();
     assert!(fake.installed_schedule().is_none());
 
@@ -185,19 +182,23 @@ fn start_and_stop_go_through_the_adapter() {
 }
 
 #[test]
-fn auto_merge_appends_update_is_saved() {
+fn mode_agent_and_log_updates_are_saved() {
     let tmp = init_repo();
     let fake = FakeScheduler::stopped();
     let update = SettingsUpdate {
-        auto_merge_appends: Some(false),
+        commit_mode: Some(CommitMode::Ai),
+        commit_agent: Some(CommitAgent::Gemini),
+        conflict_mode: Some(ConflictMode::Review),
+        conflict_agent: Some(Agent::Codex),
+        log_keep: Some(LogKeep::Forever),
         ..Default::default()
     };
-    let outcome = update_settings(tmp.path(), &update, &context(&fake)).unwrap();
-    assert!(!outcome.config.conflict.auto_merge_appends);
-    assert!(
-        !LocalConfig::load(tmp.path())
-            .unwrap()
-            .conflict
-            .auto_merge_appends
-    );
+    update_settings(tmp.path(), &update, &context(&fake)).unwrap();
+
+    let saved = LocalConfig::load(tmp.path()).unwrap();
+    assert_eq!(saved.commit.mode, CommitMode::Ai);
+    assert_eq!(saved.commit.agent, CommitAgent::Gemini);
+    assert_eq!(saved.conflicts.mode, ConflictMode::Review);
+    assert_eq!(saved.conflicts.agent, Agent::Codex);
+    assert_eq!(saved.logs.keep, LogKeep::Forever);
 }

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use commitbook_engine::config::local::LocalConfig;
+use commitbook_engine::config::{CommitMode, ConflictMode};
 use commitbook_engine::cron::{self, SystemScheduler};
 use commitbook_engine::git::{ChangesSummary, GitRepo};
 use commitbook_engine::logger::FileLogger;
@@ -54,16 +55,18 @@ pub struct App {
     pub scheduler_warning: Option<String>,
     pub schedule: String,
     pub schedule_desc: String,
-    pub auto_push: bool,
     pub branch: String,
+    /// `[commit]` and `[conflicts]` as shown in the config panel, e.g.
+    /// `timestamp` or `ai (claude)`.
+    pub commit: String,
+    pub conflicts: String,
+    pub log_keep: String,
     pub last_commit: Option<String>,
     pub log_lines: Vec<LogEntry>,
     pub log_scroll: usize,
     pub providers: Vec<(String, String, bool)>,
     pub changes: ChangesSummary,
     pub current_branch: String,
-    pub enabled: bool,
-    pub log_level: String,
     /// Outcome of the most recent start/stop action, cleared on success.
     pub action_error: Option<String>,
     pub quit: bool,
@@ -108,16 +111,16 @@ impl App {
             scheduler_warning: None,
             schedule: String::new(),
             schedule_desc: String::new(),
-            auto_push: true,
             branch: "main".to_string(),
+            commit: String::new(),
+            conflicts: String::new(),
+            log_keep: String::new(),
             last_commit: None,
             log_lines: Vec::new(),
             log_scroll: 0,
             providers: Vec::new(),
             changes: ChangesSummary::default(),
             current_branch: String::new(),
-            enabled: true,
-            log_level: "info".to_string(),
             action_error: None,
             quit: false,
         }
@@ -125,24 +128,34 @@ impl App {
 
     pub fn refresh(&mut self) {
         // Fail closed on config errors, including after AI was previously enabled.
-        let mut ai_messages = false;
-        // Load local config
+        let mut provider_keys = Vec::new();
         if let Ok(config) = LocalConfig::load_read_only(&self.repo_path) {
-            ai_messages = config.commit.ai_messages;
-            self.schedule = config.schedule.clone();
-            self.schedule_desc = cron::describe_schedule(&config.schedule);
-            self.auto_push = config.git.auto_push;
+            provider_keys = commitbook_engine::ai::commit_provider_keys(
+                config.commit.mode,
+                config.commit.agent,
+            );
+            provider_keys.retain(|key| key != "fallback");
+            self.schedule = config.sync.schedule.clone();
+            self.schedule_desc = cron::describe_schedule(&config.sync.schedule);
             self.branch = config.git.branch.clone();
-
-            self.enabled = config.enabled;
-            self.log_level = config.logging.level.clone();
+            self.commit = match config.commit.mode {
+                CommitMode::Timestamp => "timestamp".into(),
+                CommitMode::Ai => format!("ai ({})", config.commit.agent),
+            };
+            self.conflicts = match config.conflicts.mode {
+                ConflictMode::Ai | ConflictMode::Review => {
+                    format!("{} ({})", config.conflicts.mode, config.conflicts.agent)
+                }
+                mode => mode.to_string(),
+            };
+            self.log_keep = config.logs.keep.to_string();
         } else {
             self.schedule.clear();
             self.schedule_desc = "Unknown (configuration error)".into();
-            self.auto_push = false;
             self.branch = "unknown".into();
-            self.enabled = false;
-            self.log_level = "unknown".into();
+            self.commit = "unknown".into();
+            self.conflicts = "unknown".into();
+            self.log_keep = "unknown".into();
         }
 
         self.repository_status = Some(commitbook_engine::inspection::RepositoryStatus::read(
@@ -177,24 +190,19 @@ impl App {
 
         // Load log entries
         {
-            let logger = FileLogger::read_only(&self.repo_path, 30);
+            let logger = FileLogger::read_only(&self.repo_path);
             if let Ok(lines) = logger.read_entries(100, 0) {
                 self.log_lines = lines.iter().filter_map(|l| LogEntry::parse(l)).collect();
             }
         }
 
         self.providers.clear();
-        if !ai_messages {
+        if provider_keys.is_empty() {
             return;
         }
-        // Check provider availability only after opt-in.
+        // Check agent availability only when commit messages use AI.
         let chain = commitbook_engine::ai::ProviderChain::new();
-        let default_keys = vec![
-            "gh-copilot".to_string(),
-            "claude-cli".to_string(),
-            "codex-cli".to_string(),
-        ];
-        self.providers = chain.check_availability(&default_keys);
+        self.providers = chain.check_availability(&provider_keys);
     }
 
     pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
@@ -257,7 +265,7 @@ impl App {
         let result = if self.running {
             settings::stop_scheduler(&self.repo_path, &context)
         } else {
-            settings::start_scheduler(&self.repo_path, &context).map(|_| ())
+            settings::start_scheduler(&self.repo_path, &context)
         };
         self.action_error = result.err().map(|error| format!("{error:#}"));
         self.refresh();

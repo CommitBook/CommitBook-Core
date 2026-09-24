@@ -3,7 +3,8 @@ use colored::Colorize;
 use std::path::Path;
 use std::process::Command;
 
-use commitbook_engine::config::LocalConfig;
+use commitbook_engine::config::values::ANY_AGENT_ORDER;
+use commitbook_engine::config::{CommitMode, ConflictMode, LocalConfig};
 use commitbook_engine::cron;
 use commitbook_engine::git::GitRepo;
 use commitbook_engine::state::auth::AuthConfig;
@@ -124,7 +125,7 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
     let config = LocalConfig::load_read_only(repo_root).ok();
     let last_attempt = SyncState::load(cb_dir).ok().and_then(|s| s.last_attempt_at);
     let warning = scheduler.warning(
-        config.as_ref().map(|c| c.schedule.as_str()),
+        config.as_ref().map(|c| c.sync.schedule.as_str()),
         last_attempt.as_deref(),
         chrono::Utc::now(),
     );
@@ -153,37 +154,62 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
         );
     }
 
-    // 8. AI providers. Skipped entirely when `[commit] ai_messages = false`,
-    //    since sync uses only the deterministic timestamp fallback then.
-    print!("  AI providers... ");
-    let ai_messages = LocalConfig::load(repo_root)
-        .map(|c| c.commit.ai_messages)
-        .unwrap_or(false);
-    if !ai_messages {
-        println!("{}", "disabled".dimmed());
-        println!(
-            "    {}",
-            "[commit] ai_messages = false; commit messages use timestamp text.".dimmed()
-        );
-    } else {
-        let chain = commitbook_engine::ai::ProviderChain::new();
-        let keys = vec![
-            "gh-copilot".to_string(),
-            "claude-cli".to_string(),
-            "codex-cli".to_string(),
-        ];
-        let availability = chain.check_availability(&keys);
-        let available: Vec<_> = availability
-            .iter()
-            .filter(|(_, _, avail)| *avail)
-            .map(|(_, name, _)| name.as_str())
-            .collect();
-        if available.is_empty() {
-            println!("{}", "none found".yellow());
-            println!("    {}", "Commit messages will use fallback text.".dimmed());
-        } else {
-            println!("{}", available.join(", ").green());
+    // 8. AI agents: only the ones the configured modes actually use.
+    print!("  AI agents... ");
+    match LocalConfig::load(repo_root) {
+        Ok(config) => {
+            let commit_ai = config.commit.mode == CommitMode::Ai;
+            let conflict_ai = matches!(
+                config.conflicts.mode,
+                ConflictMode::Ai | ConflictMode::Review
+            );
+            if !commit_ai && !conflict_ai {
+                println!("{}", "not used".dimmed());
+            } else {
+                println!();
+            }
+            if commit_ai {
+                let agents = match config.commit.agent.agent() {
+                    Some(agent) => vec![agent],
+                    None => ANY_AGENT_ORDER.to_vec(),
+                };
+                let keys: Vec<String> = agents
+                    .iter()
+                    .map(|agent| agent.commit_provider_key().to_string())
+                    .collect();
+                let available: Vec<String> = commitbook_engine::ai::ProviderChain::new()
+                    .check_availability(&keys)
+                    .into_iter()
+                    .filter(|(_, _, installed)| *installed)
+                    .map(|(_, name, _)| name)
+                    .collect();
+                let found = if available.is_empty() {
+                    "not installed; commit messages use timestamp text"
+                        .yellow()
+                        .to_string()
+                } else {
+                    available.join(", ").green().to_string()
+                };
+                println!("    Commit messages ({}): {found}", config.commit.agent);
+            }
+            if conflict_ai {
+                let installed = commitbook_engine::ai::ResolverRegistry::new()
+                    .get(config.conflicts.agent.as_str())
+                    .is_some();
+                let found = if installed {
+                    "installed".green().to_string()
+                } else {
+                    "not installed; conflicts are left for manual resolution"
+                        .yellow()
+                        .to_string()
+                };
+                println!(
+                    "    Conflicts ({}, {}): {found}",
+                    config.conflicts.mode, config.conflicts.agent
+                );
+            }
         }
+        Err(_) => println!("{}", "unknown (config unreadable)".yellow()),
     }
 
     // 9. Sync checkpoint.
@@ -392,7 +418,7 @@ fn fix_plist_binary_path(repo_root: &Path) -> bool {
             return false;
         }
     };
-    match cron::install(repo_root, &config.schedule, &current_exe) {
+    match cron::install(repo_root, &config.sync.schedule, &current_exe) {
         Ok(_) => {
             println!("{}", "OK".green().bold());
             true

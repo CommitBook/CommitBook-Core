@@ -15,13 +15,9 @@ pub fn draw(f: &mut Frame, app: &App) {
             Line::raw(preview.policy.clone()),
             Line::raw(format!("Repository: {}", preview.repository)),
             Line::raw(format!(
-                "Branch: {}  Remote: {}  Auto push: {}",
+                "Branch: {}  Remote: {}",
                 preview.branch.as_deref().unwrap_or("unknown"),
                 preview.remote.as_deref().unwrap_or("unknown"),
-                preview
-                    .auto_push
-                    .map(|v| if v { "yes" } else { "no" })
-                    .unwrap_or("unknown")
             )),
         ];
         lines.extend(
@@ -105,8 +101,6 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("○ Stopped", Style::default().fg(Color::Red))
     };
 
-    let enabled_text = if app.enabled { "yes" } else { "no" };
-
     let changes_text = if app.changes.is_empty() {
         "No pending changes".to_string()
     } else {
@@ -121,7 +115,6 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 
     let mut lines = vec![
         Line::from(vec![Span::raw("  State:    "), state_indicator]),
-        Line::from(format!("  Enabled:  {}", enabled_text)),
         Line::from(format!("  Schedule: {}", app.schedule_desc)),
         Line::from(format!("  Branch:   {}", app.current_branch)),
         Line::from(format!("  Last:     {}", last_commit_text)),
@@ -230,9 +223,10 @@ fn draw_config(f: &mut Frame, app: &App, area: Rect) {
     }
     let lines = vec![
         Line::from(format!("  schedule:      {}", app.schedule)),
-        Line::from(format!("  auto_push:     {}", app.auto_push)),
         Line::from(format!("  branch:        {}", app.branch)),
-        Line::from(format!("  log_level:     {}", app.log_level)),
+        Line::from(format!("  commit:        {}", app.commit)),
+        Line::from(format!("  conflicts:     {}", app.conflicts)),
+        Line::from(format!("  keep logs:     {}", app.log_keep)),
     ];
 
     let paragraph = Paragraph::new(lines).block(block);
@@ -244,7 +238,7 @@ fn draw_providers(f: &mut Frame, app: &App, area: Rect) {
     let block = panel_block(" Providers ", active);
 
     if app.providers.is_empty() {
-        let paragraph = Paragraph::new("  AI commit messages disabled")
+        let paragraph = Paragraph::new("  Commit messages use timestamp text")
             .style(Style::default().fg(Color::DarkGray))
             .block(block);
         f.render_widget(paragraph, area);

@@ -1,407 +1,242 @@
 use super::*;
 
-fn init_repo_with_remote(path: &Path, remote: &str) {
-    let repo = git2::Repository::init(path).unwrap();
-    repo.remote(remote, "https://example.invalid/notes.git")
-        .unwrap();
+fn config() -> LocalConfig {
+    LocalConfig::new("notes", "main", "origin")
+}
+
+fn init(repo: &Path) -> LocalConfig {
+    let config = config();
+    LocalConfig::init(repo, &config).unwrap();
+    config
 }
 
 #[test]
-fn test_default_field_values() {
-    let cfg = LocalConfig::new("0 * * * *");
-    assert!(cfg.enabled);
-    assert_eq!(cfg.schedule, "0 * * * *");
-    assert!(cfg.scheduler_id.is_none());
-    assert!(cfg.git.auto_push);
+fn new_config_has_the_documented_defaults() {
+    let cfg = config();
+    assert_eq!(cfg.config.schema, CONFIG_SCHEMA);
+    assert_eq!(cfg.commitbook.name, "notes");
     assert_eq!(cfg.git.branch, "main");
-    assert_eq!(cfg.logging.level, "info");
-    assert_eq!(cfg.logging.max_log_days, 30);
+    assert_eq!(cfg.git.remote, "origin");
+    assert_eq!(cfg.sync.schedule, "1h");
+    assert_eq!(cfg.commit.mode, CommitMode::Timestamp);
+    assert_eq!(cfg.commit.agent, CommitAgent::Any);
+    assert_eq!(cfg.conflicts.mode, ConflictMode::Both);
+    assert_eq!(cfg.conflicts.agent, Agent::Claude);
+    assert_eq!(cfg.logs.keep, LogKeep::Days(30));
 }
 
 #[test]
-fn test_commitbook_dir_path() {
-    let dir = LocalConfig::commitbook_dir(Path::new("/tmp/repo"));
-    assert_eq!(dir, PathBuf::from("/tmp/repo/.CommitBook"));
+fn path_helpers_point_into_commitbook_dir() {
+    let repo = Path::new("/tmp/repo");
+    assert_eq!(
+        LocalConfig::commitbook_dir(repo),
+        PathBuf::from("/tmp/repo/.CommitBook")
+    );
+    assert_eq!(
+        LocalConfig::config_path(repo),
+        PathBuf::from("/tmp/repo/.CommitBook/config.toml")
+    );
+    assert_eq!(
+        LocalConfig::logs_dir(repo),
+        PathBuf::from("/tmp/repo/.CommitBook/local/logs")
+    );
+    assert_eq!(
+        LocalConfig::lock_path(repo),
+        PathBuf::from("/tmp/repo/.CommitBook/local/.lock")
+    );
 }
 
 #[test]
-fn test_config_path() {
-    let p = LocalConfig::config_path(Path::new("/tmp/repo"));
-    assert_eq!(p, PathBuf::from("/tmp/repo/.CommitBook/config.toml"));
-}
-
-#[test]
-fn test_logs_dir_path() {
-    let p = LocalConfig::logs_dir(Path::new("/tmp/repo"));
-    assert_eq!(p, PathBuf::from("/tmp/repo/.CommitBook/local/logs"));
-}
-
-#[test]
-fn test_lock_path() {
-    let p = LocalConfig::lock_path(Path::new("/tmp/repo"));
-    assert_eq!(p, PathBuf::from("/tmp/repo/.CommitBook/local/.lock"));
-}
-
-#[test]
-fn test_save_load_roundtrip() {
+fn init_writes_the_commented_template_in_section_order() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
+    init(tmp.path());
 
-    let original = LocalConfig::new("*/15 * * * *");
-    original.save(repo).unwrap();
-
-    let loaded = LocalConfig::load(repo).unwrap();
-    assert_eq!(loaded.schedule, "*/15 * * * *");
-    assert!(loaded.enabled);
-    assert_eq!(loaded.git.branch, "main");
+    let content = fs::read_to_string(LocalConfig::config_path(tmp.path())).unwrap();
+    assert!(content.starts_with("# CommitBook settings."), "{content}");
+    let sections = [
+        "[config]",
+        "[commitbook]",
+        "[git]",
+        "[sync]",
+        "[commit]",
+        "[conflicts]",
+        "[logs]",
+    ];
+    let positions: Vec<usize> = sections
+        .iter()
+        .map(|section| content.find(section).unwrap_or_else(|| panic!("{section}")))
+        .collect();
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "{content}"
+    );
+    assert!(content.contains("name = \"notes\""), "{content}");
+    assert!(content.contains("# both: keep both versions"), "{content}");
+    assert!(
+        content.find("branch = ").unwrap() < content.find("remote = ").unwrap(),
+        "branch comes before remote"
+    );
+    assert_eq!(LocalConfig::load(tmp.path()).unwrap(), config());
 }
 
 #[test]
-fn test_load_nonexistent_errors() {
-    let tmp = tempfile::tempdir().unwrap();
-    let result = LocalConfig::load(tmp.path());
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_init_creates_structure() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-
-    let cfg = LocalConfig::init(repo, "hourly").unwrap();
-    assert_eq!(cfg.schedule, "hourly");
-
-    // Directories created
-    assert!(LocalConfig::commitbook_dir(repo).exists());
-    assert!(LocalConfig::logs_dir(repo).exists());
-
-    // Config file created
-    assert!(LocalConfig::config_path(repo).exists());
-
-    // Nested ignore protects device-local state without changing the root.
-    let gitignore = fs::read_to_string(repo.join(".CommitBook/.gitignore")).unwrap();
-    assert_eq!(gitignore, "/local/\n");
-    assert!(!repo.join(".gitignore").exists());
-}
-
-#[test]
-fn test_init_preserves_repository_root_gitignore() {
+fn init_creates_structure_and_leaves_the_root_gitignore_alone() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join(".gitignore"), "user-owned/\n").unwrap();
+    init(tmp.path());
 
-    LocalConfig::init(tmp.path(), "hourly").unwrap();
-
-    assert_eq!(
-        fs::read_to_string(tmp.path().join(".gitignore")).unwrap(),
-        "user-owned/\n"
-    );
+    assert!(LocalConfig::logs_dir(tmp.path()).exists());
     assert_eq!(
         fs::read_to_string(tmp.path().join(".CommitBook/.gitignore")).unwrap(),
         "/local/\n"
     );
-}
-
-#[test]
-fn test_new_has_config_version() {
-    let cfg = LocalConfig::new("hourly");
-    assert_eq!(cfg.config_version, "1");
-}
-
-#[test]
-fn test_load_without_version_defaults() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "upstream");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-
-    // Write TOML without config_version field
-    let toml_content = r#"
-enabled = true
-schedule = "0 * * * *"
-created_at = "2026-04-07T00:00:00Z"
-"#;
-    fs::write(dir.join("config.toml"), toml_content).unwrap();
-
-    let loaded = LocalConfig::load(repo).unwrap();
-    assert_eq!(loaded.config_version, "1");
-    assert_eq!(loaded.git.remote, "upstream");
-
-    let saved = fs::read_to_string(dir.join("config.toml")).unwrap();
-    assert!(saved.contains("config_version = \"1\""));
-}
-
-#[test]
-fn test_read_only_load_normalizes_without_rewriting_config() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "upstream");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-    let original = "schedule = \"hourly\"\ncreated_at = \"now\"\n";
-    fs::write(dir.join("config.toml"), original).unwrap();
-
-    let loaded = LocalConfig::load_read_only(repo).unwrap();
-    assert_eq!(loaded.config_version, "1");
-    assert!(loaded.enabled);
-    assert_eq!(loaded.git.remote, "upstream");
     assert_eq!(
-        fs::read_to_string(dir.join("config.toml")).unwrap(),
-        original
+        fs::read_to_string(tmp.path().join(".gitignore")).unwrap(),
+        "user-owned/\n"
     );
 }
 
 #[test]
-fn test_load_legacy_version_defaults_enabled_and_rewrites() {
+fn save_edits_values_in_place_and_keeps_user_comments() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "origin");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-
-    let toml_content = r#"
-version = "1.0.0"
-schedule = "0 * * * *"
-created_at = "2026-04-07T00:00:00Z"
-"#;
-    fs::write(dir.join("config.toml"), toml_content).unwrap();
-
-    let loaded = LocalConfig::load(repo).unwrap();
-    assert_eq!(loaded.config_version, "1");
-    assert!(loaded.enabled);
-
-    let saved = fs::read_to_string(dir.join("config.toml")).unwrap();
-    assert!(saved.contains("config_version = \"1\""));
-    assert!(saved.contains("enabled = true"));
-    assert!(!saved.contains("version = \"1.0.0\""));
-}
-
-#[test]
-fn test_load_with_config_version_defaults_enabled_and_rewrites() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "origin");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-
-    let toml_content = r#"
-config_version = "1"
-schedule = "0 * * * *"
-created_at = "2026-04-07T00:00:00Z"
-"#;
-    fs::write(dir.join("config.toml"), toml_content).unwrap();
-
-    let loaded = LocalConfig::load(repo).unwrap();
-    assert_eq!(loaded.config_version, "1");
-    assert!(loaded.enabled);
-
-    let saved = fs::read_to_string(dir.join("config.toml")).unwrap();
-    assert!(saved.contains("config_version = \"1\""));
-    assert!(saved.contains("enabled = true"));
-}
-
-#[test]
-fn test_load_preserves_explicit_enabled_false() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "origin");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-
-    let toml_content = r#"
-config_version = "1"
-enabled = false
-schedule = "0 * * * *"
-created_at = "2026-04-07T00:00:00Z"
-"#;
-    fs::write(dir.join("config.toml"), toml_content).unwrap();
-
-    let loaded = LocalConfig::load(repo).unwrap();
-    assert!(!loaded.enabled);
-}
-
-#[test]
-fn test_migrate_returns_false_when_current() {
-    let mut cfg = LocalConfig::new("hourly");
-    assert!(!cfg.migrate());
-}
-
-#[test]
-fn test_max_log_files_alias_backwards_compat() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "origin");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-
-    // Old config using the legacy field name
-    let toml_content = r#"
-enabled = true
-schedule = "0 * * * *"
-created_at = "2026-04-07T00:00:00Z"
-config_version = "1"
-
-[logging]
-level = "info"
-max_log_files = 14
-"#;
-    fs::write(dir.join("config.toml"), toml_content).unwrap();
-
-    let loaded = LocalConfig::load(repo).unwrap();
-    assert_eq!(loaded.logging.max_log_days, 14);
-}
-
-#[test]
-fn test_load_missing_schedule_uses_default() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "origin");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-
-    let toml_content = r#"
-version = "1.0.0"
-created_at = "2026-04-07T00:00:00Z"
-"#;
-    fs::write(dir.join("config.toml"), toml_content).unwrap();
-
-    let config = LocalConfig::load(repo).unwrap();
-    assert_eq!(config.schedule, "0 * * * *");
-    assert!(config.enabled);
-}
-
-#[test]
-fn test_load_rejects_unknown_config_version() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "origin");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-
-    let toml_content = r#"
-config_version = "2.0.0"
-enabled = true
-schedule = "0 * * * *"
-created_at = "2026-04-07T00:00:00Z"
-"#;
-    fs::write(dir.join("config.toml"), toml_content).unwrap();
-
-    let err = LocalConfig::load(repo).unwrap_err().to_string();
-    assert!(err.contains("Unsupported local config version `2.0.0`"));
-}
-
-#[test]
-fn test_commit_ai_messages_defaults_false() {
-    assert!(!CommitSettings::default().ai_messages);
-    assert!(!LocalConfig::new("hourly").commit.ai_messages);
-}
-
-#[test]
-fn test_load_without_commit_section_defaults_false() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "origin");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-
-    // Config predating the [commit] section: ai_messages must default to false.
-    let toml_content = r#"
-config_version = "1"
-enabled = true
-schedule = "0 * * * *"
-created_at = "2026-04-07T00:00:00Z"
-"#;
-    fs::write(dir.join("config.toml"), toml_content).unwrap();
-
-    let loaded = LocalConfig::load(repo).unwrap();
-    assert!(!loaded.commit.ai_messages);
-}
-
-#[test]
-fn test_load_commit_ai_messages_false_parses() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path();
-    init_repo_with_remote(repo, "origin");
-    let dir = repo.join(".CommitBook");
-    fs::create_dir_all(&dir).unwrap();
-
-    let toml_content = r#"
-config_version = "1"
-enabled = true
-schedule = "0 * * * *"
-created_at = "2026-04-07T00:00:00Z"
-
-[commit]
-ai_messages = false
-"#;
-    fs::write(dir.join("config.toml"), toml_content).unwrap();
-
-    let loaded = LocalConfig::load(repo).unwrap();
-    assert!(!loaded.commit.ai_messages);
-}
-
-#[test]
-fn test_missing_remote_rejects_ambiguous_repository() {
-    let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
-    repo.remote("one", "https://example.invalid/one.git")
-        .unwrap();
-    repo.remote("two", "https://example.invalid/two.git")
-        .unwrap();
-    let cb_dir = tmp.path().join(".CommitBook");
-    fs::create_dir_all(&cb_dir).unwrap();
+    let mut config = init(tmp.path());
+    let path = LocalConfig::config_path(tmp.path());
+    let content = fs::read_to_string(&path).unwrap();
     fs::write(
-        cb_dir.join("config.toml"),
-        "config_version = \"1\"\nenabled = true\nschedule = \"hourly\"\ncreated_at = \"now\"\n",
+        &path,
+        content.replace("[sync]\n", "[sync]\n# my note about timing\n"),
     )
     .unwrap();
 
-    let error = LocalConfig::load(tmp.path()).unwrap_err().to_string();
-    assert!(error.contains("has 2 remotes"));
-    assert!(error.contains("set git.remote"));
-}
-
-#[test]
-fn test_removed_files_table_has_no_effect_and_is_dropped_on_save() {
-    let tmp = tempfile::tempdir().unwrap();
-    init_repo_with_remote(tmp.path(), "origin");
-    let cb_dir = tmp.path().join(".CommitBook");
-    fs::create_dir_all(&cb_dir).unwrap();
-    fs::write(
-        cb_dir.join("config.toml"),
-        r#"config_version = "1"
-enabled = true
-schedule = "hourly"
-created_at = "now"
-
-[files]
-include = ["**/*.md"]
-exclude = ["private/**"]
-"#,
-    )
-    .unwrap();
-
-    let config = LocalConfig::load(tmp.path()).unwrap();
+    config.sync.schedule = "15m".into();
+    config.conflicts.mode = ConflictMode::Review;
     config.save(tmp.path()).unwrap();
-    let saved = fs::read_to_string(cb_dir.join("config.toml")).unwrap();
-    assert!(!saved.contains("[files]"));
-    assert!(!saved.contains("include"));
-    assert!(!saved.contains("exclude"));
+
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("# my note about timing"), "{saved}");
+    assert!(saved.contains("schedule = \"15m\""), "{saved}");
+    let mode_line = saved
+        .lines()
+        .find(|line| line.starts_with("mode = \"review\""))
+        .unwrap();
+    assert!(
+        mode_line.contains("# both: keep both versions"),
+        "the value's trailing comment survives:\n{saved}"
+    );
+    assert_eq!(LocalConfig::load(tmp.path()).unwrap(), config);
+}
+
+#[test]
+fn trailing_comments_keep_their_column_when_values_change_width() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut config = LocalConfig::new("Personal Notes", "main", "origin");
+    LocalConfig::init(tmp.path(), &config).unwrap();
+    config.conflicts.mode = ConflictMode::Ai;
+    config.save(tmp.path()).unwrap();
+
+    let saved = fs::read_to_string(LocalConfig::config_path(tmp.path())).unwrap();
+    let column = |prefix: &str| {
+        let line = saved.lines().find(|l| l.starts_with(prefix)).unwrap();
+        line.find('#').unwrap()
+    };
+    assert_eq!(column("name = "), column("schema = "), "{saved}");
+    assert_eq!(column("mode = \"ai\""), column("schema = "), "{saved}");
+}
+
+#[test]
+fn logs_section_is_optional() {
+    let tmp = tempfile::tempdir().unwrap();
+    init(tmp.path());
+    let path = LocalConfig::config_path(tmp.path());
+    let content = fs::read_to_string(&path).unwrap();
+    let without_logs = &content[..content.find("[logs]").unwrap()];
+    fs::write(&path, without_logs).unwrap();
+
+    assert_eq!(
+        LocalConfig::load(tmp.path()).unwrap().logs.keep,
+        LogKeep::default()
+    );
+}
+
+#[test]
+fn invalid_values_name_the_allowed_ones() {
+    let tmp = tempfile::tempdir().unwrap();
+    init(tmp.path());
+    let path = LocalConfig::config_path(tmp.path());
+    let content = fs::read_to_string(&path).unwrap();
+    fs::write(&path, content.replace("mode = \"both\"", "mode = \"auto\"")).unwrap();
+
+    let error = format!("{:#}", LocalConfig::load(tmp.path()).unwrap_err());
+    assert!(error.contains("auto"), "{error}");
+    assert!(error.contains("both"), "{error}");
+}
+
+#[test]
+fn unknown_keys_are_rejected() {
+    let tmp = tempfile::tempdir().unwrap();
+    init(tmp.path());
+    let path = LocalConfig::config_path(tmp.path());
+    let content = fs::read_to_string(&path).unwrap();
+    fs::write(&path, content.replace("[sync]\n", "[sync]\npush = false\n")).unwrap();
+
+    let error = format!("{:#}", LocalConfig::load(tmp.path()).unwrap_err());
+    assert!(error.contains("push"), "{error}");
+}
+
+#[test]
+fn log_keep_rejects_zero_and_bare_numbers() {
+    for keep in ["0d", "7"] {
+        let text = TEMPLATE
+            .replace("name = \"\"", "name = \"notes\"")
+            .replace("keep = \"30d\"", &format!("keep = \"{keep}\""));
+        assert!(LocalConfig::parse(&text).is_err(), "{keep}");
+    }
+    let forever = TEMPLATE
+        .replace("name = \"\"", "name = \"notes\"")
+        .replace("keep = \"30d\"", "keep = \"forever\"");
+    assert_eq!(
+        LocalConfig::parse(&forever).unwrap().logs.keep,
+        LogKeep::Forever
+    );
+}
+
+#[test]
+fn files_in_another_format_ask_for_reinit() {
+    for text in [
+        "config_version = \"1\"\nenabled = true\nschedule = \"0 * * * *\"\n",
+        "[config]\nschema = 2\n",
+        "",
+    ] {
+        let error = LocalConfig::parse(text).unwrap_err().to_string();
+        assert!(error.contains("commitbook init"), "{text:?}: {error}");
+    }
+}
+
+#[test]
+fn empty_name_is_rejected() {
+    let error = LocalConfig::parse(TEMPLATE).unwrap_err().to_string();
+    assert!(error.contains("name"), "{error}");
+}
+
+#[test]
+fn load_nonexistent_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(LocalConfig::load(tmp.path()).is_err());
 }
 
 #[cfg(unix)]
 #[test]
-fn test_load_rejects_symlinked_commitbook_directory() {
+fn load_rejects_symlinked_commitbook_directory() {
     use std::os::unix::fs::symlink;
 
     let repo = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    fs::write(
-        outside.path().join("config.toml"),
-        "config_version = \"1\"\nenabled = true\nschedule = \"hourly\"\ncreated_at = \"now\"\n[git]\nremote = \"origin\"\nbranch = \"main\"\nauto_push = true\n",
+    init(outside.path());
+    symlink(
+        outside.path().join(".CommitBook"),
+        repo.path().join(".CommitBook"),
     )
     .unwrap();
-    symlink(outside.path(), repo.path().join(".CommitBook")).unwrap();
 
     assert!(LocalConfig::load(repo.path()).is_err());
     assert!(!LocalConfig::exists(repo.path()));
@@ -409,7 +244,7 @@ fn test_load_rejects_symlinked_commitbook_directory() {
 
 #[cfg(unix)]
 #[test]
-fn test_config_io_rejects_symlink_without_touching_target() {
+fn config_io_rejects_symlink_without_touching_target() {
     use std::os::unix::fs::symlink;
 
     let repo = tempfile::tempdir().unwrap();
@@ -419,7 +254,7 @@ fn test_config_io_rejects_symlink_without_touching_target() {
     symlink(outside.path(), repo.path().join(".CommitBook/config.toml")).unwrap();
 
     assert!(LocalConfig::load(repo.path()).is_err());
-    assert!(LocalConfig::new("hourly").save(repo.path()).is_err());
+    assert!(config().save(repo.path()).is_err());
     assert_eq!(
         fs::read_to_string(outside.path()).unwrap(),
         "outside sentinel\n"
@@ -428,7 +263,7 @@ fn test_config_io_rejects_symlink_without_touching_target() {
 
 #[cfg(unix)]
 #[test]
-fn test_gitignore_io_rejects_symlink_without_touching_target() {
+fn gitignore_io_rejects_symlink_without_touching_target() {
     use std::os::unix::fs::symlink;
 
     let repo = tempfile::tempdir().unwrap();
@@ -444,52 +279,22 @@ fn test_gitignore_io_rejects_symlink_without_touching_target() {
     );
 }
 
-#[test]
-fn test_commit_setting_missing_field_and_explicit_values_round_trip() {
-    for (section, expected) in [
-        ("[commit]", false),
-        ("[commit]\nai_messages = false", false),
-        ("[commit]\nai_messages = true", true),
-    ] {
-        let tmp = tempfile::tempdir().unwrap();
-        init_repo_with_remote(tmp.path(), "origin");
-        let config = LocalConfig::init(tmp.path(), "hourly").unwrap();
-        assert!(!config.commit.ai_messages);
-        let path = LocalConfig::config_path(tmp.path());
-        let content = fs::read_to_string(&path).unwrap();
-        fs::write(
-            &path,
-            content.replace("[commit]\nai_messages = false", section),
-        )
-        .unwrap();
-        let loaded = LocalConfig::load(tmp.path()).unwrap();
-        assert_eq!(loaded.commit.ai_messages, expected, "{section}");
-        loaded.save(tmp.path()).unwrap();
-        assert_eq!(
-            LocalConfig::load(tmp.path()).unwrap().commit.ai_messages,
-            expected
-        );
-    }
-}
-
 #[cfg(unix)]
 #[test]
 fn save_replaces_atomically_and_preserves_mode() {
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempfile::tempdir().unwrap();
-    init_repo_with_remote(tmp.path(), "origin");
-    let mut config = LocalConfig::init(tmp.path(), "hourly").unwrap();
+    let mut config = init(tmp.path());
     let path = LocalConfig::config_path(tmp.path());
     fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
 
-    config.schedule = "*/5 * * * *".to_string();
+    config.sync.schedule = "5m".to_string();
     config.save(tmp.path()).unwrap();
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o644, "existing permissions must be preserved");
-    let reloaded = LocalConfig::load(tmp.path()).unwrap();
-    assert_eq!(reloaded.schedule, "*/5 * * * *");
+    assert_eq!(LocalConfig::load(tmp.path()).unwrap().sync.schedule, "5m");
     let leftovers: Vec<_> = fs::read_dir(LocalConfig::commitbook_dir(tmp.path()))
         .unwrap()
         .flatten()
@@ -548,8 +353,7 @@ fn atomic_write_refuses_directory_destination() {
 #[test]
 fn save_sweeps_stale_temp_files() {
     let tmp = tempfile::tempdir().unwrap();
-    init_repo_with_remote(tmp.path(), "origin");
-    let config = LocalConfig::init(tmp.path(), "hourly").unwrap();
+    let config = init(tmp.path());
     let cb_dir = LocalConfig::commitbook_dir(tmp.path());
     let stale = cb_dir.join(".config.toml.abc123.tmp");
     fs::write(&stale, "partial").unwrap();
@@ -560,14 +364,4 @@ fn save_sweeps_stale_temp_files() {
 
     assert!(!stale.exists(), "stale config temp file must be swept");
     assert!(unrelated.exists(), "unrelated files must be left alone");
-}
-
-#[test]
-fn test_conflict_auto_merge_appends_defaults_on() {
-    assert!(ConflictSettings::default().auto_merge_appends);
-    // Configs written before the setting existed keep the new default.
-    let parsed: ConflictSettings = toml::from_str("resolver = \"manual\"\n").unwrap();
-    assert!(parsed.auto_merge_appends);
-    let disabled: ConflictSettings = toml::from_str("auto_merge_appends = false\n").unwrap();
-    assert!(!disabled.auto_merge_appends);
 }

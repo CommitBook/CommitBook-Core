@@ -366,7 +366,7 @@ pub async fn proposal_action(root: &Path, input: &ResolutionInput) -> Result<()>
         "regenerate" => {
             let registry = crate::ai::ResolverRegistry::new();
             let resolver = registry
-                .get(&config.conflict.resolver)
+                .get(config.conflicts.agent.as_str())
                 .context("Configured AI resolver is unavailable")?;
             propose_locked(root, &input.path, &input.revision, resolver, &lock).await
         }

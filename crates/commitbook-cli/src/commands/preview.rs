@@ -7,14 +7,10 @@ pub fn run(root: &Path, json: bool) -> Result<()> {
     } else {
         println!("{}", preview.policy);
         println!(
-            "Repository: {}\nBranch: {}\nRemote: {}\nAuto push: {}",
+            "Repository: {}\nBranch: {}\nRemote: {}",
             preview.repository,
             preview.branch.as_deref().unwrap_or("unknown"),
             preview.remote.as_deref().unwrap_or("unknown"),
-            preview
-                .auto_push
-                .map(|v| if v { "yes" } else { "no" })
-                .unwrap_or("unknown")
         );
         for entry in &preview.entries {
             println!(

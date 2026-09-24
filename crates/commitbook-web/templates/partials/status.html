@@ -3,7 +3,6 @@
     <div class="kv"><span class="label">Scheduler</span><span>{{ scheduler_label }}</span></div>
     <div class="kv"><span class="label">Schedule</span><span>{{ schedule_desc }}</span></div>
     <div class="kv"><span class="label">Branch</span><span>{{ current_branch }}</span></div>
-    <div class="kv"><span class="label">Auto Push</span><span>{% if auto_push %}yes{% else %}no{% endif %}</span></div>
     {% for line in status_lines %}<p>{{ line }}</p>{% endfor %}
     <p><a href="/changes">Preview next local snapshot</a></p>
     {% if needs_attention %}<p><a href="/conflicts">Review and resolve conflicts</a></p>{% endif %}

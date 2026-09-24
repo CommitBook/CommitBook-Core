@@ -57,18 +57,23 @@ pub fn ensure_initialized() -> Result<PathBuf> {
     find_commitbook_dir()
 }
 
-/// Initialize `.CommitBook/` in a repo directory. Persists `remote_name` into
-/// the default config so the sync layer knows which remote to fetch/push.
-pub fn initialize(repo_root: &Path, remote_name: &str) -> Result<()> {
-    let cb_dir = repo_root.join(".CommitBook");
+/// Initialize `.CommitBook/` in a repo directory. A missing config is
+/// written with defaults for `remote_name` and `branch`, named after the
+/// repository in the remote URL (or the folder when the URL has none).
+pub fn initialize(repo_root: &Path, remote_name: &str, branch: &str) -> Result<()> {
     prepare_local_state(repo_root)?;
 
-    // Write default config if missing
-    let config_path = cb_dir.join("config.toml");
-    if !config_path.exists() {
-        let mut config = crate::config::LocalConfig::new("0 * * * *");
-        config.git.remote = remote_name.to_string();
-        config.save(repo_root)?;
+    if !crate::config::LocalConfig::exists(repo_root) {
+        let name = crate::git::remote::remote_identity(repo_root, remote_name)
+            .map(|identity| identity.repo)
+            .ok()
+            .or_else(|| {
+                repo_root
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| "CommitBook".to_string());
+        crate::config::LocalConfig::new(&name, branch, remote_name).save(repo_root)?;
     }
 
     crate::config::LocalConfig::ensure_gitignore(repo_root)?;

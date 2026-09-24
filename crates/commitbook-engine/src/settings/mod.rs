@@ -9,7 +9,7 @@ use anyhow::{bail, Context, Result};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::config::LocalConfig;
+use crate::config::{Agent, CommitAgent, CommitMode, ConflictMode, LocalConfig, LogKeep};
 use crate::cron::{self, SchedulerAdapter};
 use crate::state::RepoLock;
 
@@ -18,12 +18,11 @@ use crate::state::RepoLock;
 pub struct SettingsUpdate {
     pub schedule: Option<String>,
     pub branch: Option<String>,
-    pub auto_push: Option<bool>,
-    pub ai_messages: Option<bool>,
-    pub enabled: Option<bool>,
-    pub review_ai_resolutions: Option<bool>,
-    pub resolver: Option<String>,
-    pub auto_merge_appends: Option<bool>,
+    pub commit_mode: Option<CommitMode>,
+    pub commit_agent: Option<CommitAgent>,
+    pub conflict_mode: Option<ConflictMode>,
+    pub conflict_agent: Option<Agent>,
+    pub log_keep: Option<LogKeep>,
 }
 
 impl SettingsUpdate {
@@ -108,24 +107,10 @@ impl fmt::Display for SettingsUpdateError {
 
 impl std::error::Error for SettingsUpdateError {}
 
-/// Turn user input (`hourly`, `5m`, or a cron expression) into a validated
-/// cron expression this platform's scheduler can represent.
+/// Turn user input (`hourly`, `5m`, or a cron expression) into the value
+/// stored in `[sync] schedule`, validated for this platform's scheduler.
 pub fn normalize_schedule(input: &str) -> Result<String> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        bail!("Schedule must not be empty");
-    }
-    let preset = cron::resolve_schedule(trimmed);
-    let schedule = if preset != trimmed {
-        preset
-    } else if let Some(expression) = cron::parse_human_interval(trimmed) {
-        expression
-    } else {
-        cron::validate_cron_expression(trimmed)?;
-        trimmed.to_string()
-    };
-    cron::validate_platform_schedule(&schedule)?;
-    Ok(schedule)
+    cron::normalize_schedule(input)
 }
 
 fn validate_branch(name: &str) -> Result<String> {
@@ -168,55 +153,35 @@ pub fn update_settings_with_lock(
 
     if let Some(schedule) = &update.schedule {
         let schedule = normalize_schedule(schedule)?;
-        if new.schedule != schedule {
-            new.schedule = schedule;
-            changed = true;
-        }
+        changed |= new.sync.schedule != schedule;
+        new.sync.schedule = schedule;
     }
     if let Some(branch) = &update.branch {
         let branch = validate_branch(branch)?;
-        if new.git.branch != branch {
-            new.git.branch = branch;
-            changed = true;
-        }
+        changed |= new.git.branch != branch;
+        new.git.branch = branch;
     }
-    if let Some(auto_push) = update.auto_push {
-        if new.git.auto_push != auto_push {
-            new.git.auto_push = auto_push;
-            changed = true;
-        }
+    if let Some(mode) = update.commit_mode {
+        changed |= new.commit.mode != mode;
+        new.commit.mode = mode;
     }
-    if let Some(ai_messages) = update.ai_messages {
-        if new.commit.ai_messages != ai_messages {
-            new.commit.ai_messages = ai_messages;
-            changed = true;
-        }
+    if let Some(agent) = update.commit_agent {
+        changed |= new.commit.agent != agent;
+        new.commit.agent = agent;
     }
-    if let Some(enabled) = update.enabled {
-        if new.enabled != enabled {
-            new.enabled = enabled;
-            changed = true;
-        }
+    if let Some(mode) = update.conflict_mode {
+        changed |= new.conflicts.mode != mode;
+        new.conflicts.mode = mode;
     }
-
-    if let Some(auto_merge) = update.auto_merge_appends {
-        changed |= new.conflict.auto_merge_appends != auto_merge;
-        new.conflict.auto_merge_appends = auto_merge;
+    if let Some(agent) = update.conflict_agent {
+        changed |= new.conflicts.agent != agent;
+        new.conflicts.agent = agent;
     }
-    if let Some(review) = update.review_ai_resolutions {
-        changed |= new.conflict.review_ai_resolutions != review;
-        new.conflict.review_ai_resolutions = review;
+    if let Some(keep) = update.log_keep {
+        changed |= new.logs.keep != keep;
+        new.logs.keep = keep;
     }
-    if let Some(resolver) = &update.resolver {
-        anyhow::ensure!(
-            ["manual", "claude", "codex", "copilot", "gemini", "cursor"]
-                .contains(&resolver.as_str()),
-            "Unknown conflict resolver"
-        );
-        changed |= new.conflict.resolver != *resolver;
-        new.conflict.resolver = resolver.clone();
-    }
-    let schedule_changed = new.schedule != old.schedule;
+    let schedule_changed = new.sync.schedule != old.sync.schedule;
     if !changed {
         return Ok(SettingsUpdateOutcome {
             config: new,
@@ -237,9 +202,9 @@ pub fn update_settings_with_lock(
 
     match scheduler
         .adapter
-        .install(repo_root, &new.schedule, &scheduler.binary)
+        .install(repo_root, &new.sync.schedule, &scheduler.binary)
     {
-        Ok(_) => Ok(SettingsUpdateOutcome {
+        Ok(()) => Ok(SettingsUpdateOutcome {
             config: new,
             schedule_changed,
             scheduler_reinstalled: true,
@@ -251,8 +216,7 @@ pub fn update_settings_with_lock(
                 .and_then(|()| {
                     scheduler
                         .adapter
-                        .install(repo_root, &old.schedule, &scheduler.binary)
-                        .map(|_| ())
+                        .install(repo_root, &old.sync.schedule, &scheduler.binary)
                         .context("Failed to reinstall the previous scheduler job")
                 })
                 .err();
@@ -262,7 +226,7 @@ pub fn update_settings_with_lock(
 }
 
 /// Install the scheduler job for the configured schedule under the lock.
-pub fn start_scheduler(repo_root: &Path, scheduler: &SchedulerContext<'_>) -> Result<String> {
+pub fn start_scheduler(repo_root: &Path, scheduler: &SchedulerContext<'_>) -> Result<()> {
     let lock = RepoLock::acquire(repo_root)?;
     start_scheduler_with_lock(repo_root, scheduler, &lock)
 }
@@ -271,12 +235,12 @@ pub fn start_scheduler_with_lock(
     repo_root: &Path,
     scheduler: &SchedulerContext<'_>,
     lock: &RepoLock,
-) -> Result<String> {
+) -> Result<()> {
     lock.ensure_matches(repo_root)?;
     let config = LocalConfig::load(repo_root)?;
     scheduler
         .adapter
-        .install(repo_root, &config.schedule, &scheduler.binary)
+        .install(repo_root, &config.sync.schedule, &scheduler.binary)
 }
 
 /// Remove the scheduler job under the lock.
@@ -291,7 +255,7 @@ pub fn stop_scheduler_with_lock(
     lock: &RepoLock,
 ) -> Result<()> {
     lock.ensure_matches(repo_root)?;
-    scheduler.adapter.uninstall(repo_root, None)
+    scheduler.adapter.uninstall(repo_root)
 }
 
 #[cfg(test)]

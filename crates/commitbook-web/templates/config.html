@@ -10,16 +10,16 @@
         <div class="form-row">
             <label for="schedule">Schedule</label>
             <select name="schedule" id="schedule">
-                {% if schedule != "*/5 * * * *" && schedule != "*/15 * * * *" && schedule != "*/30 * * * *" && schedule != "0 * * * *" && schedule != "0 */2 * * *" && schedule != "0 */4 * * *" && schedule != "0 9 * * *" %}
+                {% if schedule != "5m" && schedule != "15m" && schedule != "30m" && schedule != "1h" && schedule != "2h" && schedule != "4h" && schedule != "daily" %}
                 <option value="{{ schedule }}" selected>Custom ({{ schedule }})</option>
                 {% endif %}
-                <option value="*/5 * * * *" {% if schedule == "*/5 * * * *" %}selected{% endif %}>Every 5 minutes</option>
-                <option value="*/15 * * * *" {% if schedule == "*/15 * * * *" %}selected{% endif %}>Every 15 minutes</option>
-                <option value="*/30 * * * *" {% if schedule == "*/30 * * * *" %}selected{% endif %}>Every 30 minutes</option>
-                <option value="0 * * * *" {% if schedule == "0 * * * *" %}selected{% endif %}>Every hour</option>
-                <option value="0 */2 * * *" {% if schedule == "0 */2 * * *" %}selected{% endif %}>Every 2 hours</option>
-                <option value="0 */4 * * *" {% if schedule == "0 */4 * * *" %}selected{% endif %}>Every 4 hours</option>
-                <option value="0 9 * * *" {% if schedule == "0 9 * * *" %}selected{% endif %}>Daily at 9:00 AM</option>
+                <option value="5m" {% if schedule == "5m" %}selected{% endif %}>Every 5 minutes</option>
+                <option value="15m" {% if schedule == "15m" %}selected{% endif %}>Every 15 minutes</option>
+                <option value="30m" {% if schedule == "30m" %}selected{% endif %}>Every 30 minutes</option>
+                <option value="1h" {% if schedule == "1h" %}selected{% endif %}>Every hour</option>
+                <option value="2h" {% if schedule == "2h" %}selected{% endif %}>Every 2 hours</option>
+                <option value="4h" {% if schedule == "4h" %}selected{% endif %}>Every 4 hours</option>
+                <option value="daily" {% if schedule == "daily" %}selected{% endif %}>Daily at 9:00 AM</option>
             </select>
         </div>
         <div class="form-row">
@@ -27,31 +27,44 @@
             <input type="text" name="branch" id="branch" value="{{ branch }}">
         </div>
         <div class="form-row">
-            <label for="auto_push">Auto Push</label>
-            <select name="auto_push" id="auto_push">
-                <option value="true" {% if auto_push %}selected{% endif %}>Yes</option>
-                <option value="false" {% if !auto_push %}selected{% endif %}>No</option>
+            <label for="commit_mode">Commit messages</label>
+            <select name="commit_mode" id="commit_mode" aria-describedby="commit-help">
+                {% for choice in commit_modes %}
+                <option value="{{ choice.value }}" {% if choice.selected %}selected{% endif %}>{{ choice.value }}</option>
+                {% endfor %}
             </select>
         </div>
         <div class="form-row">
-            <label for="ai_messages">AI commit messages</label>
-            <select name="ai_messages" id="ai_messages" aria-describedby="ai-messages-help">
-                <option value="false" {% if !ai_messages %}selected{% endif %}>No</option>
-                <option value="true" {% if ai_messages %}selected{% endif %}>Yes</option>
+            <label for="commit_agent">Commit agent</label>
+            <select name="commit_agent" id="commit_agent">
+                {% for choice in commit_agents %}
+                <option value="{{ choice.value }}" {% if choice.selected %}selected{% endif %}>{{ choice.value }}</option>
+                {% endfor %}
             </select>
         </div>
-        <p id="ai-messages-help">No uses local timestamp text: Writing YYYY-MM-DD HH:MM:SS. Yes tries installed AI providers, with timestamp text as a fallback.</p>
-        <div class="form-row"><label for="auto_merge_appends">Merge added lines</label><select id="auto_merge_appends" name="auto_merge_appends" aria-describedby="auto-merge-help">
-        <option value="true" {% if auto_merge_appends %}selected{% endif %}>Keep both automatically</option>
-        <option value="false" {% if !auto_merge_appends %}selected{% endif %}>Treat as conflict</option></select></div>
-        <p id="auto-merge-help">When both sides only added lines at the same place, keep both (local first) without AI. Edits to existing lines still go to the conflict resolver.</p>
-        <div class="form-row"><label for="resolver">Conflict resolver</label><select id="resolver" name="resolver">
-        <option value="{{ resolver }}" selected>{{ resolver }}</option>
-        <option value="manual">manual</option><option value="claude">claude</option><option value="codex">codex</option><option value="copilot">copilot</option><option value="gemini">gemini</option><option value="cursor">cursor</option></select></div>
-        <div class="form-row"><label for="review_ai_resolutions">Review AI resolutions</label><select id="review_ai_resolutions" name="review_ai_resolutions">
-        <option value="false" {% if !review_ai_resolutions %}selected{% endif %}>Apply automatically</option>
-        <option value="true" {% if review_ai_resolutions %}selected{% endif %}>Wait for review</option></select></div>
-        <p>Review stores AI proposals locally and pauses the merge until you resolve them. Existing proposals still require review after this setting is turned off.</p>
+        <p id="commit-help">timestamp writes "Writing YYYY-MM-DD HH:MM:SS" and never runs an AI CLI. ai asks the commit agent (any tries every installed agent), with timestamp text as a fallback.</p>
+        <div class="form-row">
+            <label for="conflict_mode">Conflicts</label>
+            <select name="conflict_mode" id="conflict_mode" aria-describedby="conflict-help">
+                {% for choice in conflict_modes %}
+                <option value="{{ choice.value }}" {% if choice.selected %}selected{% endif %}>{{ choice.value }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row">
+            <label for="conflict_agent">Conflict agent</label>
+            <select name="conflict_agent" id="conflict_agent">
+                {% for choice in conflict_agents %}
+                <option value="{{ choice.value }}" {% if choice.selected %}selected{% endif %}>{{ choice.value }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <p id="conflict-help">both keeps both versions of a conflicting note (.md, .markdown, .txt) without markers, so you delete the one you don't want; other files are left for manual resolution. manual leaves conflict markers and pauses sync. ai lets the conflict agent resolve and continue. review stores the agent's proposal until you accept it on the Conflicts page.</p>
+        <div class="form-row">
+            <label for="log_keep">Keep logs</label>
+            <input type="text" name="log_keep" id="log_keep" value="{{ log_keep }}" aria-describedby="log-help">
+        </div>
+        <p id="log-help">Days to keep daily activity logs, such as 30d, or forever.</p>
         <div class="actions">
             <button type="submit">Save</button>
         </div>
