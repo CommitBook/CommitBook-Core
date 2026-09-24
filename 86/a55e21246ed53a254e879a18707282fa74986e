@@ -1,0 +1,43 @@
+crates/commitbook-engine/src/cron/fake_tests.rs
+  s_fd1c4d7260c332::t_9ae7edb7e9a438 9
+crates/commitbook-cli/src/commands/sync_cmd.rs
+  s_fd1c4d7260c332::t_670358e29e0253 56-59
+  s_fd1c4d7260c332::t_120ead2abeb006 5,162
+  s_fd1c4d7260c332::t_a909efe3d8a7ce 11-13,16-18,20-28,32-42,45,77,79-81,126,138-139,144-145,154-155,158
+crates/commitbook-cli/src/main.rs
+  s_fd1c4d7260c332::t_b38534a86d3bc0 96
+  s_fd1c4d7260c332::t_5e5c7017843d50 26,50-63,88-92,193-197
+  s_fd1c4d7260c332::t_97a979479a2b57 93
+crates/commitbook-cli/src/commands/sync_cmd_tests.rs
+  s_fd1c4d7260c332::t_670358e29e0253 35-38
+  s_fd1c4d7260c332::t_a909efe3d8a7ce 1,4,11-13,23-34
+  s_fd1c4d7260c332::t_a184968c12c3ca 39
+crates/commitbook-cli/src/commands/start.rs
+  s_fd1c4d7260c332::t_0de867d6868d94 24,26
+crates/commitbook-engine/src/cron/fake.rs
+  s_fd1c4d7260c332::t_b5eeb37d38e8ac 90,100,103
+crates/commitbook-engine/src/cron/linux.rs
+  s_fd1c4d7260c332::t_43f81d60033fbc 17,48-49,64,112
+crates/commitbook-engine/src/cron/linux_tests.rs
+  s_fd1c4d7260c332::t_a7a92ee05af21f 14,40,47,54,79
+crates/commitbook-engine/src/cron/macos.rs
+  s_fd1c4d7260c332::t_db39a369002b18 221,276-277,308,312
+crates/commitbook-engine/src/cron/macos_tests.rs
+  s_fd1c4d7260c332::t_370efb9103ca25 81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "86a55e21246ed53a254e879a18707282fa74986e",
+  "prompts": {},
+  "sessions": {
+    "s_fd1c4d7260c332": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0930a712-b2b7-4e21-b481-d6b29023de16",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
