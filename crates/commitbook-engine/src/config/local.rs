@@ -330,7 +330,10 @@ fn set_value(
             let mut decor = existing.decor().clone();
             // Keep a trailing comment in its column when the value's width
             // changes, e.g. `name = ""` becoming `name = "Personal Notes"`.
-            let suffix = decor.suffix().and_then(|raw| raw.as_str()).map(str::to_owned);
+            let suffix = decor
+                .suffix()
+                .and_then(|raw| raw.as_str())
+                .map(str::to_owned);
             if let Some(suffix) = suffix {
                 let comment = suffix.trim_start_matches(' ');
                 if comment.starts_with('#') {

@@ -114,6 +114,13 @@ pub fn run_init(assume_yes: bool) -> Result<()> {
         // Without this, scheduled sync on a clone fails for want of local/.
         // A device joining an existing CommitBook registers itself here.
         let device_name = ask_device_name(&repo_root, assume_yes)?;
+        if !assume_yes && io::stdin().is_terminal() {
+            let config = LocalConfig::load(&repo_root)?;
+            if !confirm_publish(&config.git.remote, &config.git.branch)? {
+                println!("Aborted; nothing was written.");
+                return Ok(());
+            }
+        }
         initialize_and_publish(&repo_root, None, device_name.as_deref())?;
         println!(
             "{} CommitBook is already initialized at {}",
@@ -139,8 +146,10 @@ pub fn run_init(assume_yes: bool) -> Result<()> {
         ),
     };
 
-    // Ask before anything is written, so declining leaves the repo untouched.
-    // Without a terminal (scripts, CI) proceed as if confirmed.
+    // Ask for the device name, then confirm before anything is written, so
+    // declining leaves the repo untouched. Without a terminal (scripts, CI)
+    // use the default name and proceed as if confirmed.
+    let device_name = ask_device_name(&repo_root, assume_yes)?;
     if !assume_yes && io::stdin().is_terminal() {
         let branch = GitRepo::open(&repo_root)?.current_branch()?;
         if !confirm_publish(&remote_name, &branch)? {
@@ -149,7 +158,6 @@ pub fn run_init(assume_yes: bool) -> Result<()> {
         }
     }
 
-    let device_name = ask_device_name(&repo_root, assume_yes)?;
     initialize_and_publish(&repo_root, Some(&remote_name), device_name.as_deref())?;
 
     println!(
