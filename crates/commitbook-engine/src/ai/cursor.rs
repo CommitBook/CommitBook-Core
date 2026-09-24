@@ -7,9 +7,11 @@ use std::time::Duration;
 use super::conflict::{
     build_resolve_prompt, finalize_resolved_text, ConflictResolution, ConflictResolver,
 };
-use crate::git::GitConflict;
+use super::{commit_message_prompt, finish_commit_message, CommitMessageProvider};
+use crate::git::{ChangesSummary, GitConflict};
 
 const CURSOR_RESOLVE_TIMEOUT: Duration = Duration::from_secs(120);
+const CURSOR_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct CursorProvider;
 
@@ -20,6 +22,33 @@ pub(crate) fn command(repo_path: &Path) -> Command {
         .args(["-p", "--output-format", "text"])
         .current_dir(repo_path);
     command
+}
+
+#[async_trait]
+impl CommitMessageProvider for CursorProvider {
+    fn name(&self) -> &str {
+        "Cursor Agent"
+    }
+
+    fn key(&self) -> &str {
+        "cursor-agent"
+    }
+
+    fn is_available(&self) -> bool {
+        which::which("cursor-agent").is_ok()
+    }
+
+    async fn generate(&self, summary: &ChangesSummary, repo_path: &Path) -> Result<String> {
+        let prompt = commit_message_prompt(summary, repo_path);
+        let repo_path = repo_path.to_path_buf();
+        let output = tokio::task::spawn_blocking(move || {
+            let mut command = command(&repo_path);
+            super::run_with_prompt(&mut command, &prompt, CURSOR_TIMEOUT)
+        })
+        .await
+        .context("spawn_blocking panicked")??;
+        finish_commit_message(&output, "cursor-agent CLI")
+    }
 }
 
 #[async_trait]

@@ -21,6 +21,11 @@ fn test_cursor_command_uses_print_mode_with_text_output() {
 #[test]
 fn test_cursor_resolver_key_and_name() {
     let provider = CursorProvider;
-    assert_eq!(provider.key(), "cursor");
-    assert_eq!(provider.name(), "Cursor Agent");
+    assert_eq!(ConflictResolver::key(&provider), "cursor");
+    assert_eq!(ConflictResolver::name(&provider), "Cursor Agent");
+    assert_eq!(
+        CommitMessageProvider::key(&provider),
+        crate::config::Agent::Cursor.commit_provider_key()
+    );
+    assert_eq!(CommitMessageProvider::name(&provider), "Cursor Agent");
 }

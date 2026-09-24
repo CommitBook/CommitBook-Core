@@ -17,7 +17,27 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::path::Path;
 
+use crate::config::values::ANY_AGENT_ORDER;
+use crate::config::{Agent, CommitAgent, CommitMode};
 use crate::git::ChangesSummary;
+
+/// Provider keys to try, in order, for a commit message.
+///
+/// `timestamp` skips the AI CLIs entirely and uses only the deterministic
+/// `fallback` provider. `ai` tries the configured agent (or, for `any`,
+/// every agent in `ANY_AGENT_ORDER`), then the fallback.
+pub fn commit_provider_keys(mode: CommitMode, agent: CommitAgent) -> Vec<String> {
+    let agents: Vec<Agent> = match (mode, agent.agent()) {
+        (CommitMode::Timestamp, _) => Vec::new(),
+        (CommitMode::Ai, Some(agent)) => vec![agent],
+        (CommitMode::Ai, None) => ANY_AGENT_ORDER.to_vec(),
+    };
+    agents
+        .into_iter()
+        .map(|agent| agent.commit_provider_key().to_string())
+        .chain(std::iter::once("fallback".to_string()))
+        .collect()
+}
 
 /// Trait for AI-powered commit message generation.
 #[async_trait]
@@ -50,6 +70,8 @@ impl ProviderChain {
             providers.push(Box::new(copilot::CopilotProvider));
             providers.push(Box::new(claude::ClaudeProvider));
             providers.push(Box::new(codex::CodexProvider));
+            providers.push(Box::new(gemini::GeminiProvider));
+            providers.push(Box::new(cursor::CursorProvider));
         }
         providers.push(Box::new(fallback::FallbackProvider));
         Self { providers }
@@ -105,6 +127,37 @@ impl Default for ProviderChain {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Prompt asking an AI CLI for a one-line commit message.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) fn commit_message_prompt(summary: &ChangesSummary, repo_path: &Path) -> String {
+    let diff_summary = crate::git::GitRepo::open(repo_path)
+        .and_then(|r| r.diff_summary())
+        .unwrap_or_default();
+    format!(
+        "Write a single-line git commit message in imperative mood (max 72 chars, no quotes, no markdown, no prefix) describing what changed. Do not describe the diff itself or mention 'staged'/'unstaged'. Files: {}. Changes:\n{}",
+        summary.to_summary_text(),
+        truncate(&diff_summary, 500)
+    )
+}
+
+/// Clean an AI CLI's commit-message output, rejecting empty replies and
+/// narration of the diff so the chain falls through to the next provider.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) fn finish_commit_message(output: &std::process::Output, cli: &str) -> Result<String> {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("{cli} failed: {}", stderr.trim());
+    }
+    let msg = clean_message(&String::from_utf8_lossy(&output.stdout));
+    if msg.is_empty() {
+        anyhow::bail!("Empty response from {cli}");
+    }
+    if looks_like_diff_narration(&msg) {
+        anyhow::bail!("{cli} returned diff narration, not a commit message");
+    }
+    Ok(msg)
 }
 
 /// Truncate a string to max_len, appending "..." if truncated.

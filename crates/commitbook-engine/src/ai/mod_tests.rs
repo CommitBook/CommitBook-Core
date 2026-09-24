@@ -322,3 +322,55 @@ mod run_with_prompt_tests {
         assert_eq!(output.stderr, b"boom\n");
     }
 }
+
+#[test]
+fn ai_with_any_agent_tries_every_agent_then_fallback() {
+    assert_eq!(
+        commit_provider_keys(CommitMode::Ai, CommitAgent::Any),
+        [
+            "gh-copilot",
+            "claude-cli",
+            "codex-cli",
+            "gemini-cli",
+            "cursor-agent",
+            "fallback"
+        ]
+    );
+}
+
+#[test]
+fn ai_with_one_agent_tries_only_that_agent_then_fallback() {
+    assert_eq!(
+        commit_provider_keys(CommitMode::Ai, CommitAgent::Claude),
+        ["claude-cli", "fallback"]
+    );
+    assert_eq!(
+        commit_provider_keys(CommitMode::Ai, CommitAgent::Gemini),
+        ["gemini-cli", "fallback"]
+    );
+    assert_eq!(
+        commit_provider_keys(CommitMode::Ai, CommitAgent::Cursor),
+        ["cursor-agent", "fallback"]
+    );
+}
+
+#[test]
+fn timestamp_mode_uses_fallback_only_whatever_the_agent() {
+    for agent in CommitAgent::ALL {
+        assert_eq!(
+            commit_provider_keys(CommitMode::Timestamp, *agent),
+            ["fallback"]
+        );
+    }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[test]
+fn every_commit_agent_has_a_registered_provider() {
+    let chain = ProviderChain::new();
+    for agent in ANY_AGENT_ORDER {
+        let key = agent.commit_provider_key().to_string();
+        let availability = chain.check_availability(std::slice::from_ref(&key));
+        assert_ne!(availability[0].1, key, "{key} has no provider in the chain");
+    }
+}
