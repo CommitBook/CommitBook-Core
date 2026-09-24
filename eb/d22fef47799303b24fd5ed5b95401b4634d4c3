@@ -1,0 +1,19 @@
+docs/handoff/apple-app-todo.md
+  s_975a063706ec02::t_5f45cee97e2171 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ebd22fef47799303b24fd5ed5b95401b4634d4c3",
+  "prompts": {},
+  "sessions": {
+    "s_975a063706ec02": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6f706c04-5803-4621-89a1-462987f993f3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
