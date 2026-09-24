@@ -559,7 +559,7 @@ impl GitRepo {
                     &branch_ref,
                     oid,
                     Some(&sig),
-                    "commitbook: publish selected paths",
+                    "CommitBook: publish selected paths",
                 )
                 .with_context(|| format!("Failed to prepare metadata commit on {branch_ref}"))?;
             transaction
@@ -801,7 +801,7 @@ impl GitRepo {
                 target_ref,
                 oid,
                 Some(reflog_signature),
-                "commitbook: publish commit",
+                "CommitBook: publish commit",
             )
             .with_context(|| format!("Failed to prepare commit publication on {target_ref}"))?;
         transaction
@@ -1242,7 +1242,7 @@ impl GitRepo {
                     head_name,
                     target_oid,
                     Some(&reflog_signature),
-                    "commitbook: fast-forward",
+                    "CommitBook: fast-forward",
                 )
                 .context("Failed to prepare fast-forward branch ref")?;
             fail_fast_forward_at(FastForwardFailpoint::BeforeRefPublication)?;
