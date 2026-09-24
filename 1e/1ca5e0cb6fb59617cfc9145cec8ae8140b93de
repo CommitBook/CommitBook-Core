@@ -1,0 +1,21 @@
+docs/README.md
+  s_7a01579965ba54::t_8ae2fa33bb9067 202,212
+docs/design/designer-brief.md
+  s_7a01579965ba54::t_8ae2fa33bb9067 44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1e1ca5e0cb6fb59617cfc9145cec8ae8140b93de",
+  "prompts": {},
+  "sessions": {
+    "s_7a01579965ba54": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f7050a21-6eab-4bbc-ba23-40dc89982f6c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
