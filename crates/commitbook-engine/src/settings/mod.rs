@@ -23,6 +23,7 @@ pub struct SettingsUpdate {
     pub enabled: Option<bool>,
     pub review_ai_resolutions: Option<bool>,
     pub resolver: Option<String>,
+    pub auto_merge_appends: Option<bool>,
 }
 
 impl SettingsUpdate {
@@ -198,6 +199,10 @@ pub fn update_settings_with_lock(
         }
     }
 
+    if let Some(auto_merge) = update.auto_merge_appends {
+        changed |= new.conflict.auto_merge_appends != auto_merge;
+        new.conflict.auto_merge_appends = auto_merge;
+    }
     if let Some(review) = update.review_ai_resolutions {
         changed |= new.conflict.review_ai_resolutions != review;
         new.conflict.review_ai_resolutions = review;

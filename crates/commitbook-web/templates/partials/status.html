@@ -1,6 +1,6 @@
 <div class="card">
     <h2>Status</h2>
-    <div class="kv"><span class="label">Scheduler</span><span>{% if running %}Running{% else %}Stopped{% endif %}</span></div>
+    <div class="kv"><span class="label">Scheduler</span><span>{{ scheduler_label }}</span></div>
     <div class="kv"><span class="label">Schedule</span><span>{{ schedule_desc }}</span></div>
     <div class="kv"><span class="label">Branch</span><span>{{ current_branch }}</span></div>
     <div class="kv"><span class="label">Auto Push</span><span>{% if auto_push %}yes{% else %}no{% endif %}</span></div>

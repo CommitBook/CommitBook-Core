@@ -49,14 +49,22 @@ fn default_conflict_resolver() -> String {
     "manual".to_string()
 }
 
+fn default_auto_merge_appends() -> bool {
+    true
+}
+
 /// Conflict-resolution settings.
 ///
-/// `resolver` selects which AI CLI is invoked when libgit2 reports structured
+/// `auto_merge_appends` (default on) first resolves conflicts where both
+/// sides only added lines at the same place, keeping both additions.
+/// `resolver` selects which AI CLI is invoked for the remaining structured
 /// merge conflicts. Recognized values: `manual`, `claude`, `codex`,
 /// `copilot`, `gemini`, `cursor`. `manual` (the default) preserves the
 /// conflicted index for the user to resolve.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConflictSettings {
+    #[serde(default = "default_auto_merge_appends")]
+    pub auto_merge_appends: bool,
     #[serde(default)]
     pub review_ai_resolutions: bool,
     #[serde(default = "default_conflict_resolver")]
@@ -66,6 +74,7 @@ pub struct ConflictSettings {
 impl Default for ConflictSettings {
     fn default() -> Self {
         Self {
+            auto_merge_appends: default_auto_merge_appends(),
             resolver: default_conflict_resolver(),
             review_ai_resolutions: false,
         }

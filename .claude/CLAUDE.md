@@ -70,9 +70,12 @@ the libgit2 3-way merge leaves conflict markers:
 
 ```toml
 [conflict]
+auto_merge_appends = true      # keep both sides when both only added lines (no AI)
 resolver = "manual"            # manual | claude | codex | copilot | gemini | cursor
 review_ai_resolutions = false  # true: store AI proposals for review instead of applying them
 ```
+
+Before any resolver runs, `auto_merge_appends` resolves conflicts whose hunks only add lines on both sides (blank ancestor section) by keeping local then remote additions (`GitRepo::try_resolve_append_only`). Edited lines, deletions, and binary files still go to the resolver or the user.
 
 `manual` (the default) leaves the markers in place; the user resolves with `git status` and re-runs `commitbook sync`, or uses the web dashboard `/conflicts` editor (use local, use remote, keep both, delete, save edited text). Any other value spawns the corresponding CLI to rewrite each conflicted file; the orchestrator stages the resolved files and finishes the merge commit.
 
@@ -94,6 +97,7 @@ selection lives in `commit_provider_keys` (`commitbook-cli/src/commands/sync_cmd
 
 ## Status, preview, and settings
 
+- Scheduler state comes from `cron::health`: `stopped`, `running`, or `broken` when the job's binary no longer exists. `SchedulerHealth::warning` also flags a job with no sync attempt for three schedule intervals. `start` and `doctor --fix` warn when installing a `target/debug` or `target/release` binary.
 - `commitbook status`, the web `/api/status` endpoint, and the TUI all read the shared engine status service. It reports the real HEAD commit, dirty files, cached ahead/behind counts, merge/conflict state, pending AI reviews, and the `state.toml` timestamps. It never fetches, invokes AI, takes the lock, or rewrites config.
 - `last_sync_at` marks a successful cycle, not a push. `last_attempt_at`, `last_fetch_at`, `last_push_at`, and `last_error_stage` distinguish attempts, remote checks, publication, and the failing stage.
 - `commitbook preview`, web `/changes`, and the TUI `p` screen show what normal staging would commit: every non-ignored Git file of any type, not only Markdown. Preview writes nothing.

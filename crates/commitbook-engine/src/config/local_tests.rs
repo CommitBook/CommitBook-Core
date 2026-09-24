@@ -561,3 +561,13 @@ fn save_sweeps_stale_temp_files() {
     assert!(!stale.exists(), "stale config temp file must be swept");
     assert!(unrelated.exists(), "unrelated files must be left alone");
 }
+
+#[test]
+fn test_conflict_auto_merge_appends_defaults_on() {
+    assert!(ConflictSettings::default().auto_merge_appends);
+    // Configs written before the setting existed keep the new default.
+    let parsed: ConflictSettings = toml::from_str("resolver = \"manual\"\n").unwrap();
+    assert!(parsed.auto_merge_appends);
+    let disabled: ConflictSettings = toml::from_str("auto_merge_appends = false\n").unwrap();
+    assert!(!disabled.auto_merge_appends);
+}

@@ -5,6 +5,8 @@ fn test_status_response_serialization() {
     let status = StatusResponse {
         repository: Default::default(),
         running: true,
+        scheduler: commitbook_engine::cron::SchedulerHealth::Broken("binary missing: /gone".into()),
+        scheduler_warning: Some("Scheduler cannot run".into()),
         enabled: true,
         schedule: "0 * * * *".into(),
         schedule_desc: "Every hour".into(),
@@ -17,6 +19,9 @@ fn test_status_response_serialization() {
     };
     let v = serde_json::to_value(&status).unwrap();
     assert_eq!(v["running"], true);
+    assert_eq!(v["scheduler"]["state"], "broken");
+    assert_eq!(v["scheduler"]["reason"], "binary missing: /gone");
+    assert_eq!(v["scheduler_warning"], "Scheduler cannot run");
     assert_eq!(v["schedule"], "0 * * * *");
     assert_eq!(v["changes_total"], 3);
     assert!(v["last_commit"].is_string());

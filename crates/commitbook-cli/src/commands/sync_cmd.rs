@@ -49,6 +49,13 @@ async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
                     println!("  {} Pushed {} commit(s).", "OK".green().bold(), o.pushed);
                 }
             }
+            if o.appends_merged > 0 {
+                println!(
+                    "  {} Kept both sides of {} conflict(s) where both only added lines.",
+                    "OK".green().bold(),
+                    o.appends_merged
+                );
+            }
             if o.conflicts_resolved > 0 {
                 println!(
                     "  {} Resolved {} conflict(s) via AI.",

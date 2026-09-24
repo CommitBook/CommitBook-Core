@@ -1254,3 +1254,161 @@ async fn malformed_state_is_preserved_before_mutation_and_commit_failure_is_reco
     assert_eq!(saved.last_error_stage.as_deref(), Some("commit"));
     assert!(saved.last_error.is_some());
 }
+
+/// Commit and push `base` for each file, then leave `local` edits
+/// uncommitted and push `remote` edits from a second clone.
+fn diverge_files(fx: &RepoFixture, files: &[(&str, &str, &str, &str)]) {
+    for (path, base, _, _) in files {
+        std::fs::write(fx.repo_dir.path().join(path), base).unwrap();
+    }
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add shared").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    for (path, _, local, remote) in files {
+        std::fs::write(fx.repo_dir.path().join(path), local).unwrap();
+        std::fs::write(other.path().join(path), remote).unwrap();
+    }
+    let other_repo = GitRepo::open(other.path()).unwrap();
+    other_repo.stage_all().unwrap();
+    other_repo.commit("remote edits").unwrap();
+    other_repo.push("origin", &fx.branch).unwrap();
+}
+
+const APPEND_BASE: &str = "# Notes\n\n- first\n";
+const APPEND_LOCAL: &str = "# Notes\n\n- first\n- local idea\n";
+const APPEND_REMOTE: &str = "# Notes\n\n- first\n- remote idea\n";
+
+fn options_with_auto_merge(fx: &RepoFixture, enabled: bool) -> SyncOptions {
+    let mut options = SyncOptions::new("origin", &fx.branch, true);
+    options.auto_merge_appends = enabled;
+    options
+}
+
+fn remote_tip(fx: &RepoFixture) -> String {
+    fx.repo.fetch("origin", &fx.branch).unwrap();
+    fx.repo.rev_parse(&format!("origin/{}", fx.branch)).unwrap()
+}
+
+#[tokio::test]
+async fn append_only_conflict_auto_merges_and_pushes_in_manual_mode() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
+    );
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &options_with_auto_merge(&fx, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert_eq!(outcome.appends_merged, 1);
+    assert_eq!(outcome.manual_conflicts, 0);
+    assert!(!fx.repo.merge_in_progress());
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_dir.path().join("notes.md")).unwrap(),
+        "# Notes\n\n- first\n- local idea\n- remote idea\n"
+    );
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), remote_tip(&fx));
+    let state = SyncState::load(&cb_dir_of(&fx)).unwrap();
+    assert!(state.last_error.is_none());
+    assert!(state.last_sync_at.is_some());
+}
+
+#[tokio::test]
+async fn append_only_conflict_stays_manual_when_disabled() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
+    );
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &options_with_auto_merge(&fx, false),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.appends_merged, 0);
+    assert_eq!(outcome.manual_conflicts, 1);
+    assert!(fx.repo.merge_in_progress());
+}
+
+#[tokio::test]
+async fn preserved_append_only_merge_is_completed_on_next_cycle() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
+    );
+    let first = sync_with_resolver(
+        fx.repo_dir.path(),
+        &options_with_auto_merge(&fx, false),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.manual_conflicts, 1);
+
+    let second = sync_with_resolver(
+        fx.repo_dir.path(),
+        &options_with_auto_merge(&fx, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(second.errors.is_empty(), "{second:?}");
+    assert_eq!(second.appends_merged, 1);
+    assert!(!fx.repo.merge_in_progress());
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), remote_tip(&fx));
+}
+
+#[tokio::test]
+async fn edited_lines_still_need_resolution_next_to_auto_merged_appends() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[
+            ("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE),
+            ("shared.md", "line A\n", "line A LOCAL\n", "line A REMOTE\n"),
+        ],
+    );
+
+    let outcome = sync_with_resolver(
+        fx.repo_dir.path(),
+        &options_with_auto_merge(&fx, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(outcome.appends_merged, 1);
+    assert_eq!(outcome.manual_conflicts, 1);
+    assert!(outcome.errors[0].contains("shared.md"), "{outcome:?}");
+    assert!(fx.repo.merge_in_progress());
+    assert_eq!(fx.repo.list_conflicted_paths().unwrap(), vec!["shared.md"]);
+}

@@ -84,3 +84,19 @@ fn test_filter_no_prefix_false_positive() {
         "Entry for /tmp/repository should be preserved when filtering /tmp/repo"
     );
 }
+
+#[test]
+fn test_crontab_binary_parses_repo_entry() {
+    let repo = Path::new("/tmp/repo");
+    let (comment, entry) = build_crontab_entry(
+        repo,
+        "0 * * * *",
+        Path::new("/opt/cb/target/debug/commitbook"),
+    );
+    let crontab = format!("0 1 * * * other-job\n{comment}\n{entry}\n");
+    assert_eq!(
+        crontab_binary(&crontab, repo),
+        Some(std::path::PathBuf::from("/opt/cb/target/debug/commitbook"))
+    );
+    assert_eq!(crontab_binary(&crontab, Path::new("/tmp/other")), None);
+}

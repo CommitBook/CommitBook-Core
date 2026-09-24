@@ -50,6 +50,8 @@ pub struct App {
     pub repo_path: PathBuf,
     pub active_panel: Panel,
     pub running: bool,
+    pub scheduler: cron::SchedulerHealth,
+    pub scheduler_warning: Option<String>,
     pub schedule: String,
     pub schedule_desc: String,
     pub auto_push: bool,
@@ -102,6 +104,8 @@ impl App {
             repo_path: repo_path.to_path_buf(),
             active_panel: Panel::Status,
             running: false,
+            scheduler: cron::SchedulerHealth::Stopped,
+            scheduler_warning: None,
             schedule: String::new(),
             schedule_desc: String::new(),
             auto_push: true,
@@ -153,7 +157,17 @@ impl App {
         }
 
         // Check scheduler state
-        self.running = cron::is_loaded(&self.repo_path);
+        self.scheduler = cron::health(&self.repo_path);
+        self.running = self.scheduler.is_loaded();
+        self.scheduler_warning = self.scheduler.warning(
+            self.repository_status
+                .as_ref()
+                .and_then(|s| s.schedule.as_deref()),
+            self.repository_status
+                .as_ref()
+                .and_then(|s| s.last_attempt_at.as_deref()),
+            chrono::Utc::now(),
+        );
 
         // Load git info
         if let Ok(repo) = GitRepo::open(&self.repo_path) {

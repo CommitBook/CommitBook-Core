@@ -226,3 +226,22 @@ fn test_generate_plist_path_excludes_protected_roots() {
         }
     }
 }
+
+#[test]
+fn test_plist_program_reads_first_program_argument() {
+    let plist = generate_plist(
+        Path::new("/tmp/my-repo"),
+        "0 * * * *",
+        Path::new("/tmp/a&b/target/debug/commitbook"),
+    )
+    .unwrap();
+    assert_eq!(
+        plist_program(&plist),
+        Some(PathBuf::from("/tmp/a&b/target/debug/commitbook"))
+    );
+}
+
+#[test]
+fn test_plist_program_missing_arguments() {
+    assert_eq!(plist_program("<plist><dict></dict></plist>"), None);
+}

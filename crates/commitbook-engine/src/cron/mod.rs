@@ -7,7 +7,9 @@ pub mod linux;
 pub mod macos;
 
 use anyhow::Result;
-use std::path::Path;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 pub use fake::FakeScheduler;
 
@@ -326,6 +328,102 @@ pub fn is_loaded(repo_path: &Path) -> bool {
         let _ = repo_path;
         false
     }
+}
+
+/// Scheduler state as seen from the repository, beyond "is a job loaded".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", content = "reason", rename_all = "snake_case")]
+pub enum SchedulerHealth {
+    Stopped,
+    Running,
+    /// A job is loaded but cannot run, e.g. its binary was deleted.
+    Broken(String),
+}
+
+impl SchedulerHealth {
+    pub fn is_loaded(&self) -> bool {
+        !matches!(self, Self::Stopped)
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Stopped => "stopped",
+            Self::Running => "running",
+            Self::Broken(_) => "broken",
+        }
+    }
+
+    /// Warning for a job that is loaded but not doing its work: a missing
+    /// binary, or no sync attempt for three schedule intervals. Sleep can
+    /// delay launchd runs briefly, so the stale threshold is generous.
+    pub fn warning(
+        &self,
+        schedule: Option<&str>,
+        last_attempt_at: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Option<String> {
+        match self {
+            Self::Stopped => None,
+            Self::Broken(reason) => Some(format!(
+                "Scheduler cannot run ({reason}). Run `commitbook doctor --fix` from an installed commitbook binary."
+            )),
+            Self::Running => {
+                let schedule = schedule?;
+                let last = DateTime::parse_from_rfc3339(last_attempt_at?).ok()?;
+                let interval = cron_to_interval_seconds(schedule).unwrap_or(86_400);
+                let threshold = chrono::Duration::seconds((interval * 3).max(1_800) as i64);
+                (now.signed_duration_since(last) > threshold).then(|| {
+                    format!(
+                        "Scheduler has not run since {} (schedule: {}). Check `commitbook doctor`.",
+                        last.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%SZ"),
+                        describe_schedule(schedule).to_lowercase()
+                    )
+                })
+            }
+        }
+    }
+}
+
+/// Classify the repo's scheduler job: stopped, running, or loaded with a
+/// binary that no longer exists (e.g. a deleted `target/` build).
+pub fn health(repo_path: &Path) -> SchedulerHealth {
+    if !is_loaded(repo_path) {
+        return SchedulerHealth::Stopped;
+    }
+    match scheduled_binary(repo_path) {
+        Some(binary) if !binary.exists() => {
+            SchedulerHealth::Broken(format!("binary missing: {}", binary.display()))
+        }
+        _ => SchedulerHealth::Running,
+    }
+}
+
+/// Binary path the repo's scheduler job launches, if one is installed.
+pub fn scheduled_binary(repo_path: &Path) -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::scheduled_binary(repo_path)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        linux::scheduled_binary(repo_path)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = repo_path;
+        None
+    }
+}
+
+/// Whether `binary` looks like a build artifact that can disappear (a cargo
+/// `target/` directory), making it a poor choice for a scheduler job.
+pub fn is_transient_binary(binary: &Path) -> bool {
+    let parts: Vec<_> = binary.components().map(|c| c.as_os_str()).collect();
+    parts
+        .windows(2)
+        .any(|w| w[0] == "target" && (w[1] == "debug" || w[1] == "release"))
 }
 
 fn validate_cron_field(field: &str, max_val: u32) -> Result<()> {

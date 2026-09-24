@@ -183,3 +183,21 @@ fn start_and_stop_go_through_the_adapter() {
     let error = start_scheduler(tmp.path(), &context(&fake)).unwrap_err();
     assert!(error.downcast_ref::<RepoLockContended>().is_some());
 }
+
+#[test]
+fn auto_merge_appends_update_is_saved() {
+    let tmp = init_repo();
+    let fake = FakeScheduler::stopped();
+    let update = SettingsUpdate {
+        auto_merge_appends: Some(false),
+        ..Default::default()
+    };
+    let outcome = update_settings(tmp.path(), &update, &context(&fake)).unwrap();
+    assert!(!outcome.config.conflict.auto_merge_appends);
+    assert!(
+        !LocalConfig::load(tmp.path())
+            .unwrap()
+            .conflict
+            .auto_merge_appends
+    );
+}

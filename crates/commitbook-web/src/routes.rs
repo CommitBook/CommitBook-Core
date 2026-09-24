@@ -115,6 +115,7 @@ struct DashboardTemplate {
     status_lines: Vec<String>,
     needs_attention: bool,
     running: bool,
+    scheduler_label: &'static str,
     schedule_desc: String,
     current_branch: String,
     auto_push: bool,
@@ -128,6 +129,7 @@ struct LogsTemplate {}
 #[derive(Template)]
 #[template(path = "config.html")]
 struct ConfigTemplate {
+    auto_merge_appends: bool,
     review_ai_resolutions: bool,
     resolver: String,
     ai_messages: bool,
@@ -141,7 +143,7 @@ struct ConfigTemplate {
 struct StatusPartial {
     status_lines: Vec<String>,
     needs_attention: bool,
-    running: bool,
+    scheduler_label: &'static str,
     schedule_desc: String,
     current_branch: String,
     auto_push: bool,
@@ -170,10 +172,35 @@ fn escape_html(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+fn status_lines(status: &StatusResponse) -> Vec<String> {
+    status
+        .scheduler_warning
+        .iter()
+        .cloned()
+        .chain(status.repository.lines())
+        .collect()
+}
+
+fn scheduler_label(scheduler: &cron::SchedulerHealth) -> &'static str {
+    match scheduler {
+        cron::SchedulerHealth::Stopped => "Stopped",
+        cron::SchedulerHealth::Running => "Running",
+        cron::SchedulerHealth::Broken(_) => "Broken",
+    }
+}
+
 fn load_status(repo_path: &Path) -> StatusResponse {
     let repository = RepositoryStatus::read(repo_path);
+    let scheduler = cron::health(repo_path);
+    let scheduler_warning = scheduler.warning(
+        repository.schedule.as_deref(),
+        repository.last_attempt_at.as_deref(),
+        chrono::Utc::now(),
+    );
     StatusResponse {
-        running: cron::is_loaded(repo_path),
+        running: scheduler.is_loaded(),
+        scheduler,
+        scheduler_warning,
         enabled: repository.enabled.unwrap_or(false),
         schedule: repository.schedule.clone().unwrap_or_default(),
         schedule_desc: repository
@@ -261,10 +288,11 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> Result<Html<String
     let providers = blocking(move || load_providers(&path)).await?;
 
     let tpl = DashboardTemplate {
-        status_lines: status.repository.lines(),
+        status_lines: status_lines(&status),
         needs_attention: status.repository.merge_in_progress
             || !status.repository.conflicts.is_empty(),
         running: status.running,
+        scheduler_label: scheduler_label(&status.scheduler),
         schedule_desc: status.schedule_desc,
         current_branch: status.current_branch,
         auto_push: status.auto_push,
@@ -296,6 +324,7 @@ pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoRespons
         Err(_) => return Html("Configuration inspection failed".into()),
     };
     let tpl = ConfigTemplate {
+        auto_merge_appends: config.conflict.auto_merge_appends,
         review_ai_resolutions: config.conflict.review_ai_resolutions,
         resolver: config.conflict.resolver,
         ai_messages: config.commit.ai_messages,
@@ -317,10 +346,10 @@ pub async fn htmx_status(State(state): State<Arc<AppState>>) -> Result<Html<Stri
     let path = state.repo_path.clone();
     let status = blocking(move || load_status(&path)).await?;
     let tpl = StatusPartial {
-        status_lines: status.repository.lines(),
+        status_lines: status_lines(&status),
         needs_attention: status.repository.merge_in_progress
             || !status.repository.conflicts.is_empty(),
-        running: status.running,
+        scheduler_label: scheduler_label(&status.scheduler),
         schedule_desc: status.schedule_desc,
         current_branch: status.current_branch,
         auto_push: status.auto_push,
@@ -411,6 +440,7 @@ pub async fn api_config(State(state): State<Arc<AppState>>, request: Request) ->
         enabled: None,
         review_ai_resolutions: update.review_ai_resolutions,
         resolver: update.resolver,
+        auto_merge_appends: update.auto_merge_appends,
     };
 
     let repo_path = state.repo_path.clone();

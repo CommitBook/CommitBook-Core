@@ -157,6 +157,7 @@ pub fn sync_one_commitbook(
         .map_err(|error| CommitBookError::database(format!("Load config: {error}")))?;
     let mut options = SyncOptions::from(&config.git);
     options.review_ai_resolutions = config.conflict.review_ai_resolutions;
+    options.auto_merge_appends = config.conflict.auto_merge_appends;
 
     let host_resolver = callback.map(|callback| HostConflictResolver {
         commitbook_id: commitbook_id.to_string(),
@@ -200,7 +201,7 @@ pub fn sync_one_commitbook(
         committed: outcome.committed,
         pulled: outcome.pulled,
         pushed: outcome.pushed,
-        conflicts_resolved: outcome.conflicts_resolved,
+        conflicts_resolved: outcome.conflicts_resolved + outcome.appends_merged,
         manual_conflicts: outcome.manual_conflicts,
         errors: outcome.errors,
     })

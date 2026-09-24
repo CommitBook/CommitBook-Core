@@ -120,10 +120,37 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
 
     // 7. Scheduler.
     print!("  Scheduler... ");
-    if cron::is_loaded(repo_root) {
-        println!("{}", "running".green().bold());
-    } else {
-        println!("{}", "stopped".dimmed());
+    let scheduler = cron::health(repo_root);
+    let config = LocalConfig::load_read_only(repo_root).ok();
+    let last_attempt = SyncState::load(cb_dir).ok().and_then(|s| s.last_attempt_at);
+    let warning = scheduler.warning(
+        config.as_ref().map(|c| c.schedule.as_str()),
+        last_attempt.as_deref(),
+        chrono::Utc::now(),
+    );
+    match (&scheduler, &warning) {
+        (cron::SchedulerHealth::Broken(_), _) => {
+            println!("{}", "BROKEN".red().bold());
+            all_ok = false;
+        }
+        (cron::SchedulerHealth::Running, Some(_)) => println!("{}", "STALE".yellow().bold()),
+        (cron::SchedulerHealth::Running, None) => println!("{}", "running".green().bold()),
+        (cron::SchedulerHealth::Stopped, _) => println!("{}", "stopped".dimmed()),
+    }
+    if let Some(warning) = &warning {
+        println!("    {}", warning.dimmed());
+    }
+    if let Some(binary) = cron::scheduled_binary(repo_root)
+        .filter(|binary| scheduler.is_loaded() && cron::is_transient_binary(binary))
+    {
+        println!(
+            "    {}",
+            format!(
+                "Scheduler runs a build artifact ({}); it stops working when that build is removed.",
+                binary.display()
+            )
+            .dimmed()
+        );
     }
 
     // 8. AI providers. Skipped entirely when `[commit] ai_messages = false`,
@@ -347,6 +374,16 @@ fn fix_plist_binary_path(repo_root: &Path) -> bool {
         return false;
     }
 
+    if cron::is_transient_binary(&current_exe) {
+        println!(
+            "    {}",
+            format!(
+                "Warning: {} is a build artifact; install commitbook (e.g. `cargo install --path crates/commitbook-cli`) and rerun `doctor --fix` from it.",
+                current_exe.display()
+            )
+            .yellow()
+        );
+    }
     print!("    Reinstalling scheduler with current label and binary path... ");
     let config = match LocalConfig::load(repo_root) {
         Ok(c) => c,

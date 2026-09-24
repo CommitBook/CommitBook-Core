@@ -1,10 +1,18 @@
 use serde::{Deserialize, Serialize};
 
+fn stopped() -> commitbook_engine::cron::SchedulerHealth {
+    commitbook_engine::cron::SchedulerHealth::Stopped
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StatusResponse {
     #[serde(default)]
     pub repository: commitbook_engine::inspection::RepositoryStatus,
     pub running: bool,
+    #[serde(default = "stopped")]
+    pub scheduler: commitbook_engine::cron::SchedulerHealth,
+    #[serde(default)]
+    pub scheduler_warning: Option<String>,
     pub enabled: bool,
     pub schedule: String,
     pub schedule_desc: String,
@@ -42,6 +50,7 @@ pub struct LogsQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigUpdate {
+    pub auto_merge_appends: Option<bool>,
     pub review_ai_resolutions: Option<bool>,
     pub resolver: Option<String>,
     pub ai_messages: Option<bool>,

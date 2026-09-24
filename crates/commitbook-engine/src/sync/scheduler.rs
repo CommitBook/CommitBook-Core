@@ -25,6 +25,7 @@ pub struct SyncOptions {
     pub branch: String,
     pub auto_push: bool,
     pub review_ai_resolutions: bool,
+    pub auto_merge_appends: bool,
 }
 
 impl SyncOptions {
@@ -34,6 +35,7 @@ impl SyncOptions {
             branch: branch.into(),
             auto_push,
             review_ai_resolutions: false,
+            auto_merge_appends: true,
         }
     }
 }
@@ -45,6 +47,7 @@ impl From<&GitSettings> for SyncOptions {
             branch: settings.branch.clone(),
             auto_push: settings.auto_push,
             review_ai_resolutions: false,
+            auto_merge_appends: true,
         }
     }
 }
@@ -56,6 +59,9 @@ pub struct SyncOutcome {
     pub pushed: u32,
     pub pulled: u32,
     pub conflicts_resolved: u32,
+    /// Conflicts resolved without a resolver by keeping both sides'
+    /// added lines (see `merge_append_only`).
+    pub appends_merged: u32,
     pub manual_conflicts: u32,
     pub errors: Vec<String>,
 }
@@ -66,6 +72,7 @@ impl SyncOutcome {
             && self.pushed == 0
             && self.pulled == 0
             && self.conflicts_resolved == 0
+            && self.appends_merged == 0
             && self.manual_conflicts == 0
             && self.errors.is_empty()
     }
@@ -100,6 +107,7 @@ pub async fn sync_repository_locked(
     let resolver = registry.get(&config.conflict.resolver);
     let mut options = SyncOptions::from(&config.git);
     options.review_ai_resolutions = config.conflict.review_ai_resolutions;
+    options.auto_merge_appends = config.conflict.auto_merge_appends;
     sync_with_resolver_locked(
         repo_root,
         &options,
@@ -227,7 +235,13 @@ async fn sync_cycle(
         //    Guarding on merge_in_progress() makes this a no-op on retries.
         *stage = "merge";
         if repo.merge_in_progress() {
-            let unresolved = repo.list_conflicted_paths()?;
+            let unresolved = merge_append_only(
+                &repo,
+                repo.list_conflicted_paths()?,
+                options.auto_merge_appends,
+                &mut outcome,
+                logger,
+            );
             if !unresolved.is_empty() {
                 *stage = "ai_resolution";
                 if crate::review::prepare_locked(
@@ -273,7 +287,8 @@ async fn sync_cycle(
                     }
                 }
             } else {
-                // Markers already resolved by the user: complete the merge.
+                // Markers already resolved by the user or the append-only
+                // pass: complete the merge.
                 repo.finalize_merge_commit_on_branch(None, &options.branch)?;
             }
         }
@@ -349,51 +364,64 @@ async fn sync_cycle(
                 outcome.pulled += behind;
             }
             MergeOutcome::Conflicts(conflicted) => {
-                *stage = "ai_resolution";
-                if crate::review::prepare_locked(
-                    repo_root,
-                    options.review_ai_resolutions,
-                    resolver,
-                    lock,
-                )
-                .await?
-                {
-                    outcome.manual_conflicts = conflicted.len() as u32;
-                    return Ok(outcome);
-                }
-                match resolver {
-                    Some(r) => {
-                        match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger)
-                            .await
-                        {
-                            Ok(()) => {
-                                outcome.conflicts_resolved += conflicted.len() as u32;
-                                *stage = "merge";
-                                repo.finalize_merge_commit_on_branch(None, &options.branch)?;
-                                outcome.pulled += behind;
-                            }
-                            Err(e) => {
-                                record_resolver_failure(
-                                    &repo,
-                                    &conflicted,
-                                    &mut outcome,
-                                    &e,
-                                    logger,
-                                )?;
-                                return Ok(outcome);
+                let conflicted = merge_append_only(
+                    &repo,
+                    conflicted,
+                    options.auto_merge_appends,
+                    &mut outcome,
+                    logger,
+                );
+                if conflicted.is_empty() {
+                    repo.finalize_merge_commit_on_branch(None, &options.branch)?;
+                    outcome.pulled += behind;
+                    // Fall through to push below.
+                } else {
+                    *stage = "ai_resolution";
+                    if crate::review::prepare_locked(
+                        repo_root,
+                        options.review_ai_resolutions,
+                        resolver,
+                        lock,
+                    )
+                    .await?
+                    {
+                        outcome.manual_conflicts = conflicted.len() as u32;
+                        return Ok(outcome);
+                    }
+                    match resolver {
+                        Some(r) => {
+                            match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger)
+                                .await
+                            {
+                                Ok(()) => {
+                                    outcome.conflicts_resolved += conflicted.len() as u32;
+                                    *stage = "merge";
+                                    repo.finalize_merge_commit_on_branch(None, &options.branch)?;
+                                    outcome.pulled += behind;
+                                }
+                                Err(e) => {
+                                    record_resolver_failure(
+                                        &repo,
+                                        &conflicted,
+                                        &mut outcome,
+                                        &e,
+                                        logger,
+                                    )?;
+                                    return Ok(outcome);
+                                }
                             }
                         }
-                    }
-                    None => {
-                        outcome.manual_conflicts += conflicted.len() as u32;
-                        let msg = format!(
-                            "{} conflict(s) need manual resolution: {}",
-                            conflicted.len(),
-                            conflicted.join(", ")
-                        );
-                        let _ = logger.warn(&msg);
-                        outcome.errors.push(msg);
-                        return Ok(outcome);
+                        None => {
+                            outcome.manual_conflicts += conflicted.len() as u32;
+                            let msg = format!(
+                                "{} conflict(s) need manual resolution: {}",
+                                conflicted.len(),
+                                conflicted.join(", ")
+                            );
+                            let _ = logger.warn(&msg);
+                            outcome.errors.push(msg);
+                            return Ok(outcome);
+                        }
                     }
                 }
             }
@@ -449,6 +477,39 @@ fn is_non_fast_forward_push(error: &anyhow::Error) -> bool {
             .downcast_ref::<git2::Error>()
             .is_some_and(|error| error.code() == git2::ErrorCode::NotFastForward)
     })
+}
+
+/// Resolve conflicts where both sides only added lines (see
+/// `GitRepo::try_resolve_append_only`) when enabled. Returns the paths that
+/// still need the configured resolver or the user. A failure on one path
+/// leaves it for those later steps instead of failing the cycle.
+fn merge_append_only(
+    repo: &GitRepo,
+    paths: Vec<String>,
+    enabled: bool,
+    outcome: &mut SyncOutcome,
+    logger: &dyn Logger,
+) -> Vec<String> {
+    if !enabled {
+        return paths;
+    }
+    let mut remaining = Vec::new();
+    for path in paths {
+        match repo.try_resolve_append_only(&path) {
+            Ok(true) => {
+                outcome.appends_merged += 1;
+                let _ = logger.info(&format!("Auto-merged append-only conflict: {path}"));
+            }
+            Ok(false) => remaining.push(path),
+            Err(error) => {
+                let _ = logger.warn(&format!(
+                    "Append-only merge of {path} failed ({error:#}); leaving it for conflict resolution"
+                ));
+                remaining.push(path);
+            }
+        }
+    }
+    remaining
 }
 
 fn record_resolver_failure(

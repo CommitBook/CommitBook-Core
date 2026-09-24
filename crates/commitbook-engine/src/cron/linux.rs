@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const CRON_COMMENT_PREFIX: &str = "# CommitBook: ";
@@ -102,6 +102,21 @@ pub fn is_loaded(repo_path: &Path) -> bool {
                 .any(|line| line.contains(&cd_arg) && line.contains("commitbook"))
         })
         .unwrap_or(false)
+}
+
+/// Binary path the repo's crontab entry launches.
+pub fn scheduled_binary(repo_path: &Path) -> Option<PathBuf> {
+    crontab_binary(&get_current_crontab().ok()?, repo_path)
+}
+
+/// Parse the quoted binary out of a `cd "<repo>" && "<bin>" run` entry.
+pub(super) fn crontab_binary(crontab: &str, repo_path: &Path) -> Option<PathBuf> {
+    let cd_arg = format!("cd \"{}\"", repo_path.to_string_lossy());
+    let line = crontab
+        .lines()
+        .find(|line| line.contains(&cd_arg) && line.contains("commitbook"))?;
+    let rest = &line[line.find("&& \"")? + "&& \"".len()..];
+    Some(PathBuf::from(&rest[..rest.find('"')?]))
 }
 
 fn get_current_crontab() -> Result<String> {

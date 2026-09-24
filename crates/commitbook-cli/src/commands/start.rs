@@ -12,7 +12,9 @@ pub fn run(_cb_dir: &Path, repo_root: &Path) -> Result<()> {
         bail!("Not a git repository: {}", repo_root.display());
     }
 
-    let context = SchedulerContext::new(&SystemScheduler, settings::current_binary());
+    let binary = settings::current_binary();
+    let transient = cron::is_transient_binary(&binary);
+    let context = SchedulerContext::new(&SystemScheduler, binary.clone());
     settings::start_scheduler(repo_root, &context)?;
     let config = LocalConfig::load_read_only(repo_root)?;
 
@@ -22,6 +24,13 @@ pub fn run(_cb_dir: &Path, repo_root: &Path) -> Result<()> {
         cron::describe_schedule(&config.schedule).cyan()
     );
     println!("  Command: {}", "commitbook run".dimmed());
+    if transient {
+        println!(
+            "  {} {} is a build artifact; the scheduler stops when it is removed. Install commitbook and run `commitbook start` from it.",
+            "Warning:".yellow().bold(),
+            binary.display()
+        );
+    }
 
     Ok(())
 }

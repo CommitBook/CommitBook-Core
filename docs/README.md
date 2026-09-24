@@ -104,7 +104,7 @@ CommitBook uses libgit2's normal merge analysis and file-level three-way merge:
 - **Up to date**: no merge is needed.
 - **Behind only**: fast-forward to the remote commit without rewriting history.
 - **Diverged**: create a normal two-parent merge commit.
-- **Conflicted**: invoke the configured AI resolver, or preserve Git conflict markers in manual mode.
+- **Conflicted**: keep both sides when both only added lines (`[conflict] auto_merge_appends`, default on); otherwise invoke the configured AI resolver, or preserve Git conflict markers in manual mode.
 
 Local changes are committed before fetching, so a network or merge failure does not discard the user's writing. A later sync resumes an unfinished manual merge after the conflicted files have been resolved and staged.
 
@@ -273,6 +273,21 @@ cd CommitBook-Core
 cargo install --path crates/commitbook-cli
 ```
 
+Run `commitbook start` from an installed binary, not from a `target/` build:
+the scheduler records the executable path, and it stops running if that path
+disappears.
+
+### Conductor run script
+
+`.conductor/settings.toml` defines a **web** run script that builds the web
+dashboard from the workspace and serves it on `$CONDUCTOR_PORT`. It needs
+`COMMITBOOK_REPO` to point at a CommitBook-initialized repository, for example
+in `~/.zprofile`:
+
+```bash
+export COMMITBOOK_REPO="$HOME/notes"
+```
+
 ### Pre-built Binaries
 
 Every release publishes tarballs for:
@@ -311,6 +326,11 @@ let two syncs mutate the same repository at the same time.
 
 ### Syncs not running
 
+`commitbook status` shows `Scheduler: broken` when the scheduled binary no
+longer exists (for example a deleted `target/` build), and warns when a loaded
+scheduler has not attempted a sync for three schedule intervals. Reinstall it
+from an installed binary with `commitbook doctor --fix`.
+
 ```bash
 # Check system health
 commitbook doctor
@@ -327,7 +347,10 @@ commitbook log
 
 ### Merge conflicts
 
-CommitBook writes conflict markers inline (like git). Check for conflicts and resolve them:
+When both sides only added lines at the same place (the common case for notes
+edited on two devices), sync keeps both additions automatically, local first.
+Disable this with `[conflict] auto_merge_appends = false`. Other conflicts get
+inline markers (like git). Check for conflicts and resolve them:
 
 ```bash
 git status

@@ -4,6 +4,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table};
 use ratatui::Frame;
 
+use commitbook_engine::cron;
+
 use crate::app::{App, Panel};
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -135,11 +137,21 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     }
 
     if let Some(status) = &app.repository_status {
+        let label = match app.scheduler {
+            cron::SchedulerHealth::Broken(_) => "broken",
+            _ if app.running => "running",
+            _ => "stopped",
+        };
         lines = vec![Line::raw(format!(
-            "Scheduler: {} • {}",
-            if app.running { "running" } else { "stopped" },
+            "Scheduler: {label} • {}",
             app.schedule_desc
         ))];
+        if let Some(warning) = &app.scheduler_warning {
+            lines.push(Line::from(Span::styled(
+                warning.clone(),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
         lines.extend(status.lines().into_iter().map(Line::raw));
         if let Some(error) = &app.action_error {
             lines.push(Line::raw(format!("Action failed: {error}")));

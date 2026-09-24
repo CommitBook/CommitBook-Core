@@ -24,7 +24,12 @@ No configuration option. No automatic fallback to a different algorithm. One pat
                           if index has no conflicts:
                               write_tree, commit with two parents (merge commit)
                           else:
-                              match SyncMode:
+                              if [conflict] auto_merge_appends (default on):
+                                  resolve every text conflict whose hunks only add
+                                  lines on both sides (blank ancestor section) as
+                                  local additions + remote additions; if none remain,
+                                  create the merge commit
+                              for the remaining conflicts, match SyncMode:
                                   AiResolve -> resolver.resolve(GitConflict) for each text conflict
                                                stage explicit content/deletion results,
                                                write_tree, create one resolved merge commit
@@ -153,6 +158,18 @@ merge and returns an actionable configuration error with the manual conflict
 summaries. Binary, symlink, and gitlink conflicts always remain manual.
 
 Apps' existing `ConflictListView` / `ConflictDetailView` activate when `Manual` mode returns conflict entries.
+
+## Append-only conflicts
+
+Notebook conflicts are most often two devices appending to the same note while
+apart. Before any resolver runs, `GitRepo::try_resolve_append_only` probes a
+diff3 merge of the three index stages. When every conflicting hunk has an empty
+or whitespace-only ancestor section (nothing existing was edited or removed),
+it stages a libgit2 union merge: local additions first, then remote additions.
+Any other hunk, a delete/modify pair, or a binary or special file leaves the
+conflict untouched for the configured resolver or the user. The same pass also
+runs when a later cycle recovers a merge left in progress. Set
+`[conflict] auto_merge_appends = false` to treat these as ordinary conflicts.
 
 ## Optional review of AI resolutions
 
