@@ -7,7 +7,13 @@ use colored::Colorize;
 
 /// CommitBook, Markdown workspace with git sync.
 #[derive(Parser)]
-#[command(name = "commitbook", version, about, long_about = None)]
+#[command(
+    name = "commitbook",
+    version,
+    about,
+    long_about = None,
+    disable_help_subcommand = true
+)]
 struct Cli {
     /// Enable verbose output
     #[arg(short, long, global = true)]
