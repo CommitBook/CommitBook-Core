@@ -47,21 +47,17 @@ pub enum Publication {
     Unchanged,
     /// The metadata commit was pushed (now or as a retry of a pending record).
     Pushed,
-    /// A pending record exists but `auto_push` is off; sync or a later init
-    /// publishes it.
-    Deferred,
 }
 
-/// Commit the `.CommitBook` metadata paths on `branch` and publish exactly
-/// that commit to `remote`. The commit is recorded in `state.toml` before the
-/// push so a failed publication can be retried without touching unrelated
-/// commits. With `auto_push` false the record is kept and no push happens.
+/// Commit the `.CommitBook` metadata paths (config, ignore file, and this
+/// device's file) on `branch` and publish exactly that commit to `remote`.
+/// The commit is recorded in `state.toml` before the push so a failed
+/// publication can be retried without touching unrelated commits.
 pub fn publish_metadata(
     repo: &GitRepo,
     remote: &str,
     branch: &str,
     message: &str,
-    auto_push: bool,
     creds: &dyn CredentialProvider,
 ) -> std::result::Result<Publication, PublicationError> {
     let directory = LocalConfig::commitbook_dir(repo.path());
@@ -74,8 +70,14 @@ pub fn publish_metadata(
             )));
         }
     }
+    let device_path = crate::devices::this_device_id(repo.path())
+        .map_err(PublicationError::Commit)?
+        .map(|id| crate::devices::device_repo_path(&id))
+        .filter(|path| repo.path().join(path).is_file());
+    let mut paths: Vec<&str> = METADATA_PATHS.to_vec();
+    paths.extend(device_path.as_deref());
     let committed = repo
-        .commit_selected_paths_on_branch(METADATA_PATHS, message, branch)
+        .commit_selected_paths_on_branch(&paths, message, branch)
         .map_err(PublicationError::Commit)?;
     if committed.is_some() {
         state.pending_init_push = Some(PendingInitPush {
@@ -88,9 +90,6 @@ pub fn publish_metadata(
     let Some(pending) = &state.pending_init_push else {
         return Ok(Publication::Unchanged);
     };
-    if !auto_push {
-        return Ok(Publication::Deferred);
-    }
     // Publish the recorded object, never a branch that external Git might have
     // advanced after validation. The remote still enforces fast-forward rules.
     repo.push_commit_with(remote, branch, &pending.commit_oid, creds)

@@ -69,7 +69,7 @@ fn initialization_commits_only_metadata_and_pushes_it() {
     std::fs::write(local.path().join("unrelated.txt"), "keep staged\n").unwrap();
     git(local.path(), &["add", "unrelated.txt"]);
 
-    initialize_and_publish(local.path(), Some("origin")).unwrap();
+    initialize_and_publish(local.path(), Some("origin"), Some("Laptop")).unwrap();
 
     let staged = git(
         local.path(),
@@ -114,7 +114,7 @@ fn failed_initialization_push_leaves_metadata_committed() {
         ],
     );
 
-    let error = initialize_and_publish(local.path(), Some("origin")).unwrap_err();
+    let error = initialize_and_publish(local.path(), Some("origin"), Some("Laptop")).unwrap_err();
     assert!(error.to_string().contains("committed locally"));
 
     assert!(tree_contains(
@@ -133,7 +133,7 @@ fn failed_initialization_push_leaves_metadata_committed() {
 fn new_initialization_uses_the_checked_out_branch() {
     let (local, remote) = initialize_repo_with_remote_on_branch("notes");
 
-    initialize_and_publish(local.path(), Some("origin")).unwrap();
+    initialize_and_publish(local.path(), Some("origin"), Some("Laptop")).unwrap();
 
     let config = LocalConfig::load(local.path()).unwrap();
     assert_eq!(config.git.branch, "notes");
@@ -147,11 +147,11 @@ fn new_initialization_uses_the_checked_out_branch() {
 #[test]
 fn initialization_refuses_to_commit_metadata_on_another_branch() {
     let (local, remote) = initialize_repo_with_remote();
-    state::initialize(local.path(), "origin").unwrap();
+    state::initialize(local.path(), "origin", "main").unwrap();
     git(local.path(), &["branch", "other"]);
     git(local.path(), &["checkout", "other"]);
 
-    let error = initialize_and_publish(local.path(), None)
+    let error = initialize_and_publish(local.path(), None, None)
         .unwrap_err()
         .to_string();
     assert!(error.contains("does not match configured branch"));
@@ -168,64 +168,68 @@ fn initialization_refuses_to_commit_metadata_on_another_branch() {
 }
 
 #[test]
-fn init_with_auto_push_disabled_records_pending_without_pushing() {
+fn initialization_registers_and_publishes_this_device() {
     let (local, remote) = initialize_repo_with_remote();
-    state::initialize(local.path(), "origin").unwrap();
-    let mut config = LocalConfig::load(local.path()).unwrap();
-    config.git.auto_push = false;
-    config.save(local.path()).unwrap();
-    // Publication must not depend on the remote being reachable.
-    git(
-        local.path(),
-        &[
-            "remote",
-            "set-url",
-            "origin",
-            "file:///definitely/missing/commitbook.git",
-        ],
+
+    initialize_and_publish(local.path(), Some("origin"), Some("Laptop")).unwrap();
+
+    let (id, device) = devices::this_device(local.path()).unwrap().unwrap();
+    assert_eq!(device.name, "Laptop");
+    // A `file://` remote is not SSH, so desktop auth is the local repo mode.
+    assert_eq!(
+        device.auth,
+        commitbook_engine::config::Auth::ExistingLocalRepo
     );
-
-    initialize_and_publish(local.path(), None).unwrap();
-
-    let cb_dir = LocalConfig::commitbook_dir(local.path());
-    let pending = commitbook_engine::state::sync_state::SyncState::load(&cb_dir)
-        .unwrap()
-        .pending_init_push
-        .expect("pending publication recorded");
-    let head = git(local.path(), &["rev-parse", "HEAD"]).trim().to_string();
-    assert_eq!(pending.commit_oid, head);
-    assert_eq!(pending.remote, "origin");
-    assert_eq!(pending.branch, "main");
+    let device_file = devices::device_repo_path(&id);
+    assert!(tree_contains(local.path(), "HEAD", &device_file));
     assert!(tree_contains(
-        local.path(),
-        "HEAD",
-        ".CommitBook/config.toml"
+        remote.path(),
+        "refs/heads/main",
+        &device_file
     ));
     assert!(!tree_contains(
-        remote.path(),
-        "refs/heads/main",
-        ".CommitBook/config.toml"
+        local.path(),
+        "HEAD",
+        ".CommitBook/local/device-id"
     ));
-
-    // Re-enabling auto_push publishes the recorded commit without a new one.
-    let remote_url = format!("file://{}", remote.path().display());
-    git(local.path(), &["remote", "set-url", "origin", &remote_url]);
-    let mut config = LocalConfig::load(local.path()).unwrap();
-    config.git.auto_push = true;
-    config.save(local.path()).unwrap();
-    initialize_and_publish(local.path(), None).unwrap();
-
-    assert!(
-        commitbook_engine::state::sync_state::SyncState::load(&cb_dir)
-            .unwrap()
-            .pending_init_push
-            .is_none()
+    // The CommitBook is named after the repository in the remote URL.
+    let config = LocalConfig::load(local.path()).unwrap();
+    assert_eq!(
+        config.commitbook.name,
+        remote.path().file_name().unwrap().to_str().unwrap()
     );
-    assert!(tree_contains(
-        remote.path(),
-        "refs/heads/main",
-        ".CommitBook/config.toml"
-    ));
+}
+
+#[test]
+fn joining_device_registers_on_an_initialized_clone() {
+    let (local, remote) = initialize_repo_with_remote();
+    initialize_and_publish(local.path(), Some("origin"), Some("Laptop")).unwrap();
+
+    let other = tempdir().unwrap();
+    let remote_url = format!("file://{}", remote.path().display());
+    git(
+        other.path(),
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "main",
+            &remote_url,
+            other.path().to_str().unwrap(),
+        ],
+    );
+    git(other.path(), &["config", "user.name", "CommitBook Test"]);
+    git(
+        other.path(),
+        &["config", "user.email", "test@commitbook.local"],
+    );
+    git(other.path(), &["config", "commit.gpgsign", "false"]);
+
+    initialize_and_publish(other.path(), None, Some("Phone")).unwrap();
+
+    let (devices, _) = devices::list(other.path()).unwrap();
+    let names: Vec<_> = devices.iter().map(|d| d.device.name.as_str()).collect();
+    assert_eq!(names, ["Laptop", "Phone"]);
 }
 
 #[test]

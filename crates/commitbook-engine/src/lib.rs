@@ -2,6 +2,7 @@ pub mod ai;
 pub mod commitbooks;
 pub mod config;
 pub mod cron;
+pub mod devices;
 pub mod git;
 pub mod logger;
 pub mod platform;

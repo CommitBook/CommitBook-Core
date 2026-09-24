@@ -24,6 +24,9 @@ pub struct CommitBookInput {
     pub owner: String,
     pub repo: String,
     pub branch: String,
+    /// Name for this device in `.CommitBook/devices/`; `None` uses a default
+    /// such as "iOS 7f3c".
+    pub device_name: Option<String>,
 }
 
 /// Materialized view of a CommitBook clone on this device.

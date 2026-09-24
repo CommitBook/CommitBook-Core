@@ -1,3 +1,4 @@
+pub mod devices;
 pub mod doctor;
 pub mod init_cmd;
 pub mod log;

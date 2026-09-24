@@ -2,17 +2,20 @@ use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use std::io::{self, IsTerminal, Write};
 
-use commitbook_engine::commitbooks::publication::{
-    publish_metadata, Publication, PublicationError,
-};
+use commitbook_engine::commitbooks::publication::{publish_metadata, PublicationError};
 use commitbook_engine::config::LocalConfig;
+use commitbook_engine::devices;
 use commitbook_engine::git::remote::list_remote_names;
 use commitbook_engine::git::GitRepo;
 use commitbook_engine::state::{self, RepoLock};
 
 const METADATA_COMMIT_MESSAGE: &str = "Initialize CommitBook metadata for synchronized state";
 
-fn initialize_and_publish(repo_root: &std::path::Path, remote_name: Option<&str>) -> Result<()> {
+fn initialize_and_publish(
+    repo_root: &std::path::Path,
+    remote_name: Option<&str>,
+    device_name: Option<&str>,
+) -> Result<()> {
     let _lock = RepoLock::acquire(repo_root)?;
     let repo = GitRepo::open(repo_root)?;
     if repo.merge_in_progress() {
@@ -20,24 +23,20 @@ fn initialize_and_publish(repo_root: &std::path::Path, remote_name: Option<&str>
             "Cannot publish CommitBook metadata while a merge is in progress; resolve or abort the merge, then retry `commitbook init`"
         );
     }
-    let config_existed = LocalConfig::exists(repo_root);
     let current_branch = repo.current_branch()?;
     let remote_name = match remote_name {
         Some(remote_name) => remote_name.to_string(),
         None => LocalConfig::load(repo_root)?.git.remote,
     };
-    state::initialize(repo_root, &remote_name)?;
-    let mut config = LocalConfig::load(repo_root)?;
-    if !config_existed {
-        config.git.branch = current_branch;
-        config.save(repo_root)?;
-    }
-    let publication = publish_metadata(
+    state::initialize(repo_root, &remote_name, &current_branch)?;
+    let config = LocalConfig::load(repo_root)?;
+    let auth = devices::desktop_auth(repo_root, &config.git.remote);
+    devices::register(repo_root, device_name, auth)?;
+    publish_metadata(
         &repo,
         &config.git.remote,
         &config.git.branch,
         METADATA_COMMIT_MESSAGE,
-        config.git.auto_push,
         &commitbook_engine::platform::SystemCredentials,
     )
     .map_err(|error| match error {
@@ -47,14 +46,25 @@ fn initialize_and_publish(repo_root: &std::path::Path, remote_name: Option<&str>
         )),
         PublicationError::Commit(_) | PublicationError::State(_) => anyhow::Error::new(error),
     })?;
-    if publication == Publication::Deferred {
-        println!(
-            "{}",
-            "Metadata committed locally; git.auto_push is off, so run `commitbook sync` or `git push` to publish it."
-                .yellow()
-        );
-    }
     Ok(())
+}
+
+/// Ask for this device's name when it is not registered yet. Returns `None`
+/// (use the default) when skipped with `--yes`, without a terminal, or when
+/// the answer is empty.
+fn ask_device_name(repo_root: &std::path::Path, assume_yes: bool) -> Result<Option<String>> {
+    if assume_yes || !io::stdin().is_terminal() || devices::this_device(repo_root)?.is_some() {
+        return Ok(None);
+    }
+    print!(
+        "Name for this device (Enter for a default like \"{}\"): ",
+        devices::default_name("7f3c")
+    );
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let name = input.trim();
+    Ok((!name.is_empty()).then(|| name.to_string()))
 }
 
 fn confirm_publish(remote: &str, branch: &str) -> Result<bool> {
@@ -102,12 +112,15 @@ pub fn run_init(assume_yes: bool) -> Result<()> {
         // committed, but local/ is gitignored and therefore absent) gets its
         // local/ directory, logs, permissions, and .gitignore entry recreated.
         // Without this, scheduled sync on a clone fails for want of local/.
-        initialize_and_publish(&repo_root, None)?;
+        // A device joining an existing CommitBook registers itself here.
+        let device_name = ask_device_name(&repo_root, assume_yes)?;
+        initialize_and_publish(&repo_root, None, device_name.as_deref())?;
         println!(
             "{} CommitBook is already initialized at {}",
             "OK".green().bold(),
             repo_root.join(".CommitBook").display()
         );
+        print_this_device(&repo_root);
         return Ok(());
     }
 
@@ -136,7 +149,8 @@ pub fn run_init(assume_yes: bool) -> Result<()> {
         }
     }
 
-    initialize_and_publish(&repo_root, Some(&remote_name))?;
+    let device_name = ask_device_name(&repo_root, assume_yes)?;
+    initialize_and_publish(&repo_root, Some(&remote_name), device_name.as_deref())?;
 
     println!(
         "{} Initialized CommitBook in {} (remote: {})",
@@ -144,7 +158,17 @@ pub fn run_init(assume_yes: bool) -> Result<()> {
         repo_root.display(),
         remote_name
     );
+    print_this_device(&repo_root);
     Ok(())
+}
+
+fn print_this_device(repo_root: &std::path::Path) {
+    if let Ok(Some((_, device))) = devices::this_device(repo_root) {
+        println!(
+            "  This device: {} (rename with `commitbook devices rename <name>`)",
+            device.name.cyan()
+        );
+    }
 }
 
 #[cfg(test)]
