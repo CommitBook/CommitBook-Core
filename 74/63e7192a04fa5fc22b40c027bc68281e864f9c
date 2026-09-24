@@ -1,0 +1,19 @@
+crates/commitbook-engine/src/git/operations.rs
+  s_975a063706ec02::t_5c751c1aa49c92 562,804,1245
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7463e7192a04fa5fc22b40c027bc68281e864f9c",
+  "prompts": {},
+  "sessions": {
+    "s_975a063706ec02": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6f706c04-5803-4621-89a1-462987f993f3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
