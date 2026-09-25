@@ -241,9 +241,10 @@ platform = "macos"       # macos | linux | ios | android
 auth = "ssh"             # github_app | pat | ssh | existing_local_repo
 ```
 
-`.CommitBook/.gitignore` is intentionally the only built-in protection for
-`.CommitBook/local/`. Removing it makes that directory eligible under normal
-Git semantics; review `git status` before committing such a change.
+Sync never stages anything under `.CommitBook/local/`, even when no ignore
+rule covers it, so the token in `auth.toml` cannot reach the remote. If
+`/local/` goes missing from `.CommitBook/.gitignore`, for example after a
+merge, the next sync puts it back and publishes the fix.
 
 ### `auth.toml` (gitignored)
 

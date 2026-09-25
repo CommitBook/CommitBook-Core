@@ -128,6 +128,8 @@ pub fn preview_files(root: &Path) -> Result<Vec<PreviewEntry>> {
             ),
         });
     }
+    // Sync never stages device-local state, whatever the ignore files say.
+    entries.retain(|e| !crate::git::operations::is_local_state_path(&e.path));
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(entries)
 }

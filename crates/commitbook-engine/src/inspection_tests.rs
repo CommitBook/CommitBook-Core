@@ -253,3 +253,19 @@ fn status_lists_devices_and_notes_where_both_versions_were_kept() {
     );
     assert!(lines.contains("journal.md"), "{lines}");
 }
+
+#[test]
+fn preview_omits_local_state_even_when_not_ignored() {
+    let fx = setup();
+    let root = &fx.repo_root;
+    std::fs::write(root.join(".gitignore"), "ignored*\n").unwrap();
+    std::fs::write(root.join(".CommitBook/.gitignore"), "").unwrap();
+    std::fs::write(root.join(".CommitBook/local/auth.toml"), "x\n").unwrap();
+    let entries = preview_files(root).unwrap();
+    assert!(
+        entries
+            .iter()
+            .all(|e| !e.path.starts_with(".CommitBook/local")),
+        "{entries:?}"
+    );
+}

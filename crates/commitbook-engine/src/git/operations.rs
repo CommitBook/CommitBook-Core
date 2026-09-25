@@ -4,6 +4,17 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::platform::{CredentialProvider, SystemCredentials};
 
+/// Device-local state (token, sync state, logs, lock). Never staged.
+const LOCAL_STATE_DIR: &str = ".CommitBook/local";
+
+/// True for `.CommitBook/local` and anything under it.
+pub fn is_local_state_path(path: &str) -> bool {
+    path == LOCAL_STATE_DIR
+        || path
+            .strip_prefix(LOCAL_STATE_DIR)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct HeadExpectation {
     symbolic_target: Option<String>,
@@ -349,10 +360,14 @@ impl GitRepo {
         Ok(summary)
     }
 
-    /// Stage specific paths (equivalent to `git add <paths...>`).
+    /// Stage specific paths (equivalent to `git add <paths...>`). Paths under
+    /// `.CommitBook/local/` are refused: that directory holds the token.
     pub fn stage_paths(&self, paths: &[String]) -> Result<()> {
         let mut index = self.repo.index().context("Failed to get index")?;
         for p in paths {
+            if is_local_state_path(p) {
+                bail!("Refusing to stage device-local state: {p}");
+            }
             index
                 .add_path(Path::new(p))
                 .with_context(|| format!("Failed to stage {p}"))?;
@@ -361,7 +376,10 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Stage all changes (equivalent to `git add -A`).
+    /// Stage all changes (equivalent to `git add -A`), except
+    /// `.CommitBook/local/`. The committed `.CommitBook/.gitignore` normally
+    /// excludes it, but that file can be changed by a merge, so staging never
+    /// relies on it: the token in `auth.toml` must not reach the remote.
     pub fn stage_all(&self) -> Result<()> {
         let mut index = self.repo.index().context("Failed to get index")?;
         index
@@ -370,6 +388,9 @@ impl GitRepo {
         index
             .update_all(["*"].iter(), None)
             .context("Failed to update index for deletions")?;
+        index
+            .remove_dir(Path::new(LOCAL_STATE_DIR), 0)
+            .context("Failed to unstage device-local state")?;
         index.write().context("Failed to write index")?;
         Ok(())
     }
@@ -1459,9 +1480,9 @@ impl GitRepo {
             .repo
             .statuses(Some(&mut opts))
             .context("Failed to get repository status")?;
-        Ok(statuses
-            .iter()
-            .any(|entry| entry.status() != git2::Status::CURRENT))
+        Ok(statuses.iter().any(|entry| {
+            entry.status() != git2::Status::CURRENT && !entry.path().is_ok_and(is_local_state_path)
+        }))
     }
 
     /// List paths with unmerged conflict entries in the index.

@@ -128,7 +128,7 @@ keep = "30d"            # <N>d | forever
 
 ## .CommitBook/ Directory
 
-`config.toml`, `.gitignore`, and `devices/` are committed. Everything else lives under `local/`, which is gitignored as a single entry: initialization writes `/local/` into the committed `.CommitBook/.gitignore` (the repository-root `.gitignore` is never changed).
+`config.toml`, `.gitignore`, and `devices/` are committed. Everything else lives under `local/`, which is gitignored as a single entry: initialization writes `/local/` into the committed `.CommitBook/.gitignore` (the repository-root `.gitignore` is never changed). Every sync restores that entry if a merge removed it, and `GitRepo::stage_all`/`stage_paths` never stage `.CommitBook/local/` regardless of ignore rules.
 
 Each device writes only its own `devices/<id>.toml`, and only when it registers (`commitbook init`, or the first sync on a clone that never ran init) or is renamed, so device files never conflict or cause commits on their own.
 

@@ -166,6 +166,9 @@ pub async fn sync_with_resolver_locked(
     lock: &RepoLock,
 ) -> Result<SyncOutcome> {
     lock.ensure_matches(repo_root)?;
+    // A merge can drop `/local/` from the committed `.CommitBook/.gitignore`;
+    // restore it every cycle. `stage_all` also refuses `.CommitBook/local/`.
+    LocalConfig::ensure_gitignore(repo_root)?;
     let cb_dir = LocalConfig::commitbook_dir(repo_root);
     // Never replace malformed state with defaults; validate before mutations.
     let mut state = SyncState::load(&cb_dir)?;

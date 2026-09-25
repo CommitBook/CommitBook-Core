@@ -100,6 +100,19 @@ fn setup_with_state() -> (RepoFixture, FileLogger) {
         ".CommitBook/local/\n",
     )
     .unwrap();
+    // Commit and publish the ignore file `init` writes, since sync restores it
+    // when it is missing.
+    LocalConfig::ensure_gitignore(fx.repo_dir.path()).unwrap();
+    fx.repo
+        .stage_paths(&[".CommitBook/.gitignore".to_string()])
+        .unwrap();
+    fx.repo.commit("add .CommitBook/.gitignore").unwrap();
+    let pushed = std::process::Command::new("git")
+        .args(["push", "-q", "origin", &fx.branch])
+        .current_dir(fx.repo_dir.path())
+        .output()
+        .unwrap();
+    assert!(pushed.status.success());
     let logger = FileLogger::new(fx.repo_dir.path(), crate::config::LogKeep::Days(30)).unwrap();
     (fx, logger)
 }
@@ -1583,4 +1596,48 @@ async fn a_conflicted_user_merge_is_not_kept_both_in_both_mode() {
     assert!(std::fs::read_to_string(fx.repo_dir.path().join("notes.md"))
         .unwrap()
         .contains("<<<<<<<"));
+}
+
+#[tokio::test]
+async fn sync_never_pushes_local_state_when_its_ignore_rule_is_gone() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    // Drop every rule that ignores .CommitBook/local/, as a merge could.
+    std::fs::write(root.join(".git/info/exclude"), "").unwrap();
+    std::fs::write(
+        root.join(".CommitBook/.gitignore"),
+        "# emptied by a merge\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".CommitBook/local/auth.toml"),
+        "[auth]\ntoken = \"ghp_secret\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("note.md"), "hello\n").unwrap();
+
+    let outcome = sync_with_resolver(
+        root,
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+
+    let remote = git2::Repository::open_bare(fx.remote_dir.path()).unwrap();
+    let tree = remote
+        .find_reference(&format!("refs/heads/{}", fx.branch))
+        .unwrap()
+        .peel_to_tree()
+        .unwrap();
+    assert!(tree.get_path(Path::new("note.md")).is_ok());
+    assert!(tree.get_path(Path::new(".CommitBook/local")).is_err());
+    // The ignore rule is restored and published for the other devices.
+    let ignore = tree.get_path(Path::new(".CommitBook/.gitignore")).unwrap();
+    let text = remote.find_blob(ignore.id()).unwrap().content().to_vec();
+    assert!(String::from_utf8(text).unwrap().contains("/local/"));
 }
