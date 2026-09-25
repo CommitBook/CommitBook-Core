@@ -266,6 +266,10 @@ async fn sync_review_pauses_without_writing_resolution_or_pushing() {
         crate::state::sync_state::SyncState::load(&LocalConfig::commitbook_dir(root)).unwrap();
     assert!(state.last_attempt_at.is_some());
     assert!(state.last_sync_at.is_none());
+    assert_eq!(state.last_error_stage.as_deref(), Some("review"));
+    let error = state.last_error.unwrap();
+    assert!(error.contains("await review"), "{error}");
+    assert!(error.contains("note.md"), "{error}");
 }
 
 struct StateFailure;

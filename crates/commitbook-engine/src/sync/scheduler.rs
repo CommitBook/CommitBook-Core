@@ -275,7 +275,7 @@ async fn sync_cycle(
                 )
                 .await?
                 {
-                    outcome.manual_conflicts = unresolved.len() as u32;
+                    record_review_pause(&unresolved, &mut outcome, stage, logger);
                     return Ok(outcome);
                 }
                 match resolver {
@@ -403,7 +403,7 @@ async fn sync_cycle(
                     )
                     .await?
                     {
-                        outcome.manual_conflicts = conflicted.len() as u32;
+                        record_review_pause(&conflicted, &mut outcome, stage, logger);
                         return Ok(outcome);
                     }
                     match resolver {
@@ -583,6 +583,26 @@ fn keep_both_notes(
         }
     }
     remaining
+}
+
+/// Sync stopped because conflicts wait for a stored AI proposal to be
+/// reviewed. Record it as the cycle's error (stage `review`) so `state.toml`,
+/// `status`, and the exit code say why nothing was merged or pushed.
+fn record_review_pause(
+    conflicted: &[String],
+    outcome: &mut SyncOutcome,
+    stage: &mut &'static str,
+    logger: &dyn Logger,
+) {
+    *stage = "review";
+    outcome.manual_conflicts = conflicted.len() as u32;
+    let msg = format!(
+        "{} conflict(s) await review of an AI proposal: {}. Accept, edit, or reject them on the web dashboard's Conflicts page; sync resumes after that.",
+        conflicted.len(),
+        conflicted.join(", ")
+    );
+    let _ = logger.warn(&msg);
+    outcome.errors.push(msg);
 }
 
 fn record_resolver_failure(
