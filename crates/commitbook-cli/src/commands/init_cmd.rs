@@ -23,6 +23,7 @@ fn initialize_and_publish(
             "Cannot publish CommitBook metadata while a merge is in progress; resolve or abort the merge, then retry `commitbook init`"
         );
     }
+    commitbook_engine::git::attributes::ensure_filters_supported(repo_root)?;
     let current_branch = repo.current_branch()?;
     let remote_name = match remote_name {
         Some(remote_name) => remote_name.to_string(),

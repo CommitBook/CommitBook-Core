@@ -38,6 +38,25 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
         all_ok = false;
     }
 
+    // 2b. Git filters libgit2 cannot run (git-crypt, Git LFS): sync would
+    //     commit those files unfiltered, so it refuses such a repository.
+    print!("  Git filters... ");
+    match commitbook_engine::git::attributes::unsupported_filters(repo_root) {
+        Ok(filters) if filters.is_empty() => println!("{}", "OK".green().bold()),
+        Ok(filters) => {
+            println!("{}", "UNSUPPORTED".red().bold());
+            for filter in &filters {
+                println!("    {filter}");
+            }
+            println!(
+                "    {}",
+                "Sync refuses to commit here: these filters would be skipped and files pushed unfiltered.".dimmed()
+            );
+            all_ok = false;
+        }
+        Err(_) => println!("{}", "SKIP".dimmed()),
+    }
+
     // 3. Remote, CommitBook requires exactly one remote. Also verify the
     //    name in config matches what's actually configured.
     print!("  Git remote... ");

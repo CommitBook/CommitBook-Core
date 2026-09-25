@@ -245,3 +245,22 @@ fn confirmation_declines_anything_else() {
         assert!(!accepts(answer), "{answer:?} should decline");
     }
 }
+
+#[test]
+fn initialization_refuses_a_repository_with_git_lfs_filters() {
+    let (local, remote) = initialize_repo_with_remote();
+    std::fs::write(
+        local.path().join(".gitattributes"),
+        "*.psd filter=lfs diff=lfs merge=lfs -text\n",
+    )
+    .unwrap();
+
+    let error = initialize_and_publish(local.path(), Some("origin"), Some("Laptop")).unwrap_err();
+    assert!(format!("{error:#}").contains("filter=lfs"), "{error:#}");
+    assert!(!local.path().join(".CommitBook/config.toml").exists());
+    assert!(!tree_contains(
+        remote.path(),
+        "refs/heads/main",
+        ".CommitBook/config.toml"
+    ));
+}

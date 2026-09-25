@@ -425,6 +425,16 @@ git add <resolved-files>
 commitbook sync
 ```
 
+### git-crypt, Git LFS, and other filters
+
+CommitBook commits through libgit2, which cannot run clean/smudge filter
+drivers such as git-crypt or Git LFS. Committing would push those files
+unfiltered (plaintext instead of ciphertext, whole files instead of LFS
+pointers). So `init` and `sync` refuse a repository whose `.gitattributes`,
+`.git/info/attributes`, or `core.attributesFile` sets `filter=<driver>`, and
+`commitbook doctor` lists each one. Remove the filter, or keep that repository
+out of CommitBook.
+
 ### Signed commits
 
 CommitBook signs its commits when `commit.gpgsign = true` is set in your Git

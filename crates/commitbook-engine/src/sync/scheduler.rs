@@ -248,6 +248,7 @@ async fn sync_cycle(
         );
     }
     ensure_no_user_operation(&repo, options)?;
+    crate::git::attributes::ensure_filters_supported(repo_root)?;
     crate::review::cleanup_locked(repo_root, lock)?;
     let mut outcome = SyncOutcome::default();
 

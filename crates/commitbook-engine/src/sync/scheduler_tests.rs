@@ -1641,3 +1641,31 @@ async fn sync_never_pushes_local_state_when_its_ignore_rule_is_gone() {
     let text = remote.find_blob(ignore.id()).unwrap().content().to_vec();
     assert!(String::from_utf8(text).unwrap().contains("/local/"));
 }
+
+#[tokio::test]
+async fn sync_refuses_a_repository_with_a_git_crypt_filter() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    std::fs::write(root.join(".gitattributes"), "secret.md filter=git-crypt\n").unwrap();
+    std::fs::write(root.join("secret.md"), "plaintext api key\n").unwrap();
+    let head = fx.repo.rev_parse("HEAD").unwrap();
+    let remote = remote_branch_oid(&fx);
+
+    let error = sync_with_resolver(
+        root,
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("filter=git-crypt"),
+        "{error:#}"
+    );
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
+    assert_eq!(remote_branch_oid(&fx), remote);
+}
