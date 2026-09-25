@@ -1,0 +1,36 @@
+crates/commitbook-cli/src/commands/log_tests.rs
+  s_acb8881477f1c1::t_984cfcf9eb9c75 55-59,63
+  s_acb8881477f1c1::t_1b032e189dcb04 42-54,60-62,64
+crates/commitbook-cli/src/commands/sync_cmd_tests.rs
+  s_acb8881477f1c1::t_1b032e189dcb04 40-43,50-59,64,68-74
+  s_acb8881477f1c1::t_984cfcf9eb9c75 60-63,65-67
+  s_acb8881477f1c1::t_16423395f784b0 44-49
+crates/commitbook-cli/src/commands/doctor.rs
+  s_acb8881477f1c1::t_868bcf624c74a4 113,115,117-125
+  s_acb8881477f1c1::t_16423395f784b0 458-461
+crates/commitbook-cli/src/commands/sync_cmd.rs
+  s_acb8881477f1c1::t_1db6d4fe158f37 43-60,62-68
+crates/commitbook-cli/src/commands/doctor_tests.rs
+  s_acb8881477f1c1::t_16423395f784b0 1-18,25-40,46-55
+  s_acb8881477f1c1::t_984cfcf9eb9c75 19-24,41-45
+crates/commitbook-cli/src/commands/log.rs
+  s_acb8881477f1c1::t_d43f0a93231431 7
+  s_acb8881477f1c1::t_868bcf624c74a4 21-22,25,37-44
+  s_acb8881477f1c1::t_050c2308244b35 45-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1d6261dabb75ab9d92a5d7ba3628b1f43969dbbf",
+  "prompts": {},
+  "sessions": {
+    "s_acb8881477f1c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d866877b-0c18-4d7a-bf81-6acebb67f32f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
