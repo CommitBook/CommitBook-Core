@@ -16,7 +16,7 @@ use git2::Repository;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 use std::io::Write;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 /// Sign an unsigned commit object's bytes per the repo's git config.
 ///
@@ -108,23 +108,10 @@ fn sign_ssh(config: &git2::Config, unsigned_bytes: &[u8]) -> Result<String> {
         .get_string("gpg.ssh.program")
         .unwrap_or_else(|_| "ssh-keygen".to_string());
 
-    let mut child = Command::new(&program)
-        .args(["-Y", "sign", "-n", "git", "-f", &key_path])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("Failed to spawn {program} for signing"))?;
-    child
-        .stdin
-        .as_mut()
-        .context("ssh-keygen stdin missing")?
-        .write_all(unsigned_bytes)
-        .context("Failed to pipe commit bytes to ssh-keygen")?;
-
-    let output = child
-        .wait_with_output()
-        .context("Failed to wait for ssh-keygen")?;
+    let output = run_signer(
+        Command::new(&program).args(["-Y", "sign", "-n", "git", "-f", &key_path]),
+        unsigned_bytes,
+    )?;
     if !output.status.success() {
         anyhow::bail!(
             "ssh-keygen sign failed: {}",
@@ -142,22 +129,10 @@ fn sign_gpg(config: &git2::Config, unsigned_bytes: &[u8]) -> Result<String> {
         .get_string("gpg.program")
         .unwrap_or_else(|_| "gpg".to_string());
 
-    let mut command = Command::new(&program);
-    command.args(gpg_arguments(signing_key.as_deref()));
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("Failed to spawn {program} for signing"))?;
-    child
-        .stdin
-        .as_mut()
-        .context("gpg stdin missing")?
-        .write_all(unsigned_bytes)
-        .context("Failed to pipe commit bytes to gpg")?;
-
-    let output = child.wait_with_output().context("Failed to wait for gpg")?;
+    let output = run_signer(
+        Command::new(&program).args(gpg_arguments(signing_key.as_deref())),
+        unsigned_bytes,
+    )?;
     if !output.status.success() {
         anyhow::bail!(
             "gpg sign failed: {}",
@@ -166,6 +141,31 @@ fn sign_gpg(config: &git2::Config, unsigned_bytes: &[u8]) -> Result<String> {
     }
     let sig = String::from_utf8(output.stdout).context("gpg produced non-UTF8 sig")?;
     Ok(sig)
+}
+
+/// How long `gpg` or `ssh-keygen` may take to sign. Long enough to type a
+/// passphrase at an interactive pinentry; a signer that waits for input no
+/// one can give (a scheduled run) fails instead of holding the repository
+/// lock forever.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+const SIGN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Pipe the commit bytes to a signing program, bounded by `SIGN_TIMEOUT`.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn run_signer(command: &mut Command, unsigned_bytes: &[u8]) -> Result<std::process::Output> {
+    run_signer_within(command, unsigned_bytes, SIGN_TIMEOUT)
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn run_signer_within(
+    command: &mut Command,
+    unsigned_bytes: &[u8],
+    timeout: std::time::Duration,
+) -> Result<std::process::Output> {
+    crate::process::run_bounded(command, Some(unsigned_bytes), timeout).context(
+        "Commit signing did not finish. A scheduled sync cannot answer a passphrase prompt: \
+         cache the key in gpg-agent or ssh-agent, or set commit.gpgsign=false for this repository",
+    )
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]

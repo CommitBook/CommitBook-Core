@@ -124,6 +124,7 @@ keep = "30d"            # <N>d | forever
 - **No database or ORM.** State is TOML files + directory structure.
 - **Rust edition 2021.** `set_var` requires `unsafe` blocks.
 - Async traits use `#[async_trait]`.
+- Every subprocess spawned during sync (AI CLIs, `gh` probes, `gpg`/`ssh-keygen` signing) goes through `process::run_bounded`, which enforces one deadline covering exit and output draining and kills the process group on timeout. Never call `.output()` or `wait_with_output()` there.
 - Desktop git operations shell out to `git` CLI; mobile builds skip these via `#[cfg(not(any(target_os = "ios", target_os = "android")))]` and reach git through the `CredentialProvider`-based git2 path.
 
 ## .CommitBook/ Directory

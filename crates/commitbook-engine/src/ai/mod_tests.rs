@@ -1,26 +1,5 @@
 use super::*;
 
-#[cfg(unix)]
-#[test]
-fn wait_with_timeout_drains_large_output_without_deadlock() {
-    use std::process::{Command, Stdio};
-    use std::time::Duration;
-
-    // Emit ~200 KB, far past the ~64 KB pipe buffer that would deadlock a
-    // waiter that reads the pipe only after the child exits.
-    let child = Command::new("sh")
-        .arg("-c")
-        .arg("yes 0123456789ABCDEF | head -c 200000")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-
-    let output = wait_with_timeout(child, Duration::from_secs(30)).unwrap();
-    assert!(output.status.success());
-    assert_eq!(output.stdout.len(), 200000);
-}
-
 #[test]
 fn test_clean_message_passthrough() {
     assert_eq!(clean_message("Fix login bug"), "Fix login bug");

@@ -6,6 +6,8 @@ pub mod devices;
 pub mod git;
 pub mod logger;
 pub mod platform;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) mod process;
 pub mod settings;
 pub mod state;
 pub mod sync;

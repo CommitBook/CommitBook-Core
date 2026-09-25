@@ -425,6 +425,16 @@ git add <resolved-files>
 commitbook sync
 ```
 
+### Signed commits
+
+CommitBook signs its commits when `commit.gpgsign = true` is set in your Git
+config, using `gpg` or `ssh-keygen` as Git would. Signing must finish within
+60 seconds. A scheduled sync cannot show a passphrase prompt, so keep the key
+unlocked in `gpg-agent` or `ssh-agent`, or set `commit.gpgsign = false` for
+the notes repository. Every program CommitBook starts (AI CLIs, `gh`, signers)
+has a time limit, so a stuck program fails that sync instead of blocking later
+ones.
+
 ### Push failures
 
 CommitBook commits locally even when the remote is unreachable. When connectivity returns, the next sync pushes. Check logs for details:

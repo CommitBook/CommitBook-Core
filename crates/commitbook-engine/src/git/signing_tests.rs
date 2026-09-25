@@ -54,3 +54,30 @@ fn gpg_arguments_include_explicit_key_when_configured() {
         ]
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_signer_waiting_for_a_passphrase_fails_instead_of_hanging() {
+    // Stands in for gpg blocked on a pinentry that a scheduled run cannot show.
+    let started = std::time::Instant::now();
+    let error = run_signer_within(
+        Command::new("sh").args(["-c", "sleep 60"]),
+        b"tree 0000\n",
+        std::time::Duration::from_millis(200),
+    )
+    .unwrap_err();
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert!(format!("{error:#}").contains("passphrase"), "{error:#}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_signer_receives_the_commit_bytes() {
+    let output = run_signer_within(
+        &mut Command::new("cat"),
+        b"tree 0000\n",
+        std::time::Duration::from_secs(30),
+    )
+    .unwrap();
+    assert_eq!(output.stdout, b"tree 0000\n");
+}

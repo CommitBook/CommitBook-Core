@@ -231,150 +231,15 @@ pub(crate) fn clean_message(raw: &str) -> String {
     msg
 }
 
-/// Wait for a child process with a timeout, draining stdout and stderr on
-/// separate threads so a child that fills the pipe buffer cannot deadlock the
-/// parent (the previous per-provider version read the pipes only after the
-/// child exited, which hung on output larger than the ~64 KB pipe buffer).
-///
-/// All resolver/provider callers run inside `spawn_blocking`, so the blocking
-/// reader threads are fine.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub(crate) fn wait_with_timeout(
-    mut child: std::process::Child,
-    timeout: std::time::Duration,
-) -> Result<std::process::Output> {
-    use std::io::Read;
-
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
-    let out_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(s) = stdout.as_mut() {
-            let _ = s.read_to_end(&mut buf);
-        }
-        buf
-    });
-    let err_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(s) = stderr.as_mut() {
-            let _ = s.read_to_end(&mut buf);
-        }
-        buf
-    });
-
-    let start = std::time::Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    anyhow::bail!("Process timed out after {:?}", timeout);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            Err(e) => anyhow::bail!("Error waiting for process: {}", e),
-        }
-    };
-
-    let stdout = out_handle.join().unwrap_or_default();
-    let stderr = err_handle.join().unwrap_or_default();
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
-}
-
-/// Run a CLI with bounded, concurrent stdin/stdout/stderr transport. Blocks
-/// the calling thread for up to `timeout`; async callers wrap it in
-/// `spawn_blocking`.
+/// Run a CLI with `prompt` on stdin, bounded by `timeout`. Blocks the
+/// calling thread; async callers wrap it in `spawn_blocking`.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn run_with_prompt(
     command: &mut std::process::Command,
     prompt: &str,
     timeout: std::time::Duration,
 ) -> Result<std::process::Output> {
-    use std::io::{Read, Write};
-    use std::process::Stdio;
-    let start = std::time::Instant::now();
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn()?;
-    let mut stdin = child.stdin.take().expect("piped stdin");
-    let mut stdout = child.stdout.take().expect("piped stdout");
-    let mut stderr = child.stderr.take().expect("piped stderr");
-    let bytes = prompt.as_bytes().to_vec();
-    let writer = std::thread::spawn(move || stdin.write_all(&bytes));
-    let out = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stdout.read_to_end(&mut bytes).map(|_| bytes)
-    });
-    let err = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stderr.read_to_end(&mut bytes).map(|_| bytes)
-    });
-    let result = (|| -> Result<std::process::ExitStatus> {
-        let mut status = None;
-        loop {
-            if status.is_none() {
-                status = child.try_wait()?;
-            }
-            if let Some(status) = status {
-                if writer.is_finished() && out.is_finished() && err.is_finished() {
-                    return Ok(status);
-                }
-            }
-            if start.elapsed() >= timeout {
-                anyhow::bail!("Process timed out after {timeout:?}");
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-    })();
-    let status = match result {
-        Ok(status) => status,
-        Err(error) => {
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
-    };
-    let stdout = out
-        .join()
-        .map_err(|_| anyhow::anyhow!("stdout reader panicked"))??;
-    let stderr = err
-        .join()
-        .map_err(|_| anyhow::anyhow!("stderr reader panicked"))??;
-    // The child has exited by now, so a broken pipe only means it stopped
-    // reading before the whole prompt was delivered. Its exit status and
-    // output decide success; any other write failure is still an error.
-    match writer
-        .join()
-        .map_err(|_| anyhow::anyhow!("stdin writer panicked"))?
-    {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
-        Err(error) => {
-            return Err(anyhow::Error::new(error).context("Failed to write prompt to CLI stdin"))
-        }
-    }
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
+    crate::process::run_bounded(command, Some(prompt.as_bytes()), timeout)
 }
 
 #[cfg(test)]
