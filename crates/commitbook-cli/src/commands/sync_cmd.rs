@@ -40,8 +40,32 @@ fn log_skipped_sync(repo_root: &Path) {
     }
 }
 
+/// Record a config that fails to load, before any logger settings are known:
+/// in the daily log (default retention) and as the last error in
+/// `state.toml`, so `commitbook log` and `status` explain a failing
+/// scheduled sync. Best effort: never masks the load error.
+fn record_config_failure(repo_root: &Path, error: &anyhow::Error) {
+    let message = format!("Sync failed: cannot load .CommitBook/config.toml: {error:#}");
+    if let Ok(logger) = FileLogger::new(repo_root, Default::default()) {
+        let _ = logger.error(&message);
+    }
+    let cb_dir = LocalConfig::commitbook_dir(repo_root);
+    if let Ok(mut state) = commitbook_engine::state::sync_state::SyncState::load(&cb_dir) {
+        state.last_attempt_at = Some(commitbook_engine::utils::datetime::now_iso());
+        state.last_error = Some(message);
+        state.last_error_stage = Some("config".to_string());
+        let _ = state.save(&cb_dir);
+    }
+}
+
 async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
-    let config = LocalConfig::load(repo_root)?;
+    let config = match LocalConfig::load(repo_root) {
+        Ok(config) => config,
+        Err(error) => {
+            record_config_failure(repo_root, &error);
+            return Err(error);
+        }
+    };
     let logger = FileLogger::new(repo_root, config.logs.keep)?;
     let repo = GitRepo::open(repo_root)?;
 

@@ -110,12 +110,19 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
         all_ok = false;
     }
 
-    // 5. config.toml.
+    // 5. config.toml: it must parse, or every sync stops before it starts.
     print!("  config.toml... ");
-    if LocalConfig::exists(repo_root) {
-        println!("{}", "OK".green().bold());
-    } else {
+    if !LocalConfig::exists(repo_root) {
         println!("{}", "MISSING".yellow().bold());
+    } else {
+        match LocalConfig::load(repo_root) {
+            Ok(_) => println!("{}", "OK".green().bold()),
+            Err(error) => {
+                println!("{}", "INVALID".red().bold());
+                println!("    {}", format!("{error:#}").dimmed());
+                all_ok = false;
+            }
+        }
     }
 
     // 6. Optional token-backed auth. Normal desktop sync uses the user's
@@ -448,3 +455,7 @@ fn fix_plist_binary_path(repo_root: &Path) -> bool {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "doctor_tests.rs"]
+mod tests;

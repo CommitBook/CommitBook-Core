@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use commitbook_engine::config::LocalConfig;
+use commitbook_engine::logger::FileLogger;
 
 pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, json: bool, tail: bool) -> Result<()> {
     let logs_dir = LocalConfig::logs_dir(repo_root);
@@ -17,45 +18,11 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, json: bool, tail: boo
         return Ok(());
     }
 
-    // Collect log files, sorted newest first.
-    let mut log_files: Vec<_> = std::fs::read_dir(&logs_dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
-        .collect();
-
-    log_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
-
-    if log_files.is_empty() {
-        println!("{}", "No log entries found.".dimmed());
-        if tail {
-            follow_today(repo_root, json)?;
-        }
-        return Ok(());
-    }
-
-    // Print the last N entries oldest-first so the most recent appears at the
-    // bottom of the terminal (matches `tail` conventions).
-    let mut collected: Vec<String> = Vec::new();
-    for entry in &log_files {
-        if collected.len() >= lines {
-            break;
-        }
-        let content = std::fs::read_to_string(entry.path())?;
-        for line in content.lines().rev() {
-            if collected.len() >= lines {
-                break;
-            }
-            if line.trim().is_empty() {
-                continue;
-            }
-            collected.push(line.to_string());
-        }
-    }
-
-    if collected.is_empty() {
+    let recent = recent_lines(repo_root, lines)?;
+    if recent.is_empty() {
         println!("{}", "No log entries found.".dimmed());
     } else {
-        for line in collected.iter().rev() {
+        for line in &recent {
             print_line(line, json);
         }
     }
@@ -65,6 +32,16 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, lines: usize, json: bool, tail: boo
     }
 
     Ok(())
+}
+
+/// The last `lines` activity-log entries, oldest first so the newest ends up
+/// at the bottom of the terminal. Only the dated `YYYY-MM-DD.log` files are
+/// read: `logs/` also holds the launchd stdout and stderr captures, which are
+/// not activity entries.
+fn recent_lines(repo_root: &Path, lines: usize) -> Result<Vec<String>> {
+    let mut entries = FileLogger::read_only(repo_root).read_entries(lines, 0)?;
+    entries.reverse();
+    Ok(entries)
 }
 
 fn print_line(line: &str, json: bool) {

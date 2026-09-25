@@ -37,3 +37,38 @@ fn contended_lock_logs_a_skipped_sync() {
         "{logs}"
     );
 }
+
+#[tokio::test]
+async fn unloadable_config_is_logged_and_recorded_as_the_last_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    std::fs::create_dir_all(tmp.path().join(".CommitBook/local")).unwrap();
+    std::fs::write(tmp.path().join(".CommitBook/config.toml"), "not = [valid").unwrap();
+
+    let error = super::run_sync(tmp.path()).await.unwrap_err();
+    assert!(format!("{error:#}").contains("config"), "{error:#}");
+
+    let logs = std::fs::read_dir(tmp.path().join(".CommitBook/local/logs"))
+        .unwrap()
+        .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect::<String>();
+    assert!(
+        logs.contains("cannot load .CommitBook/config.toml"),
+        "{logs}"
+    );
+
+    let state =
+        commitbook_engine::state::sync_state::SyncState::load(&tmp.path().join(".CommitBook"))
+            .unwrap();
+    assert_eq!(state.last_error_stage.as_deref(), Some("config"));
+    assert!(state.last_attempt_at.is_some());
+    assert!(state
+        .last_error
+        .unwrap()
+        .contains("cannot load .CommitBook/config.toml"));
+}
