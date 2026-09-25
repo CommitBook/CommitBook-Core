@@ -1225,26 +1225,33 @@ async fn ai_resolution_then_finalize_failure_is_still_labeled_merge() {
 }
 
 #[tokio::test]
-async fn malformed_state_is_preserved_before_mutation_and_commit_failure_is_recorded() {
+async fn malformed_state_is_quarantined_and_commit_failure_is_recorded() {
     let (fx, logger) = setup_with_state();
     let root = fx.repo_dir.path();
     let path = cb_dir_of(&fx).join("local/state.toml");
     std::fs::write(&path, "broken = [").unwrap();
     let head = fx.repo.rev_parse("HEAD").unwrap();
     std::fs::write(root.join("note.md"), "new text").unwrap();
-    assert!(sync_with_resolver(
+    // A corrupt state file no longer stops sync; its content is kept aside.
+    let outcome = sync_with_resolver(
         root,
         &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
-        None
+        None,
     )
     .await
-    .is_err());
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "broken = [");
-    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
-    std::fs::remove_file(&path).unwrap();
+    .unwrap();
+    assert!(outcome.committed, "{outcome:?}");
+    assert_ne!(fx.repo.rev_parse("HEAD").unwrap(), head);
+    assert_eq!(
+        std::fs::read_to_string(cb_dir_of(&fx).join("local/state.toml.corrupt")).unwrap(),
+        "broken = ["
+    );
+    let fresh = SyncState::load(&cb_dir_of(&fx)).unwrap();
+    assert!(fresh.last_sync_at.is_some());
+    std::fs::write(root.join("note.md"), "newer text").unwrap();
     // Unsupported signing format fails before invoking any external signing program.
     let raw = git2::Repository::open(root).unwrap();
     let mut config = raw.config().unwrap();

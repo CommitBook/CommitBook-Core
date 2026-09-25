@@ -170,8 +170,15 @@ pub async fn sync_with_resolver_locked(
     // restore it every cycle. `stage_all` also refuses `.CommitBook/local/`.
     LocalConfig::ensure_gitignore(repo_root)?;
     let cb_dir = LocalConfig::commitbook_dir(repo_root);
-    // Never replace malformed state with defaults; validate before mutations.
-    let mut state = SyncState::load(&cb_dir)?;
+    // A state.toml that does not parse is moved aside, never overwritten,
+    // so its content survives and sync keeps running.
+    let (mut state, quarantined) = SyncState::load_or_quarantine(&cb_dir)?;
+    if let Some(moved) = &quarantined {
+        let _ = logger.warn(&format!(
+            "state.toml could not be read; moved it to {} and started fresh sync state",
+            moved.display()
+        ));
+    }
     state.last_attempt_at = Some(crate::utils::datetime::now_iso());
     state.save(&cb_dir)?;
     let mut stage = "inspection";

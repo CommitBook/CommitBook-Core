@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PendingInitPush {
@@ -48,6 +48,38 @@ impl SyncState {
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         toml::from_str(&content).with_context(|| "Failed to parse state.toml")
+    }
+
+    /// `load`, but a `state.toml` that does not parse is moved aside to
+    /// `state.toml.corrupt` (or `state.toml.corrupt-<n>`) and replaced by
+    /// defaults, returning where it went. The file only holds timestamps, the
+    /// last error, and a pending init push that the next push publishes
+    /// anyway, so one bad write must not stop every future sync. Its content
+    /// is kept for inspection, never overwritten.
+    pub fn load_or_quarantine(commitbook_dir: &Path) -> Result<(Self, Option<PathBuf>)> {
+        let path = commitbook_dir.join("local").join("state.toml");
+        if !path.exists() {
+            return Ok((Self::default(), None));
+        }
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        if let Ok(state) = toml::from_str(&content) {
+            return Ok((state, None));
+        }
+        let mut destination = path.with_file_name("state.toml.corrupt");
+        let mut n = 1;
+        while destination.exists() {
+            destination = path.with_file_name(format!("state.toml.corrupt-{n}"));
+            n += 1;
+        }
+        std::fs::rename(&path, &destination).with_context(|| {
+            format!(
+                "Failed to move unreadable {} to {}",
+                path.display(),
+                destination.display()
+            )
+        })?;
+        Ok((Self::default(), Some(destination)))
     }
 
     pub fn save(&self, commitbook_dir: &Path) -> Result<()> {
