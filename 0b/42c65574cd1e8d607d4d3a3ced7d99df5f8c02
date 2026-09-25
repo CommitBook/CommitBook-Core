@@ -1,0 +1,51 @@
+crates/commitbook-engine/src/ai/cursor.rs
+  s_acb8881477f1c1::t_d1d9818fd99f4d 87
+  s_acb8881477f1c1::t_9762aafa5e8b3c 76
+crates/commitbook-engine/src/ai/claude.rs
+  s_acb8881477f1c1::t_d1d9818fd99f4d 112
+  s_acb8881477f1c1::t_9762aafa5e8b3c 97
+crates/commitbook-engine/src/ai/gemini.rs
+  s_acb8881477f1c1::t_d1d9818fd99f4d 96
+  s_acb8881477f1c1::t_9762aafa5e8b3c 85
+crates/commitbook-engine/src/ai/copilot.rs
+  s_acb8881477f1c1::t_9762aafa5e8b3c 152
+  s_acb8881477f1c1::t_d1d9818fd99f4d 167
+crates/commitbook-engine/src/ai/conflict.rs
+  s_acb8881477f1c1::t_d1d9818fd99f4d 100-101,125-131,139-157
+crates/commitbook-engine/src/process_tests.rs
+  s_acb8881477f1c1::t_4689aa203da574 75-88,95-96
+  s_acb8881477f1c1::t_f0e1935a738232 89-94
+crates/commitbook-engine/src/ai/copilot_tests.rs
+  s_acb8881477f1c1::t_4689aa203da574 69-81
+crates/commitbook-engine/src/ai/conflict_tests.rs
+  s_acb8881477f1c1::t_4689aa203da574 93,100,110,121-174
+  s_acb8881477f1c1::t_f0e1935a738232 117-118
+crates/commitbook-engine/src/ai/codex.rs
+  s_acb8881477f1c1::t_f0e1935a738232 121-125
+  s_acb8881477f1c1::t_9762aafa5e8b3c 41-43,46-51
+  s_acb8881477f1c1::t_d1d9818fd99f4d 86,126
+crates/commitbook-engine/src/ai/mod_tests.rs
+  s_acb8881477f1c1::t_f0e1935a738232 291-293
+  s_acb8881477f1c1::t_4689aa203da574 280-290,294-302
+  s_acb8881477f1c1::t_380ae5268527aa 279
+crates/commitbook-engine/src/ai/mod.rs
+  s_acb8881477f1c1::t_9762aafa5e8b3c 245-266
+crates/commitbook-engine/src/process.rs
+  s_acb8881477f1c1::t_9762aafa5e8b3c 21-22,28-43,117,124-126,133-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0b42c65574cd1e8d607d4d3a3ced7d99df5f8c02",
+  "prompts": {},
+  "sessions": {
+    "s_acb8881477f1c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d866877b-0c18-4d7a-bf81-6acebb67f32f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
