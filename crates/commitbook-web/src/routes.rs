@@ -14,6 +14,7 @@ use commitbook_engine::ai::ProviderChain;
 use commitbook_engine::config::local::LocalConfig;
 use commitbook_engine::config::{Agent, CommitAgent, CommitMode, ConflictMode};
 use commitbook_engine::cron::{self, SchedulerAdapter, SystemScheduler};
+use commitbook_engine::git::remote::{remote_identity, Provider, RemoteIdentity};
 use commitbook_engine::inspection::RepositoryStatus;
 use commitbook_engine::logger::FileLogger;
 use commitbook_engine::settings::{self, SchedulerContext, SettingsUpdate, SettingsUpdateError};
@@ -129,13 +130,23 @@ struct LogsTemplate {}
 #[derive(Template)]
 #[template(path = "config.html")]
 struct ConfigTemplate {
+    name: String,
+    remote: String,
+    /// Provider, owner and repository parsed from the remote's URL; never the
+    /// URL itself, which can embed credentials.
+    remote_location: String,
     schedule: String,
     branch: String,
+    checked_out_branch: String,
     log_keep: String,
     commit_modes: Vec<Choice>,
     commit_agents: Vec<Choice>,
+    /// Only `ai` commit mode asks the commit agent.
+    commit_agent_used: bool,
     conflict_modes: Vec<Choice>,
     conflict_agents: Vec<Choice>,
+    /// Only the `ai` and `review` conflict modes ask the conflict agent.
+    conflict_agent_used: bool,
 }
 
 /// One `<option>` of a settings `<select>`.
@@ -184,6 +195,22 @@ fn escape_html(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// `GitHub owner/repo` for the config page; a local path remote shows its
+/// parent folder and name.
+fn remote_location(identity: &RemoteIdentity) -> String {
+    let provider = match identity.provider {
+        Provider::Github => "GitHub",
+        Provider::Gitlab => "GitLab",
+        Provider::Codeberg => "Codeberg",
+        Provider::GenericGit => "Git",
+    };
+    if identity.owner.is_empty() {
+        format!("{provider} {}", identity.repo)
+    } else {
+        format!("{provider} {}/{}", identity.owner, identity.repo)
+    }
 }
 
 fn status_lines(status: &StatusResponse) -> Vec<String> {
@@ -333,18 +360,40 @@ pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoRespons
         }
         Err(_) => return Html("Configuration inspection failed".into()),
     };
+    let path = state.repo_path.clone();
+    let remote = config.git.remote.clone();
+    let (remote_location, checked_out_branch) = blocking(move || {
+        let location = remote_identity(&path, &remote)
+            .map(|identity| remote_location(&identity))
+            .unwrap_or_else(|_| "unknown".into());
+        let branch = commitbook_engine::git::GitRepo::open(&path)
+            .and_then(|repo| repo.current_branch())
+            .unwrap_or_else(|_| "unknown".into());
+        (location, branch)
+    })
+    .await
+    .unwrap_or_else(|_| ("unknown".into(), "unknown".into()));
     let tpl = ConfigTemplate {
+        name: config.commitbook.name,
+        remote: config.git.remote,
+        remote_location,
         schedule: config.sync.schedule,
         branch: config.git.branch,
+        checked_out_branch,
         log_keep: config.logs.keep.to_string(),
         commit_modes: choices(CommitMode::ALL, config.commit.mode, CommitMode::as_str),
         commit_agents: choices(CommitAgent::ALL, config.commit.agent, CommitAgent::as_str),
+        commit_agent_used: config.commit.mode == CommitMode::Ai,
         conflict_modes: choices(
             ConflictMode::ALL,
             config.conflicts.mode,
             ConflictMode::as_str,
         ),
         conflict_agents: choices(Agent::ALL, config.conflicts.agent, Agent::as_str),
+        conflict_agent_used: matches!(
+            config.conflicts.mode,
+            ConflictMode::Ai | ConflictMode::Review
+        ),
     };
     Html(
         tpl.render()
@@ -446,6 +495,7 @@ pub async fn api_config(State(state): State<Arc<AppState>>, request: Request) ->
         }
     };
     let settings_update = SettingsUpdate {
+        name: update.name,
         schedule: update.schedule,
         branch: update.branch,
         commit_mode: update.commit_mode,

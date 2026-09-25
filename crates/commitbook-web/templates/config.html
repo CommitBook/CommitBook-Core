@@ -8,6 +8,15 @@
     <div id="config-flash"></div>
     <form hx-post="/api/config" hx-target="#config-flash" hx-swap="innerHTML">
         <div class="form-row">
+            <label for="name">Name</label>
+            <input type="text" name="name" id="name" value="{{ name }}" maxlength="64" required>
+        </div>
+        <div class="form-row">
+            <label>Remote</label>
+            <span id="remote">{{ remote }} ({{ remote_location }})</span>
+        </div>
+        <p id="remote-help">Chosen at <code>commitbook init</code>. Every device pushes and pulls through this remote.</p>
+        <div class="form-row">
             <label for="schedule">Schedule</label>
             <select name="schedule" id="schedule">
                 {% if schedule != "5m" && schedule != "15m" && schedule != "30m" && schedule != "1h" && schedule != "2h" && schedule != "4h" && schedule != "daily" %}
@@ -24,8 +33,9 @@
         </div>
         <div class="form-row">
             <label for="branch">Branch</label>
-            <input type="text" name="branch" id="branch" value="{{ branch }}">
+            <input type="text" name="branch" id="branch" value="{{ branch }}" aria-describedby="branch-help">
         </div>
+        <p id="branch-help">Checked out: <code>{{ checked_out_branch }}</code>. Sync only runs on the configured branch, so check out a new branch before saving it here.</p>
         <div class="form-row">
             <label for="commit_mode">Commit messages</label>
             <select name="commit_mode" id="commit_mode" aria-describedby="commit-help">
@@ -36,7 +46,7 @@
         </div>
         <div class="form-row">
             <label for="commit_agent">Commit agent</label>
-            <select name="commit_agent" id="commit_agent">
+            <select name="commit_agent" id="commit_agent" {% if !commit_agent_used %}disabled{% endif %}>
                 {% for choice in commit_agents %}
                 <option value="{{ choice.value }}" {% if choice.selected %}selected{% endif %}>{{ choice.value }}</option>
                 {% endfor %}
@@ -53,7 +63,7 @@
         </div>
         <div class="form-row">
             <label for="conflict_agent">Conflict agent</label>
-            <select name="conflict_agent" id="conflict_agent">
+            <select name="conflict_agent" id="conflict_agent" {% if !conflict_agent_used %}disabled{% endif %}>
                 {% for choice in conflict_agents %}
                 <option value="{{ choice.value }}" {% if choice.selected %}selected{% endif %}>{{ choice.value }}</option>
                 {% endfor %}
@@ -70,4 +80,18 @@
         </div>
     </form>
 </div>
+<script>
+// An agent select only matters in the modes that ask the agent. A disabled
+// select is not submitted, so saving keeps its stored value.
+for (const [modeId, agentId, usedBy] of [
+    ['commit_mode', 'commit_agent', ['ai']],
+    ['conflict_mode', 'conflict_agent', ['ai', 'review']],
+]) {
+    const mode = document.getElementById(modeId);
+    const agent = document.getElementById(agentId);
+    const sync = () => { agent.disabled = !usedBy.includes(mode.value); };
+    mode.addEventListener('change', sync);
+    sync();
+}
+</script>
 {% endblock %}

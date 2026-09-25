@@ -738,3 +738,84 @@ async fn changes_api_lists_pending_snapshot_files() {
         .any(|e| e.path == "new.json" && e.change == "added"));
     assert!(preview.policy.contains("non-Markdown"));
 }
+
+#[tokio::test]
+async fn config_page_shows_name_remote_branch_and_unused_agents_disabled() {
+    let (tmp, app) = setup_test_app();
+    run_git(
+        tmp.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/owner/notes.git",
+        ],
+    );
+    run_git(tmp.path(), &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let page = get_html(app.clone(), "/config").await;
+    assert!(
+        page.contains(r#"name="name" id="name" value="notes""#),
+        "{page}"
+    );
+    assert!(page.contains("origin (GitHub owner/notes)"), "{page}");
+    assert!(page.contains("Checked out: <code>main</code>"), "{page}");
+    // Defaults are timestamp commits and `both` conflicts: neither asks an agent.
+    assert!(page.contains(r#"id="commit_agent" disabled"#), "{page}");
+    assert!(page.contains(r#"id="conflict_agent" disabled"#), "{page}");
+
+    post_json(
+        app.clone(),
+        "/api/config",
+        serde_json::json!({"commit_mode": "ai", "conflict_mode": "review"}),
+    )
+    .await;
+    let page = get_html(app, "/config").await;
+    assert!(!page.contains(r#"id="commit_agent" disabled"#), "{page}");
+    assert!(!page.contains(r#"id="conflict_agent" disabled"#), "{page}");
+}
+
+#[tokio::test]
+async fn config_name_saves_from_json_and_form() {
+    for (content_type, body) in [
+        ("application/json", r#"{"name":"Work Notes"}"#),
+        (
+            "application/x-www-form-urlencoded",
+            "name=Work+Notes&branch=main",
+        ),
+    ] {
+        let (tmp, app) = setup_test_app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/config")
+                    .header("content-type", content_type)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{body}");
+        let config = LocalConfig::load(tmp.path()).unwrap();
+        assert_eq!(config.commitbook.name, "Work Notes", "{body}");
+    }
+}
+
+#[tokio::test]
+async fn config_rejects_empty_name_and_unchecked_out_branch_without_saving() {
+    for update in [
+        serde_json::json!({"name": "   "}),
+        serde_json::json!({"branch": "not-checked-out"}),
+    ] {
+        let (tmp, app) = setup_test_app();
+        let before = std::fs::read(LocalConfig::config_path(tmp.path())).unwrap();
+        let (status, body) = post_json(app, "/api/config", update.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{update}: {body}");
+        assert_eq!(
+            std::fs::read(LocalConfig::config_path(tmp.path())).unwrap(),
+            before,
+            "{update}"
+        );
+    }
+}

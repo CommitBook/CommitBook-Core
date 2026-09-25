@@ -48,6 +48,7 @@ pub struct LogsQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigUpdate {
+    pub name: Option<String>,
     pub schedule: Option<String>,
     pub branch: Option<String>,
     pub commit_mode: Option<commitbook_engine::config::CommitMode>,

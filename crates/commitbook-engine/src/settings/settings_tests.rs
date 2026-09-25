@@ -159,12 +159,89 @@ fn invalid_branch_is_rejected_before_save() {
         before
     );
 
+    git2::Repository::open(tmp.path())
+        .unwrap()
+        .set_head("refs/heads/notes/main")
+        .unwrap();
     let update = SettingsUpdate {
         branch: Some("notes/main".to_string()),
         ..Default::default()
     };
     let outcome = update_settings(tmp.path(), &update, &context(&fake)).unwrap();
     assert_eq!(outcome.config.git.branch, "notes/main");
+}
+
+#[test]
+fn branch_change_requires_the_branch_to_be_checked_out() {
+    let tmp = init_repo();
+    let repo = git2::Repository::open(tmp.path()).unwrap();
+    repo.set_head("refs/heads/drafts").unwrap();
+    let fake = FakeScheduler::stopped();
+    let before = fs::read(LocalConfig::config_path(tmp.path())).unwrap();
+
+    let update = SettingsUpdate {
+        branch: Some("notes".to_string()),
+        ..Default::default()
+    };
+    let error = update_settings(tmp.path(), &update, &context(&fake)).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("Check out `notes` first"),
+        "{error:#}"
+    );
+    assert_eq!(
+        fs::read(LocalConfig::config_path(tmp.path())).unwrap(),
+        before
+    );
+
+    // Resubmitting the configured branch is not a change, so a form that always
+    // sends the branch still saves while another branch is checked out.
+    let update = SettingsUpdate {
+        branch: Some("main".to_string()),
+        log_keep: Some(LogKeep::Forever),
+        ..Default::default()
+    };
+    let outcome = update_settings(tmp.path(), &update, &context(&fake)).unwrap();
+    assert_eq!(outcome.config.git.branch, "main");
+    assert_eq!(outcome.config.logs.keep, LogKeep::Forever);
+}
+
+#[test]
+fn name_is_trimmed_saved_and_keeps_config_comments() {
+    let tmp = init_repo();
+    let fake = FakeScheduler::stopped();
+    let update = SettingsUpdate {
+        name: Some("  Work Notes  ".to_string()),
+        ..Default::default()
+    };
+    let outcome = update_settings(tmp.path(), &update, &context(&fake)).unwrap();
+    assert_eq!(outcome.config.commitbook.name, "Work Notes");
+    assert_eq!(
+        LocalConfig::load(tmp.path()).unwrap().commitbook.name,
+        "Work Notes"
+    );
+    let text = fs::read_to_string(LocalConfig::config_path(tmp.path())).unwrap();
+    assert!(text.contains("# display name"), "{text}");
+}
+
+#[test]
+fn invalid_name_is_rejected_before_save() {
+    let tmp = init_repo();
+    let fake = FakeScheduler::stopped();
+    let before = fs::read(LocalConfig::config_path(tmp.path())).unwrap();
+    for name in ["", "   ", "line\nbreak", &"x".repeat(65)] {
+        let update = SettingsUpdate {
+            name: Some(name.to_string()),
+            ..Default::default()
+        };
+        assert!(
+            update_settings(tmp.path(), &update, &context(&fake)).is_err(),
+            "name {name:?} should be rejected"
+        );
+    }
+    assert_eq!(
+        fs::read(LocalConfig::config_path(tmp.path())).unwrap(),
+        before
+    );
 }
 
 #[test]

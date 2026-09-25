@@ -208,6 +208,11 @@ agent = "claude"              # claude | codex | copilot | gemini | cursor (used
 keep = "30d"                  # <N>d (e.g. 7d, 30d, 90d) | forever
 ```
 
+The web Config page edits every setting except the remote, which is chosen at
+`commitbook init` and shown read-only with its provider, owner, and repository.
+A new branch is accepted only once it is checked out, because sync refuses to
+run on any other branch.
+
 CommitBook follows ordinary Git staging and ignore behavior. Every dirty
 tracked or non-ignored file is eligible, including hidden files, non-Markdown
 files, staged changes, and deletions. Sync always pushes after a successful

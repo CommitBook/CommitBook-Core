@@ -11,11 +11,16 @@ use std::path::{Path, PathBuf};
 
 use crate::config::{Agent, CommitAgent, CommitMode, ConflictMode, LocalConfig, LogKeep};
 use crate::cron::{self, SchedulerAdapter};
+use crate::git::GitRepo;
 use crate::state::RepoLock;
+
+/// Longest accepted `[commitbook] name`, matching device names.
+const MAX_NAME_LEN: usize = 64;
 
 /// Fields a user interface may change. `None` leaves the field untouched.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SettingsUpdate {
+    pub name: Option<String>,
     pub schedule: Option<String>,
     pub branch: Option<String>,
     pub commit_mode: Option<CommitMode>,
@@ -129,6 +134,30 @@ fn validate_branch(name: &str) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
+fn validate_name(name: &str) -> Result<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("Name must not be empty");
+    }
+    if name.chars().any(char::is_control) {
+        bail!("Name must not contain control characters");
+    }
+    if name.chars().count() > MAX_NAME_LEN {
+        bail!("Name must be at most {MAX_NAME_LEN} characters");
+    }
+    Ok(name.to_string())
+}
+
+/// Sync refuses to run on any branch but the configured one, so a new
+/// branch is accepted only once it is checked out.
+fn ensure_checked_out(repo_root: &Path, branch: &str) -> Result<()> {
+    let checked_out = GitRepo::open(repo_root)?.current_branch()?;
+    if checked_out != branch {
+        bail!("Check out `{branch}` first: CommitBook syncs the checked-out branch, which is `{checked_out}`");
+    }
+    Ok(())
+}
+
 /// Apply `update` under the repository lock.
 pub fn update_settings(
     repo_root: &Path,
@@ -151,6 +180,11 @@ pub fn update_settings_with_lock(
     let mut new = old.clone();
     let mut changed = false;
 
+    if let Some(name) = &update.name {
+        let name = validate_name(name)?;
+        changed |= new.commitbook.name != name;
+        new.commitbook.name = name;
+    }
     if let Some(schedule) = &update.schedule {
         let schedule = normalize_schedule(schedule)?;
         changed |= new.sync.schedule != schedule;
@@ -158,7 +192,10 @@ pub fn update_settings_with_lock(
     }
     if let Some(branch) = &update.branch {
         let branch = validate_branch(branch)?;
-        changed |= new.git.branch != branch;
+        if new.git.branch != branch {
+            ensure_checked_out(repo_root, &branch)?;
+            changed = true;
+        }
         new.git.branch = branch;
     }
     if let Some(mode) = update.commit_mode {
