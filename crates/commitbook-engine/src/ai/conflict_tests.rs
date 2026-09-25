@@ -90,14 +90,14 @@ fn build_resolve_prompt_includes_path_and_structured_sides() {
 #[test]
 fn finalize_resolved_text_accepts_setext_heading_underline() {
     let raw = "Title\n=======\n\nbody text";
-    let resolved = finalize_resolved_text(raw, "test CLI").unwrap();
+    let resolved = finalize_resolved_text(raw, &text_conflict("a", "b"), "test CLI").unwrap();
     assert_eq!(resolved, ConflictResolution::WriteContent(raw.to_string()));
 }
 
 #[test]
 fn finalize_resolved_text_strips_outer_fence() {
     let raw = "```markdown\n# Title\nbody\n```";
-    let resolved = finalize_resolved_text(raw, "test CLI").unwrap();
+    let resolved = finalize_resolved_text(raw, &text_conflict("a", "b"), "test CLI").unwrap();
     assert_eq!(
         resolved,
         ConflictResolution::WriteContent("# Title\nbody".to_string())
@@ -107,13 +107,68 @@ fn finalize_resolved_text_strips_outer_fence() {
 #[test]
 fn finalize_resolved_text_rejects_real_conflict_markers() {
     let raw = "intro\n<<<<<<< ours\nleft\n=======\nright\n>>>>>>> theirs\n";
-    let err = finalize_resolved_text(raw, "test CLI").unwrap_err();
+    let err = finalize_resolved_text(raw, &text_conflict("a", "b"), "test CLI").unwrap_err();
     assert!(err.to_string().contains("left conflict markers"));
     assert!(err.to_string().contains("test CLI"));
 }
 
 #[test]
 fn finalize_resolved_text_rejects_empty_output() {
-    let err = finalize_resolved_text("  \n```\n\n```\n", "test CLI").unwrap_err();
+    let err = finalize_resolved_text("  \n```\n\n```\n", &text_conflict("a", "b"), "test CLI")
+        .unwrap_err();
     assert!(err.to_string().contains("Empty resolution from test CLI"));
+}
+
+fn text_conflict(local: &str, remote: &str) -> GitConflict {
+    let side = |content: &str| crate::git::ConflictSide {
+        oid: git2::Oid::ZERO_SHA1,
+        mode: 0o100644,
+        content: content.as_bytes().to_vec(),
+    };
+    GitConflict {
+        path: "note.md".to_string(),
+        ancestor: Some(side("base\n")),
+        local: Some(side(local)),
+        remote: Some(side(remote)),
+    }
+}
+
+fn written(resolution: ConflictResolution) -> String {
+    match resolution {
+        ConflictResolution::WriteContent(content) => content,
+        other => panic!("unexpected resolution: {other:?}"),
+    }
+}
+
+#[test]
+fn finalize_resolved_text_keeps_the_final_line_break_of_the_sides() {
+    let conflict = text_conflict("local\n", "remote\n");
+    // CLIs print trailing blank lines or none at all.
+    for raw in ["merged", "merged\n", "merged\n\n\n", "```\nmerged\n```\n"] {
+        let content = written(finalize_resolved_text(raw, &conflict, "test CLI").unwrap());
+        assert_eq!(content, "merged\n", "{raw:?}");
+    }
+}
+
+#[test]
+fn finalize_resolved_text_uses_the_sides_line_break_style() {
+    let crlf = text_conflict("a\r\nlocal\r\n", "a\r\nremote\r\n");
+    let content = written(finalize_resolved_text("a\r\nmerged\r\n", &crlf, "test CLI").unwrap());
+    assert_eq!(content, "a\r\nmerged\r\n");
+
+    let none = text_conflict("local", "remote");
+    let content = written(finalize_resolved_text("merged\n", &none, "test CLI").unwrap());
+    assert_eq!(content, "merged");
+
+    // Either side ending with a line break is enough.
+    let one = text_conflict("local", "remote\n");
+    let content = written(finalize_resolved_text("merged", &one, "test CLI").unwrap());
+    assert_eq!(content, "merged\n");
+}
+
+#[test]
+fn finalize_resolved_text_keeps_indentation_of_the_first_line() {
+    let conflict = text_conflict("    code\n", "    other\n");
+    let content = written(finalize_resolved_text("\n    code\n", &conflict, "test CLI").unwrap());
+    assert_eq!(content, "    code\n");
 }

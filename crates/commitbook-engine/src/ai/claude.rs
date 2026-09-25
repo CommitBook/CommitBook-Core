@@ -94,7 +94,7 @@ impl ConflictResolver for ClaudeProvider {
         let prompt = build_resolve_prompt(conflict)?;
         let repo_path = repo_path.to_path_buf();
         let output = tokio::task::spawn_blocking(move || {
-            super::run_with_prompt(
+            super::run_with_full_prompt(
                 Command::new("claude").arg("-p").current_dir(&repo_path),
                 &prompt,
                 CLAUDE_RESOLVE_TIMEOUT,
@@ -109,7 +109,7 @@ impl ConflictResolver for ClaudeProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        finalize_resolved_text(&raw, "claude CLI")
+        finalize_resolved_text(&raw, conflict, "claude CLI")
     }
 }
 

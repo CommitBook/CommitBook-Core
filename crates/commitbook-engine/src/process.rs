@@ -18,11 +18,29 @@ use std::time::{Duration, Instant};
 ///
 /// When the child has exited but stopped reading before all of `input` was
 /// written, the broken pipe is ignored and the exit status decides success.
+/// Callers that must know the child read everything use
+/// `run_bounded_tracking_input`.
 pub(crate) fn run_bounded(
     command: &mut Command,
     input: Option<&[u8]>,
     timeout: Duration,
 ) -> Result<Output> {
+    run_bounded_tracking_input(command, input, timeout).map(|finished| finished.output)
+}
+
+/// Result of `run_bounded_tracking_input`.
+pub(crate) struct Finished {
+    pub output: Output,
+    /// False when the child exited before reading all of the input.
+    pub input_complete: bool,
+}
+
+/// `run_bounded`, also reporting whether the child read all of `input`.
+pub(crate) fn run_bounded_tracking_input(
+    command: &mut Command,
+    input: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<Finished> {
     let start = Instant::now();
     command
         .stdin(if input.is_some() {
@@ -96,23 +114,29 @@ pub(crate) fn run_bounded(
     let stderr = err
         .join()
         .map_err(|_| anyhow::anyhow!("stderr reader panicked"))??;
+    let mut input_complete = true;
     if let Some(writer) = writer {
         match writer
             .join()
             .map_err(|_| anyhow::anyhow!("stdin writer panicked"))?
         {
             Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {
+                input_complete = false;
+            }
             Err(error) => {
                 return Err(anyhow::Error::new(error)
                     .context(format!("Failed to write input to {program}")))
             }
         }
     }
-    Ok(Output {
-        status,
-        stdout,
-        stderr,
+    Ok(Finished {
+        output: Output {
+            status,
+            stdout,
+            stderr,
+        },
+        input_complete,
     })
 }
 

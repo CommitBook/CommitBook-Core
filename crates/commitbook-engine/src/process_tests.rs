@@ -72,3 +72,25 @@ fn a_missing_program_is_reported() {
         "{error:#}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn reports_whether_the_child_read_all_input() {
+    let input = vec![b'x'; 1024 * 1024];
+    let partial = run_bounded_tracking_input(
+        &mut sh("echo early; exit 0"),
+        Some(&input),
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    assert!(partial.output.status.success());
+    assert!(!partial.input_complete);
+
+    let full = run_bounded_tracking_input(
+        &mut sh("cat >/dev/null"),
+        Some(&input),
+        Duration::from_secs(30),
+    )
+    .unwrap();
+    assert!(full.input_complete);
+}

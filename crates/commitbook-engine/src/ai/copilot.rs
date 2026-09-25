@@ -149,7 +149,7 @@ impl ConflictResolver for CopilotProvider {
         let prompt = build_resolve_prompt(conflict)?;
         let repo_path = repo_path.to_path_buf();
         let output = tokio::task::spawn_blocking(move || {
-            super::run_with_prompt(
+            super::run_with_full_prompt(
                 &mut resolve_command(&repo_path),
                 &prompt,
                 COPILOT_RESOLVE_TIMEOUT,
@@ -164,7 +164,7 @@ impl ConflictResolver for CopilotProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout);
-        finalize_resolved_text(&raw, "GitHub Copilot")
+        finalize_resolved_text(&raw, conflict, "GitHub Copilot")
     }
 }
 

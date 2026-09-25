@@ -277,6 +277,30 @@ mod run_with_prompt_tests {
     }
 
     #[test]
+    fn run_with_full_prompt_rejects_a_cli_that_stopped_reading() {
+        // A resolver that answers after reading only part of a large
+        // conflict must not have its answer applied.
+        let prompt = "x".repeat(1024 * 1024);
+        let error = super::super::run_with_full_prompt(
+            &mut sh("echo partial merge; exit 0"),
+            &prompt,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("before reading the whole conflict"),
+            "{error:#}"
+        );
+
+        let output =
+            super::super::run_with_full_prompt(&mut sh("cat"), "small", Duration::from_secs(60))
+                .unwrap();
+        assert_eq!(output.stdout, b"small");
+    }
+
+    #[test]
     fn run_with_prompt_kills_process_group_on_timeout() {
         let started = Instant::now();
         let error = run_with_prompt(

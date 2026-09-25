@@ -97,7 +97,8 @@ impl Default for ResolverRegistry {
 pub(crate) fn strip_outer_code_fence(s: &str) -> String {
     let trimmed = s.trim();
     if !trimmed.starts_with("```") {
-        return trimmed.to_string();
+        // Keep the first line's indentation: in a note it is content.
+        return s.trim_start_matches(['\r', '\n']).trim_end().to_string();
     }
     let after_open = match trimmed.find('\n') {
         Some(idx) => &trimmed[idx + 1..],
@@ -121,7 +122,13 @@ pub(crate) fn strip_outer_code_fence(s: &str) -> String {
 /// still contains real conflict markers. The marker check delegates to
 /// `git::conflicts::has_conflict_markers`, which deliberately ignores a bare
 /// `=======` line because that is valid Markdown (a setext heading underline).
-pub(crate) fn finalize_resolved_text(raw: &str, cli_name: &str) -> Result<ConflictResolution> {
+/// The file ends with a line break when either side did, using that side's
+/// style, since CLI output trimming would otherwise drop it.
+pub(crate) fn finalize_resolved_text(
+    raw: &str,
+    conflict: &GitConflict,
+    cli_name: &str,
+) -> Result<ConflictResolution> {
     let resolved = strip_outer_code_fence(raw);
     if resolved.trim().is_empty() {
         anyhow::bail!("Empty resolution from {cli_name}");
@@ -129,7 +136,25 @@ pub(crate) fn finalize_resolved_text(raw: &str, cli_name: &str) -> Result<Confli
     if crate::git::conflicts::has_conflict_markers(&resolved) {
         anyhow::bail!("{cli_name} left conflict markers in its response");
     }
-    Ok(ConflictResolution::WriteContent(resolved))
+    let mut content = resolved.trim_end_matches(['\r', '\n']).to_string();
+    content.push_str(final_line_break(conflict));
+    Ok(ConflictResolution::WriteContent(content))
+}
+
+/// The line break the conflicting sides end with (local first), or none.
+fn final_line_break(conflict: &GitConflict) -> &'static str {
+    for text in [conflict.local_text(), conflict.remote_text()]
+        .into_iter()
+        .flatten()
+    {
+        if text.ends_with("\r\n") {
+            return "\r\n";
+        }
+        if text.ends_with('\n') {
+            return "\n";
+        }
+    }
+    ""
 }
 
 /// Build the prompt sent to a resolver CLI for a single structured text

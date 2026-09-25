@@ -73,7 +73,7 @@ impl ConflictResolver for CursorProvider {
         let prompt = build_resolve_prompt(conflict)?;
         let repo_path = repo_path.to_path_buf();
         let output = tokio::task::spawn_blocking(move || {
-            super::run_with_prompt(&mut command(&repo_path), &prompt, CURSOR_RESOLVE_TIMEOUT)
+            super::run_with_full_prompt(&mut command(&repo_path), &prompt, CURSOR_RESOLVE_TIMEOUT)
         })
         .await
         .context("spawn_blocking panicked")??;
@@ -84,7 +84,7 @@ impl ConflictResolver for CursorProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        finalize_resolved_text(&raw, "cursor-agent CLI")
+        finalize_resolved_text(&raw, conflict, "cursor-agent CLI")
     }
 }
 

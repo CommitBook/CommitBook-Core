@@ -242,6 +242,28 @@ pub(crate) fn run_with_prompt(
     crate::process::run_bounded(command, Some(prompt.as_bytes()), timeout)
 }
 
+/// `run_with_prompt` for conflict resolvers: fails when the CLI exits before
+/// reading the whole prompt. A CLI that saw only the start of a large
+/// conflict would answer with a merge of that part, which would replace the
+/// whole note.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) fn run_with_full_prompt(
+    command: &mut std::process::Command,
+    prompt: &str,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output> {
+    let program = command.get_program().to_string_lossy().into_owned();
+    let finished =
+        crate::process::run_bounded_tracking_input(command, Some(prompt.as_bytes()), timeout)?;
+    if !finished.input_complete {
+        anyhow::bail!(
+            "{program} exited before reading the whole conflict ({} bytes); its answer could cover only part of the file",
+            prompt.len()
+        );
+    }
+    Ok(finished.output)
+}
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
