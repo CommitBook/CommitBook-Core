@@ -1,0 +1,24 @@
+crates/commitbook-engine/src/review_tests.rs
+  s_acb8881477f1c1::t_64fac855168f76 269-272
+.claude/CLAUDE.md
+  s_acb8881477f1c1::t_c6d5ab7fd79deb 106
+crates/commitbook-engine/src/sync/scheduler.rs
+  s_acb8881477f1c1::t_64fac855168f76 278,406,588-605
+  s_acb8881477f1c1::t_d72ebe1be53d07 606-607
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7aaeaedbef3d3e188f3377b2550633a43bb0845f",
+  "prompts": {},
+  "sessions": {
+    "s_acb8881477f1c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d866877b-0c18-4d7a-bf81-6acebb67f32f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
