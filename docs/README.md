@@ -111,6 +111,12 @@ CommitBook uses libgit2's normal merge analysis and file-level three-way merge:
 
 Local changes are committed before fetching, so a network or merge failure does not discard the user's writing. A later sync resumes an unfinished manual merge after the conflicted files have been resolved and staged.
 
+Sync never touches a git operation you started yourself. While a merge of
+another branch, a cherry-pick, revert, rebase, `am`, or bisect is in progress,
+or while the index still holds conflicts (for example from `git stash pop`),
+sync stops with an error and changes nothing. Finish or abort that operation,
+then sync again.
+
 Desktop conflict resolution invokes the configured AI CLI. Mobile resolution
 uses an asynchronous callback implemented by the embedding Swift/Kotlin app;
 the app calls its AI provider or backend over HTTPS from the phone. The mobile

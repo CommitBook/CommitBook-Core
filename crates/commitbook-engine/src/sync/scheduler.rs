@@ -244,6 +244,7 @@ async fn sync_cycle(
             options.branch
         );
     }
+    ensure_no_user_operation(&repo, options)?;
     crate::review::cleanup_locked(repo_root, lock)?;
     let mut outcome = SyncOutcome::default();
 
@@ -482,6 +483,46 @@ async fn sync_cycle(
     }
 
     Ok(outcome)
+}
+
+/// Refuse to touch a repository in the middle of a git operation the user
+/// started. Staging would commit its conflict markers, and step 0 would
+/// finish (and in `both` mode, auto-resolve) a merge that is not ours.
+/// Only a merge of the configured remote branch, which sync itself starts,
+/// is recovered.
+fn ensure_no_user_operation(repo: &GitRepo, options: &SyncOptions) -> Result<()> {
+    use git2::RepositoryState;
+    let operation = match repo.repository_state() {
+        RepositoryState::Clean => {
+            let conflicted = repo.list_conflicted_paths()?;
+            if conflicted.is_empty() {
+                return Ok(());
+            }
+            anyhow::bail!(
+                "Cannot sync: the index has unresolved conflicts left by a git command ({}). Resolve them (see `git status`) or undo that command, then retry.",
+                conflicted.join(", ")
+            );
+        }
+        RepositoryState::Merge => {
+            if repo.merge_head_is_from_remote(&options.remote, &options.branch)? {
+                return Ok(());
+            }
+            anyhow::bail!(
+                "Cannot sync: a merge you started is in progress. Finish it with `git commit` or cancel it with `git merge --abort`, then retry."
+            );
+        }
+        RepositoryState::Revert | RepositoryState::RevertSequence => "revert",
+        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => "cherry-pick",
+        RepositoryState::Bisect => "bisect",
+        RepositoryState::Rebase
+        | RepositoryState::RebaseInteractive
+        | RepositoryState::RebaseMerge => "rebase",
+        RepositoryState::ApplyMailbox => "am",
+        RepositoryState::ApplyMailboxOrRebase => "am or rebase",
+    };
+    anyhow::bail!(
+        "Cannot sync: a git {operation} is in progress. Finish it or abort it (for example `git {operation} --abort`), then retry."
+    )
 }
 
 fn is_non_fast_forward_push(error: &anyhow::Error) -> bool {

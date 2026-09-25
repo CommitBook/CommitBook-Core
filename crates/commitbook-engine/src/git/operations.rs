@@ -1611,6 +1611,47 @@ impl GitRepo {
         self.repo.state() == git2::RepositoryState::Merge
     }
 
+    /// Operation the repository is in the middle of (merge, cherry-pick,
+    /// revert, rebase, am, bisect), or `Clean`.
+    pub fn repository_state(&self) -> git2::RepositoryState {
+        self.repo.state()
+    }
+
+    /// True when every `MERGE_HEAD` commit is `refs/remotes/<remote>/<branch>`
+    /// or one of its ancestors, i.e. the merge is one sync itself started from
+    /// the remote branch rather than a merge the user started.
+    pub fn merge_head_is_from_remote(&self, remote: &str, branch: &str) -> Result<bool> {
+        let upstream = match self
+            .repo
+            .refname_to_id(&format!("refs/remotes/{remote}/{branch}"))
+        {
+            Ok(oid) => oid,
+            Err(_) => return Ok(false),
+        };
+        let path = self.repo.path().join("MERGE_HEAD");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error).context("Failed to read MERGE_HEAD"),
+        };
+        let heads = content
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(git2::Oid::from_str)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("MERGE_HEAD does not contain commit ids")?;
+        if heads.is_empty() {
+            return Ok(false);
+        }
+        for head in heads {
+            if head != upstream && !self.repo.graph_descendant_of(upstream, head)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// Abort an in-flight merge: clear MERGE_HEAD and reset working tree
     /// to HEAD. Used in error-recovery paths.
     pub fn merge_abort(&self) -> Result<()> {

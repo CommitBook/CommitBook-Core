@@ -1438,3 +1438,149 @@ async fn config_driven_sync_registers_devices_that_every_clone_can_see() {
         assert_eq!(devices.iter().filter(|d| d.this_device).count(), 1);
     }
 }
+
+/// Run git in `dir` with a fixed identity; returns whether it succeeded so
+/// commands expected to stop on a conflict can be run too.
+fn git_in(dir: &Path, args: &[&str]) -> bool {
+    std::process::Command::new("git")
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap()
+        .status
+        .success()
+}
+
+/// Commit `content` to `notes.md` on the checked-out branch.
+fn commit_notes(fx: &RepoFixture, content: &str, message: &str) {
+    std::fs::write(fx.repo_dir.path().join("notes.md"), content).unwrap();
+    assert!(git_in(fx.repo_dir.path(), &["add", "notes.md"]));
+    assert!(git_in(fx.repo_dir.path(), &["commit", "-q", "-m", message]));
+}
+
+/// Sync with `both` mode on, as the default config does.
+async fn try_sync_keep_both(fx: &RepoFixture, logger: &FileLogger) -> Result<SyncOutcome> {
+    let mut options = SyncOptions::new("origin", &fx.branch, true);
+    options.keep_both = true;
+    sync_with_resolver(
+        fx.repo_dir.path(),
+        &options,
+        None,
+        &SystemCredentials,
+        logger,
+        None,
+    )
+    .await
+}
+
+fn remote_branch_oid(fx: &RepoFixture) -> git2::Oid {
+    git2::Repository::open_bare(fx.remote_dir.path())
+        .unwrap()
+        .refname_to_id(&format!("refs/heads/{}", fx.branch))
+        .unwrap()
+}
+
+/// Assert sync refused with `expected` in the error and changed nothing:
+/// HEAD, the remote, and the conflicted file's markers are untouched.
+async fn assert_refused(fx: &RepoFixture, logger: &FileLogger, expected: &str) {
+    let head = fx.repo.rev_parse("HEAD").unwrap();
+    let remote = remote_branch_oid(fx);
+    let before = std::fs::read_to_string(fx.repo_dir.path().join("notes.md")).unwrap();
+    let error = try_sync_keep_both(fx, logger).await.unwrap_err();
+    assert!(format!("{error:#}").contains(expected), "{error:#}");
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
+    assert_eq!(remote_branch_oid(fx), remote);
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_dir.path().join("notes.md")).unwrap(),
+        before
+    );
+}
+
+#[tokio::test]
+async fn conflicted_stash_pop_is_not_committed() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "base\n", "base");
+    std::fs::write(fx.repo_dir.path().join("notes.md"), "stashed\n").unwrap();
+    assert!(git_in(fx.repo_dir.path(), &["stash", "-q"]));
+    commit_notes(&fx, "committed\n", "diverge");
+    assert!(!git_in(fx.repo_dir.path(), &["stash", "pop", "-q"]));
+    assert_eq!(fx.repo.repository_state(), git2::RepositoryState::Clean);
+
+    assert_refused(&fx, &logger, "unresolved conflicts left by a git command").await;
+    assert!(std::fs::read_to_string(fx.repo_dir.path().join("notes.md"))
+        .unwrap()
+        .contains("<<<<<<<"));
+}
+
+#[tokio::test]
+async fn conflicted_cherry_pick_is_not_committed() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "base\n", "base");
+    assert!(git_in(
+        fx.repo_dir.path(),
+        &["checkout", "-q", "-b", "side"]
+    ));
+    commit_notes(&fx, "side\n", "side edit");
+    let side = fx.repo.rev_parse("HEAD").unwrap();
+    assert!(git_in(fx.repo_dir.path(), &["checkout", "-q", &fx.branch]));
+    commit_notes(&fx, "main\n", "main edit");
+    assert!(!git_in(fx.repo_dir.path(), &["cherry-pick", &side]));
+
+    assert_refused(&fx, &logger, "git cherry-pick is in progress").await;
+}
+
+#[tokio::test]
+async fn conflicted_revert_is_not_committed() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "one\n", "one");
+    let first = fx.repo.rev_parse("HEAD").unwrap();
+    commit_notes(&fx, "two\n", "two");
+    assert!(!git_in(
+        fx.repo_dir.path(),
+        &["revert", "--no-edit", &first]
+    ));
+
+    assert_refused(&fx, &logger, "git revert is in progress").await;
+}
+
+#[tokio::test]
+async fn a_merge_the_user_started_is_left_alone() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "base\n", "base");
+    assert!(git_in(
+        fx.repo_dir.path(),
+        &["checkout", "-q", "-b", "drafts"]
+    ));
+    std::fs::write(fx.repo_dir.path().join("draft.md"), "draft\n").unwrap();
+    assert!(git_in(fx.repo_dir.path(), &["add", "draft.md"]));
+    assert!(git_in(fx.repo_dir.path(), &["commit", "-q", "-m", "draft"]));
+    assert!(git_in(fx.repo_dir.path(), &["checkout", "-q", &fx.branch]));
+    assert!(git_in(
+        fx.repo_dir.path(),
+        &["merge", "--no-commit", "--no-ff", "drafts"]
+    ));
+    assert!(fx.repo.merge_in_progress());
+
+    assert_refused(&fx, &logger, "a merge you started is in progress").await;
+    assert!(fx.repo.merge_in_progress());
+}
+
+#[tokio::test]
+async fn a_conflicted_user_merge_is_not_kept_both_in_both_mode() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "base\n", "base");
+    assert!(git_in(
+        fx.repo_dir.path(),
+        &["checkout", "-q", "-b", "drafts"]
+    ));
+    commit_notes(&fx, "draft version\n", "draft");
+    assert!(git_in(fx.repo_dir.path(), &["checkout", "-q", &fx.branch]));
+    commit_notes(&fx, "main version\n", "main");
+    assert!(!git_in(fx.repo_dir.path(), &["merge", "drafts"]));
+
+    assert_refused(&fx, &logger, "a merge you started is in progress").await;
+    assert!(std::fs::read_to_string(fx.repo_dir.path().join("notes.md"))
+        .unwrap()
+        .contains("<<<<<<<"));
+}
