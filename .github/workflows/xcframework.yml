@@ -12,13 +12,16 @@ on:
         required: false
         default: ""
 
+# Read-only by default; the job needs write only to attach to a release.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-xcframework:
     name: Build CommitBookEngine.xcframework
     runs-on: macos-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,6 +51,20 @@ jobs:
           path: |
             target/CommitBookEngine.xcframework.zip
             target/CommitBookEngine.xcframework.zip.sha256
+
+      # Only attach to a release when the tag points at the built commit.
+      - name: Check the tag matches the built commit
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          git fetch --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          tagged="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          built="$(git rev-parse HEAD)"
+          if [ "$tagged" != "$built" ]; then
+            echo "Tag ${TAG} is ${tagged}, but the build used ${built}" >&2
+            exit 1
+          fi
 
       - name: Upload to release
         if: ${{ inputs.release_tag != '' }}

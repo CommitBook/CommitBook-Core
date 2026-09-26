@@ -22,8 +22,9 @@ env:
   RELEASE_TAG: ${{ inputs.tag_name || github.ref_name }}
   RELEASE_COMMITISH: ${{ inputs.ref || github.sha }}
 
+# Read-only by default; only the job that publishes can write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -52,9 +53,12 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
+      # Pinned: this job builds the shipped binaries, so it must not run
+      # whatever lands on cross's default branch. To update, pick a newer
+      # commit of https://github.com/cross-rs/cross and change the rev.
       - name: Install cross
         if: matrix.use_cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --rev 74e99b2223de06166f8cdcc1af7f1308ec52baf4 --locked
 
       - name: Build
         run: |
@@ -80,6 +84,11 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Add required reviewers to this environment in the repository settings
+    # (Settings > Environments > release) so publishing needs an approval.
+    environment: release
     steps:
       # Checked out into a subdirectory so install.sh can be published as a
       # release asset without the repo tree colliding with the artifacts.
@@ -87,6 +96,22 @@ jobs:
         with:
           ref: ${{ env.RELEASE_REF }}
           path: repo
+
+      # A dispatch names a ref to build and a tag to publish to. Refuse to
+      # attach binaries built from anything but the commit that tag points at,
+      # so an existing release cannot be overwritten with other code.
+      - name: Check the tag matches the built commit
+        working-directory: repo
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          git fetch --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          tagged="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          built="$(git rev-parse HEAD)"
+          if [ "$tagged" != "$built" ]; then
+            echo "Tag ${TAG} is ${tagged}, but the build used ${built}" >&2
+            exit 1
+          fi
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
