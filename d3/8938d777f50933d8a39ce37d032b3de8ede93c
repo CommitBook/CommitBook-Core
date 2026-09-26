@@ -1,0 +1,29 @@
+crates/commitbook-web/src/routes_tests.rs
+  s_acb8881477f1c1::t_6570947984bda6 822,830-876,881-889,894-931
+  s_acb8881477f1c1::t_a46bd82ffa5060 823-829,877-880,890-893
+.claude/CLAUDE.md
+  s_acb8881477f1c1::t_a46bd82ffa5060 120
+crates/commitbook-web/src/routes.rs
+  s_acb8881477f1c1::t_a46bd82ffa5060 97,110,118
+  s_acb8881477f1c1::t_b362c07cd94f97 81,85-96,98-109,114,139-140
+  s_acb8881477f1c1::t_0976037ccefb5a 111-113,115-117,119-138,141-142
+  s_acb8881477f1c1::t_31498cd9325b5b 143
+Cargo.lock
+  s_acb8881477f1c1::t_54b079236108e2 2484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d38938d777f50933d8a39ce37d032b3de8ede93c",
+  "prompts": {},
+  "sessions": {
+    "s_acb8881477f1c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d866877b-0c18-4d7a-bf81-6acebb67f32f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
