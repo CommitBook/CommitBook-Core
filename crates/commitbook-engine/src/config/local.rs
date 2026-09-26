@@ -439,6 +439,17 @@ fn write_regular_text(path: &Path, content: &str) -> Result<()> {
 /// destination. An interrupted write leaves the previous file intact, and a
 /// symlink or other non-regular destination is never followed or replaced.
 pub(crate) fn write_regular_text_atomic(path: &Path, content: &str) -> Result<()> {
+    write_atomic(path, content, None)
+}
+
+/// `write_regular_text_atomic` for secrets: the file is created with mode
+/// 0600 before it is renamed into place, so it is never readable by others,
+/// even briefly, and an existing wider mode is not kept.
+pub(crate) fn write_private_text_atomic(path: &Path, content: &str) -> Result<()> {
+    write_atomic(path, content, Some(0o600))
+}
+
+fn write_atomic(path: &Path, content: &str, mode: Option<u32>) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Path has no parent directory: {}", path.display()))?;
@@ -475,10 +486,23 @@ pub(crate) fn write_regular_text_atomic(path: &Path, content: &str) -> Result<()
     temp.as_file()
         .sync_all()
         .with_context(|| format!("Failed to sync {}", temp.path().display()))?;
-    if let Some(permissions) = existing_permissions {
+    #[cfg(unix)]
+    let permissions = match mode {
+        Some(mode) => {
+            use std::os::unix::fs::PermissionsExt;
+            Some(fs::Permissions::from_mode(mode))
+        }
+        None => existing_permissions,
+    };
+    #[cfg(not(unix))]
+    let permissions = {
+        let _ = mode;
+        existing_permissions
+    };
+    if let Some(permissions) = permissions {
         temp.as_file()
             .set_permissions(permissions)
-            .with_context(|| format!("Failed to preserve permissions of {}", path.display()))?;
+            .with_context(|| format!("Failed to set permissions of {}", path.display()))?;
     }
     // `persist` is a rename, so the destination is replaced as a directory
     // entry rather than written through. On failure the temporary file is

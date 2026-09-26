@@ -10,10 +10,20 @@ pub struct AuthConfig {
     pub auth: AuthEntry,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct AuthEntry {
     pub provider: Option<String>,
     pub token: Option<String>,
+}
+
+/// Never print the token, even in debug output or error chains.
+impl std::fmt::Debug for AuthEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthEntry")
+            .field("provider", &self.provider)
+            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 impl AuthConfig {
@@ -27,23 +37,16 @@ impl AuthConfig {
         toml::from_str(&content).with_context(|| "Failed to parse auth.toml")
     }
 
+    /// Write `auth.toml` atomically with mode 0600. A symlink or other
+    /// non-regular file at that path is refused, never written through.
     pub fn save(&self, commitbook_dir: &Path) -> Result<()> {
         let local = commitbook_dir.join("local");
         std::fs::create_dir_all(&local)?;
         let path = local.join("auth.toml");
         let content =
             toml::to_string_pretty(self).with_context(|| "Failed to serialize auth.toml")?;
-        std::fs::write(&path, &content)
-            .with_context(|| format!("Failed to write {}", path.display()))?;
-
-        // Set restrictive permissions (owner read/write only)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
-
-        Ok(())
+        crate::config::local::write_private_text_atomic(&path, &content)
+            .with_context(|| format!("Failed to write {}", path.display()))
     }
 
     /// Delete `auth.toml`. Returns whether a file was removed.

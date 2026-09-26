@@ -33,12 +33,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum TokenAction {
-    /// Store a token in .CommitBook/local/auth.toml
+    /// Store a token in .CommitBook/local/auth.toml. The token is read from a
+    /// hidden prompt, or from stdin when piped (`echo "$T" | commitbook token
+    /// set`), never from an argument: arguments end up in shell history and
+    /// `ps` output.
     Set {
-        /// Personal access token (prompted if omitted)
-        #[arg(long)]
-        token: Option<String>,
-
         /// Provider name for the stored token (github, gitlab, etc.)
         #[arg(long)]
         provider: Option<String>,
@@ -203,8 +202,8 @@ async fn run(cli: Cli) -> Result<()> {
             commands::log::run(&cb_dir, &repo_root, lines, cli.json, tail)?;
         }
         Commands::Token { action } => match action {
-            TokenAction::Set { token, provider } => {
-                commands::token::set(&cb_dir, &repo_root, token, provider).await?;
+            TokenAction::Set { provider } => {
+                commands::token::set(&cb_dir, &repo_root, provider).await?;
             }
             TokenAction::Clear => commands::token::clear(&cb_dir)?,
         },

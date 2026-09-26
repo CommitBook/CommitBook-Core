@@ -1,31 +1,19 @@
 use anyhow::{bail, Result};
 use colored::Colorize;
-use std::io::{self, Write};
+use std::io::{self, BufRead, IsTerminal};
 use std::path::Path;
 
 use commitbook_engine::config::LocalConfig;
 use commitbook_engine::state::auth::{AuthConfig, AuthEntry};
 
-pub async fn set(
-    cb_dir: &Path,
-    repo_root: &Path,
-    token: Option<String>,
-    provider: Option<String>,
-) -> Result<()> {
-    let token = match token {
-        Some(t) => t,
-        None => {
-            // Prompt for token interactively.
-            print!("  Enter personal access token: ");
-            io::stdout().flush()?;
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
-            let t = input.trim().to_string();
-            if t.is_empty() {
-                bail!("Token cannot be empty.");
-            }
-            t
-        }
+pub async fn set(cb_dir: &Path, repo_root: &Path, provider: Option<String>) -> Result<()> {
+    let token = if io::stdin().is_terminal() {
+        // Typed input is not echoed, so the token never shows on screen.
+        parse_token(&rpassword::prompt_password(
+            "  Enter personal access token: ",
+        )?)?
+    } else {
+        read_token(&mut io::stdin().lock())?
     };
 
     // Auto-detect provider from remote URL if not specified.
@@ -44,7 +32,7 @@ pub async fn set(
     auth.save(cb_dir)?;
 
     println!(
-        "  {} Authenticated with {} provider.",
+        "  {} Token stored for the {} provider (not checked against it).",
         "OK".green().bold(),
         provider.cyan()
     );
@@ -70,6 +58,25 @@ pub fn clear(cb_dir: &Path) -> Result<()> {
         println!("  {}", "No token stored.".dimmed());
     }
     Ok(())
+}
+
+/// Read the token from the first line of piped input.
+fn read_token(input: &mut impl BufRead) -> Result<String> {
+    let mut line = String::new();
+    input.read_line(&mut line)?;
+    parse_token(&line)
+}
+
+/// The token from one line of input, without surrounding whitespace.
+fn parse_token(input: &str) -> Result<String> {
+    let token = input.trim();
+    if token.is_empty() {
+        bail!("Token cannot be empty.");
+    }
+    if token.chars().any(char::is_whitespace) {
+        bail!("Token must be a single line without spaces.");
+    }
+    Ok(token.to_string())
 }
 
 /// Detect git provider from the configured remote's URL.
