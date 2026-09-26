@@ -41,7 +41,7 @@ pub fn sign_commit_object(repo: &Repository, unsigned_bytes: &[u8]) -> Result<Op
     #[cfg(any(target_os = "ios", target_os = "android"))]
     {
         let _ = (config, format, unsigned_bytes);
-        return Ok(None);
+        Ok(None)
     }
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]

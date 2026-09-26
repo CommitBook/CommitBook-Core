@@ -124,6 +124,7 @@ pub(crate) fn strip_outer_code_fence(s: &str) -> String {
 /// `=======` line because that is valid Markdown (a setext heading underline).
 /// The file ends with a line break when either side did, using that side's
 /// style, since CLI output trimming would otherwise drop it.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn finalize_resolved_text(
     raw: &str,
     conflict: &GitConflict,
@@ -142,6 +143,7 @@ pub(crate) fn finalize_resolved_text(
 }
 
 /// The line break the conflicting sides end with (local first), or none.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn final_line_break(conflict: &GitConflict) -> &'static str {
     for text in [conflict.local_text(), conflict.remote_text()]
         .into_iter()

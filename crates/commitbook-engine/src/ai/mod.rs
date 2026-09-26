@@ -62,6 +62,9 @@ pub struct ProviderChain {
 
 impl ProviderChain {
     /// Build the default provider chain.
+    // On mobile only the fallback is pushed, which clippy would rather see as
+    // a `vec![]` literal; desktop pushes the AI providers first.
+    #[allow(clippy::vec_init_then_push)]
     pub fn new() -> Self {
         #[allow(unused_mut)]
         let mut providers: Vec<Box<dyn CommitMessageProvider>> = Vec::new();
