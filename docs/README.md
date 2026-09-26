@@ -14,7 +14,7 @@ Commit messages use a timestamp by default, or an AI CLI (GitHub Copilot, Claude
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | bash
 
 # Navigate to your notes repo
 cd ~/my-notes
@@ -313,7 +313,7 @@ All state is file-based (no database). The `.CommitBook/` directory is self-cont
 ### Install Script (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | bash
 ```
 
 Detects your platform, downloads the latest release, verifies it against the

@@ -5,7 +5,7 @@ Automated git commits and sync for your markdown notebooks. Turn any git reposit
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | bash
 ```
 
 This downloads the latest release for your platform (macOS arm64/x86_64, Linux
