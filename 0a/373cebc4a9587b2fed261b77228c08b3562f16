@@ -1,0 +1,40 @@
+crates/commitbook-engine/src/config/local.rs
+  s_acb8881477f1c1::t_cf47d5df3cb7e2 442-452,489-502,505
+crates/commitbook-cli/Cargo.toml
+  s_acb8881477f1c1::t_cf47d5df3cb7e2 27
+crates/commitbook-cli/src/commands/token_tests.rs
+  s_acb8881477f1c1::t_5cc6893bcd76cf 82-90,101,106
+  s_acb8881477f1c1::t_8b02fa0dbdce8a 94-99
+  s_acb8881477f1c1::t_c4e250d8a5c1f8 91-93,100,102-105
+crates/commitbook-cli/src/main.rs
+  s_acb8881477f1c1::t_5997f5618741e0 36-39,205-206
+crates/commitbook-engine/src/state/auth.rs
+  s_acb8881477f1c1::t_cf47d5df3cb7e2 13,19-28,40-41,48-49
+crates/commitbook-engine/src/state/auth_tests.rs
+  s_acb8881477f1c1::t_8b02fa0dbdce8a 130-133
+  s_acb8881477f1c1::t_5cc6893bcd76cf 106-129,134-158
+crates/commitbook-cli/src/commands/token.rs
+  s_acb8881477f1c1::t_8aee12424ea72e 35
+  s_acb8881477f1c1::t_8b02fa0dbdce8a 12-14
+  s_acb8881477f1c1::t_c4e250d8a5c1f8 10,16,63-67
+  s_acb8881477f1c1::t_5997f5618741e0 3,9,11,15,68-80
+  s_acb8881477f1c1::t_eec7a583b36362 81
+Cargo.lock
+  s_acb8881477f1c1::t_9b7dc222d23177 555,2513-2533
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a373cebc4a9587b2fed261b77228c08b3562f16",
+  "prompts": {},
+  "sessions": {
+    "s_acb8881477f1c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d866877b-0c18-4d7a-bf81-6acebb67f32f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
