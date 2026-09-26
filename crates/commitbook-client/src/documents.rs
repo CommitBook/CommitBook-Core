@@ -87,11 +87,16 @@ pub fn read_document(
     })
 }
 
+/// Write and commit a document. With `expected_revision` (the `revision`
+/// that `read_document` returned), the save is refused when the document's
+/// last commit has changed since, for example because a background sync
+/// pulled another device's edit, so that edit is not silently overwritten.
 pub fn save_document(
     workspaces_root: &Path,
     commitbook_id: &str,
     path: &str,
     content: &str,
+    expected_revision: Option<&str>,
 ) -> Result<()> {
     let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
     let _lock = RepoLock::acquire(&commitbook.local_path)
@@ -111,6 +116,17 @@ pub fn save_document(
         return Err(CommitBookError::merge(
             "Cannot save a document while conflict resolution is in progress; resolve or abort the merge first",
         ));
+    }
+    if let Some(expected) = expected_revision {
+        let current = repo
+            .last_commit_touching(path)
+            .map_err(|error| CommitBookError::database(format!("Read revision: {error}")))?;
+        if current.as_deref() != Some(expected) {
+            return Err(CommitBookError::merge(format!(
+                "{path} changed since it was read (now at {}); read it again and reapply the edit",
+                current.as_deref().unwrap_or("no commit")
+            )));
+        }
     }
     let abs = crate::paths::safe_document_path(&commitbook.local_path, path, true)?;
     write_regular_nofollow(&abs, content.as_bytes())?;

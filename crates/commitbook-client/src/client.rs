@@ -229,8 +229,15 @@ impl CommitBookEngineClient {
         commitbook_id: String,
         path: String,
         content: String,
+        expected_revision: Option<String>,
     ) -> Result<()> {
-        crate::documents::save_document(&self.workspaces_root, &commitbook_id, &path, &content)
+        crate::documents::save_document(
+            &self.workspaces_root,
+            &commitbook_id,
+            &path,
+            &content,
+            expected_revision.as_deref(),
+        )
     }
 
     pub async fn sync_commitbook(
