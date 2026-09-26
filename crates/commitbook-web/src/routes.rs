@@ -78,7 +78,67 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/start", post(api_start))
         .route("/api/stop", post(api_stop))
         .route("/api/providers", get(api_providers))
+        .layer(axum::middleware::from_fn(guard_local_requests))
         .with_state(state)
+}
+
+/// Host names the dashboard answers to. It only listens on 127.0.0.1.
+const LOCAL_HOSTS: &[&str] = &["127.0.0.1", "localhost", "[::1]"];
+
+/// The host name of a `host[:port]` value, lowercased.
+fn host_name(authority: &str) -> String {
+    let authority = authority.trim().to_ascii_lowercase();
+    if authority.starts_with('[') {
+        return authority
+            .split_once(']')
+            .map(|(host, _)| format!("{host}]"))
+            .unwrap_or(authority);
+    }
+    authority.split(':').next().unwrap_or_default().to_string()
+}
+
+/// Refuse requests a web page on another site could make through the
+/// user's browser. The dashboard has no login, so:
+/// - every request must name a local host, which defeats DNS rebinding
+///   (a foreign name resolving to 127.0.0.1 could otherwise read notes);
+/// - a request that changes something must come from the dashboard's own
+///   origin. Browsers send `Origin` (and `Sec-Fetch-Site`) with cross-site
+///   form posts, which need no CORS preflight, so those are rejected.
+///
+/// Requests without these headers (curl, scripts) are not browser-driven
+/// and are allowed.
+async fn guard_local_requests(request: Request, next: axum::middleware::Next) -> Response {
+    match rejection(request.method(), request.headers()) {
+        Some(reason) => (StatusCode::FORBIDDEN, format!("Forbidden: {reason}")).into_response(),
+        None => next.run(request).await,
+    }
+}
+
+/// Why `guard_local_requests` refuses a request, if it does.
+fn rejection(method: &axum::http::Method, headers: &axum::http::HeaderMap) -> Option<&'static str> {
+    let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+    let host = header("host");
+    if host.is_some_and(|host| !LOCAL_HOSTS.contains(&host_name(host).as_str())) {
+        return Some("unexpected Host");
+    }
+    if method == axum::http::Method::GET || method == axum::http::Method::HEAD {
+        return None;
+    }
+    if header("sec-fetch-site").is_some_and(|site| site != "same-origin" && site != "none") {
+        return Some("cross-site request");
+    }
+    if let Some(origin) = header("origin") {
+        let same_origin = match host {
+            Some(host) => origin.eq_ignore_ascii_case(&format!("http://{host}")),
+            None => origin
+                .strip_prefix("http://")
+                .is_some_and(|rest| LOCAL_HOSTS.contains(&host_name(rest).as_str())),
+        };
+        if !same_origin {
+            return Some("cross-origin request");
+        }
+    }
+    None
 }
 
 /// Run repository, lock, or scheduler work off the async executor.

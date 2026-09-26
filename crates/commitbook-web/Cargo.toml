@@ -14,7 +14,6 @@ path = "src/main.rs"
 [dependencies]
 commitbook-engine = { path = "../commitbook-engine" }
 axum = "0.8.9"
-tower-http = { version = "0.7.1", features = ["cors"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net"] }
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }

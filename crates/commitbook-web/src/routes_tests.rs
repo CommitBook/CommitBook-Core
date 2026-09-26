@@ -819,3 +819,113 @@ async fn config_rejects_empty_name_and_unchecked_out_branch_without_saving() {
         );
     }
 }
+
+async fn send(
+    app: Router,
+    method: &str,
+    uri: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> StatusCode {
+    let mut request = Request::builder().method(method).uri(uri);
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    app.oneshot(request.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
+
+#[test]
+fn host_name_strips_port_and_case() {
+    assert_eq!(host_name("127.0.0.1:9847"), "127.0.0.1");
+    assert_eq!(host_name("LocalHost:9847"), "localhost");
+    assert_eq!(host_name("[::1]:9847"), "[::1]");
+    assert_eq!(host_name("evil.test"), "evil.test");
+}
+
+#[tokio::test]
+async fn cross_site_posts_are_rejected_before_any_change() {
+    let scheduler = Arc::new(FakeScheduler::running("1h"));
+    let (tmp, app) = setup_test_app_with(Arc::clone(&scheduler));
+    let before = std::fs::read(LocalConfig::config_path(tmp.path())).unwrap();
+    let form = [
+        ("host", "127.0.0.1:9847"),
+        ("origin", "https://evil.example"),
+        ("content-type", "application/x-www-form-urlencoded"),
+    ];
+    for uri in ["/api/config", "/api/sync", "/api/start", "/api/stop"] {
+        let status = send(app.clone(), "POST", uri, &form, "log_keep=forever").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
+    }
+    // Sec-Fetch-Site alone is enough, even when Origin is stripped.
+    let status = send(
+        app.clone(),
+        "POST",
+        "/api/stop",
+        &[("host", "127.0.0.1:9847"), ("sec-fetch-site", "cross-site")],
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // Another local port is a different origin too.
+    let status = send(
+        app.clone(),
+        "POST",
+        "/api/stop",
+        &[
+            ("host", "127.0.0.1:9847"),
+            ("origin", "http://127.0.0.1:3000"),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    assert_eq!(
+        std::fs::read(LocalConfig::config_path(tmp.path())).unwrap(),
+        before
+    );
+    assert!(
+        scheduler.installed_schedule().is_some(),
+        "scheduler was stopped"
+    );
+}
+
+#[tokio::test]
+async fn a_foreign_host_cannot_read_the_dashboard() {
+    let (_tmp, app) = setup_test_app();
+    for uri in ["/api/conflicts", "/api/changes", "/api/status", "/"] {
+        let status = send(app.clone(), "GET", uri, &[("host", "evil.test:9847")], "").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn the_dashboards_own_pages_still_work() {
+    let (tmp, app) = setup_test_app();
+    for host in ["127.0.0.1:9847", "localhost:9847", "[::1]:9847"] {
+        let origin = format!("http://{host}");
+        let status = send(
+            app.clone(),
+            "POST",
+            "/api/config",
+            &[
+                ("host", host),
+                ("origin", &origin),
+                ("sec-fetch-site", "same-origin"),
+                ("content-type", "application/x-www-form-urlencoded"),
+            ],
+            "log_keep=forever",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{host}");
+        let status = send(app.clone(), "GET", "/api/status", &[("host", host)], "").await;
+        assert_eq!(status, StatusCode::OK, "{host}");
+    }
+    assert_eq!(
+        LocalConfig::load(tmp.path()).unwrap().logs.keep,
+        commitbook_engine::config::LogKeep::Forever
+    );
+}

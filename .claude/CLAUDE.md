@@ -117,6 +117,7 @@ keep = "30d"            # <N>d | forever
 - A `state.toml` that does not parse is moved to `state.toml.corrupt` (never overwritten) and sync continues with fresh state (`SyncState::load_or_quarantine`).
 - `last_sync_at` marks a successful cycle, not a push. `last_attempt_at`, `last_fetch_at`, `last_push_at`, and `last_error_stage` distinguish attempts, remote checks, publication, and the failing stage.
 - `commitbook preview`, web `/changes`, and the TUI `p` screen show what normal staging would commit: every non-ignored Git file of any type, not only Markdown. Preview writes nothing.
+- The web dashboard (127.0.0.1 only, no login) rejects any request whose `Host` is not a local name (DNS rebinding) and any state-changing request whose `Origin`/`Sec-Fetch-Site` is not its own origin (CSRF); see `guard_local_requests` in `commitbook-web/src/routes.rs`.
 - Settings changes from CLI, web, and TUI go through `commitbook-engine/src/settings/` under the repository lock; config writes are atomic and an active scheduler is reinstalled (or rolled back) when the schedule changes. A branch change is accepted only when that branch is checked out; `[git] remote` is not editable after `init`.
 
 ## Code Conventions
