@@ -277,3 +277,30 @@ fn test_is_transient_binary() {
     )));
     assert!(!is_transient_binary(Path::new("/opt/target/commitbook")));
 }
+
+#[test]
+fn only_an_existing_absolute_commitbook_binary_can_be_scheduled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cli = tmp.path().join("commitbook");
+    let tui = tmp.path().join("commitbook-tui");
+    std::fs::write(&cli, "").unwrap();
+    std::fs::write(&tui, "").unwrap();
+
+    ensure_scheduler_binary(&cli).unwrap();
+    let error = ensure_scheduler_binary(&tui).unwrap_err();
+    assert!(error.to_string().contains("commitbook-tui"), "{error:#}");
+    assert!(ensure_scheduler_binary(Path::new("commitbook")).is_err());
+    assert!(ensure_scheduler_binary(&tmp.path().join("missing/commitbook")).is_err());
+}
+
+#[test]
+fn install_refuses_a_non_cli_binary_before_touching_the_scheduler() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tui = tmp.path().join("commitbook-tui");
+    std::fs::write(&tui, "").unwrap();
+    let error = install(tmp.path(), "1h", &tui).unwrap_err();
+    assert!(
+        error.to_string().contains("must run the `commitbook` CLI"),
+        "{error:#}"
+    );
+}

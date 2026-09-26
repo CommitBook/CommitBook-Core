@@ -304,8 +304,27 @@ pub fn list_presets() -> &'static str {
   daily      - Daily at 9:00 AM"
 }
 
+/// Refuse to schedule anything but the `commitbook` CLI. The TUI and web
+/// dashboard resolve the binary from their own location and `PATH`; when
+/// that fails they fall back to their own executable, which would install a
+/// job that runs `commitbook-tui sync` and never syncs.
+pub fn ensure_scheduler_binary(commitbook_bin: &Path) -> Result<()> {
+    let named_commitbook = commitbook_bin
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem == "commitbook");
+    if !named_commitbook || !commitbook_bin.is_absolute() || !commitbook_bin.is_file() {
+        anyhow::bail!(
+            "Cannot schedule {}: the scheduler must run the `commitbook` CLI. Install `commitbook` next to this program or on PATH, or run `commitbook start` from the CLI.",
+            commitbook_bin.display()
+        );
+    }
+    Ok(())
+}
+
 /// Install a scheduler job for a repo. Platform-specific.
 pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<()> {
+    ensure_scheduler_binary(commitbook_bin)?;
     let schedule = to_cron(schedule)?;
     let schedule = schedule.as_str();
     #[cfg(target_os = "macos")]

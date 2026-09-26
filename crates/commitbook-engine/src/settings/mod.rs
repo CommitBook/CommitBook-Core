@@ -52,6 +52,8 @@ impl<'a> SchedulerContext<'a> {
 /// Resolve the `commitbook` binary a scheduler job should run: the current
 /// executable when it is the CLI, otherwise a `commitbook` sibling of the
 /// current executable, otherwise whatever `commitbook` resolves to on PATH.
+/// The last resort is the current executable, which `cron::install` then
+/// refuses unless it is the CLI.
 pub fn current_binary() -> PathBuf {
     let current = std::env::current_exe().ok();
     if let Some(current) = &current {

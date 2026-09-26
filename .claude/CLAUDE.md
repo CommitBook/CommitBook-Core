@@ -111,7 +111,7 @@ keep = "30d"            # <N>d | forever
 
 ## Status, preview, and settings
 
-- Scheduler state comes from `cron::health`: `stopped`, `running`, or `broken` when the job's binary no longer exists. `SchedulerHealth::warning` also flags a job with no sync attempt for three schedule intervals. `start` and `doctor --fix` warn when installing a `target/debug` or `target/release` binary.
+- Scheduler state comes from `cron::health`: `stopped`, `running`, or `broken` when the job's binary no longer exists. `SchedulerHealth::warning` also flags a job with no sync attempt for three schedule intervals. `start` and `doctor --fix` warn when installing a `target/debug` or `target/release` binary. `cron::install` refuses any binary that is not an existing absolute path named `commitbook` (`cron::ensure_scheduler_binary`), so the TUI or web dashboard can never schedule themselves.
 - `commitbook status`, the web `/api/status` endpoint, and the TUI all read the shared engine status service. It reports the real HEAD commit, dirty files, cached ahead/behind counts, merge/conflict state, pending AI reviews, and the `state.toml` timestamps. It never fetches, invokes AI, takes the lock, or rewrites config.
 - Status also lists the devices from `.CommitBook/devices/` and the notes where `both` mode last kept two versions.
 - A `state.toml` that does not parse is moved to `state.toml.corrupt` (never overwritten) and sync continues with fresh state (`SyncState::load_or_quarantine`).
