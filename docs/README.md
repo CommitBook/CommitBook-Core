@@ -360,8 +360,10 @@ mkdir -p ~/.local/bin
 tar xzf "commitbook-${TARGET}.tar.gz" -C ~/.local/bin
 ```
 
-Each tarball contains `commitbook`, and where built, `commitbook-tui` and
-`commitbook-web`.
+Each tarball contains `commitbook`, `commitbook-tui`, and `commitbook-web`.
+The binaries bundle their own OpenSSL, so they run on any glibc-based Linux
+without a matching system OpenSSL; update CommitBook to pick up OpenSSL
+security fixes.
 
 ### Upgrading
 
