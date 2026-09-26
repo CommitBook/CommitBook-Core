@@ -1,0 +1,24 @@
+.github/workflows/release.yml
+  s_acb8881477f1c1::t_c6835d6b068049 30-49,52,84-86,99-100,104
+  s_acb8881477f1c1::t_a2c735035c95ad 88,90-92,94,96
+crates/commitbook-engine/Cargo.toml
+  s_acb8881477f1c1::t_c6835d6b068049 12-16
+docs/README.md
+  s_acb8881477f1c1::t_24f40d18e2aaa8 363-366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b4ce75ffc2d08209234d538cba440b2e43cbd0c6",
+  "prompts": {},
+  "sessions": {
+    "s_acb8881477f1c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d866877b-0c18-4d7a-bf81-6acebb67f32f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
