@@ -1,0 +1,23 @@
+docs/README.md
+  s_acb8881477f1c1::t_11eec0a8cab978 17,316
+README.md
+  s_acb8881477f1c1::t_11eec0a8cab978 8
+install.sh
+  s_acb8881477f1c1::t_ad3e1f76c6b4cc 2-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0130edd9e70bd5c3cacb9fa0f3f79754bb79e409",
+  "prompts": {},
+  "sessions": {
+    "s_acb8881477f1c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d866877b-0c18-4d7a-bf81-6acebb67f32f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
