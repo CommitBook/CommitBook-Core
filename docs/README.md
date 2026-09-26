@@ -403,6 +403,15 @@ launchctl list | grep commitbook
 commitbook log
 ```
 
+On Linux, `commitbook start` writes one crontab line for the repository and
+leaves your other entries alone. cron starts jobs without your login
+session's environment, so the line sets `PATH` (the directories of `git` and
+the AI CLIs found at install time, plus the standard ones) and, when an agent
+is running, `SSH_AUTH_SOCK` for CommitBook only. If your ssh-agent socket
+path changes between logins, SSH pushes from cron fail; use an agent with a
+fixed socket (for example the systemd user `ssh-agent.socket`) and run
+`commitbook start` again.
+
 ### Merge conflicts
 
 `[conflicts] mode` decides what happens when the same part of a file changed

@@ -2,7 +2,7 @@ use super::*;
 use std::path::Path;
 
 fn entry(repo: &str, bin: &str) -> (String, String) {
-    build_crontab_entry(Path::new(repo), "0 * * * *", Path::new(bin)).unwrap()
+    build_crontab_entry(Path::new(repo), "0 * * * *", Path::new(bin), &[]).unwrap()
 }
 
 #[test]
@@ -46,7 +46,8 @@ fn entry_refuses_paths_cron_cannot_carry() {
             build_crontab_entry(
                 Path::new(repo),
                 "0 * * * *",
-                Path::new("/usr/bin/commitbook")
+                Path::new("/usr/bin/commitbook"),
+                &[]
             )
             .is_err(),
             "{repo:?}"
@@ -149,4 +150,63 @@ fn crontab_read_failure_is_an_error_not_an_empty_crontab() {
         ""
     );
     assert!(read_crontab_output(&output(1, "crontab: permission denied\n")).is_err());
+}
+
+#[test]
+fn entry_sets_path_and_ssh_agent_for_commitbook_only() {
+    let environment = [
+        ("PATH", "/home/u/.local/bin:/usr/bin:/bin".to_string()),
+        (
+            "SSH_AUTH_SOCK",
+            "/run/user/1000/ssh-agent.socket".to_string(),
+        ),
+    ];
+    let (_, line) = build_crontab_entry(
+        Path::new("/tmp/repo"),
+        "0 * * * *",
+        Path::new("/usr/bin/commitbook"),
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(
+        line,
+        "0 * * * * cd '/tmp/repo' && PATH='/home/u/.local/bin:/usr/bin:/bin' \
+         SSH_AUTH_SOCK='/run/user/1000/ssh-agent.socket' '/usr/bin/commitbook' sync"
+    );
+    // The entry is still recognized, so reinstall and uninstall find it.
+    assert_eq!(
+        crontab_binary(&line, Path::new("/tmp/repo")),
+        Some(PathBuf::from("/usr/bin/commitbook"))
+    );
+    assert!(filter_crontab_lines(&line, Path::new("/tmp/repo")).is_empty());
+}
+
+#[test]
+fn entry_leaves_out_values_cron_cannot_carry() {
+    let environment = [("SSH_AUTH_SOCK", "/tmp/100%agent".to_string())];
+    let (_, line) = build_crontab_entry(
+        Path::new("/tmp/repo"),
+        "0 * * * *",
+        Path::new("/usr/bin/commitbook"),
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(
+        line,
+        "0 * * * * cd '/tmp/repo' && '/usr/bin/commitbook' sync"
+    );
+}
+
+#[test]
+fn scheduled_environment_has_a_usable_path() {
+    let environment = scheduled_environment();
+    let path = &environment
+        .iter()
+        .find(|(name, _)| *name == "PATH")
+        .unwrap()
+        .1;
+    for dir in ["/usr/bin", "/bin"] {
+        assert!(path.split(':').any(|entry| entry == dir), "{path}");
+    }
+    assert!(environment.iter().all(|(_, value)| is_cron_safe(value)));
 }

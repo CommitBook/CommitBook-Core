@@ -50,21 +50,94 @@ fn cron_safe(label: &str, path: &Path) -> Result<String> {
     Ok(text.to_string())
 }
 
-/// Build the comment and crontab entry lines for a repo.
+/// Tools a scheduled sync may start. Their directories go into the job's
+/// PATH, because cron runs jobs with a minimal PATH (often `/usr/bin:/bin`).
+const SCHEDULED_TOOLS: &[&str] = &["git", "claude", "codex", "gh", "gemini", "cursor-agent"];
+
+/// Directories always on the job's PATH, so a tool installed later in a
+/// standard place is still found.
+const BASELINE_PATHS: &[&str] = &["/usr/local/bin", "/usr/bin", "/bin"];
+
+/// Environment for the scheduled job, captured when it is installed. cron
+/// starts jobs without the login session's PATH or ssh-agent, so without
+/// these a scheduled sync cannot find the AI CLIs or push over SSH.
+/// Values cron cannot carry (`%`, control characters) are left out.
+pub(super) fn scheduled_environment() -> Vec<(&'static str, String)> {
+    let home = dirs::home_dir();
+    let mut dirs: Vec<String> = SCHEDULED_TOOLS
+        .iter()
+        .filter_map(|tool| which::which(tool).ok())
+        .filter_map(|path| path.parent().map(|dir| dir.to_string_lossy().into_owned()))
+        .collect();
+    if let Some(home) = &home {
+        for sub in [".local/bin", ".cargo/bin"] {
+            dirs.push(home.join(sub).to_string_lossy().into_owned());
+        }
+    }
+    dirs.extend(BASELINE_PATHS.iter().map(|dir| dir.to_string()));
+    let mut seen = std::collections::HashSet::new();
+    let path = dirs
+        .into_iter()
+        .filter(|dir| is_cron_safe(dir) && !dir.contains(':'))
+        .filter(|dir| seen.insert(dir.clone()))
+        .collect::<Vec<_>>()
+        .join(":");
+
+    let mut environment = vec![("PATH", path)];
+    if let Ok(socket) = std::env::var("SSH_AUTH_SOCK") {
+        if !socket.is_empty() && is_cron_safe(&socket) {
+            environment.push(("SSH_AUTH_SOCK", socket));
+        }
+    }
+    environment
+}
+
+fn is_cron_safe(text: &str) -> bool {
+    !text.contains('%') && !text.chars().any(char::is_control)
+}
+
+/// Build the comment and crontab entry lines for a repo. `environment` is
+/// set for the `commitbook` process only, as shell assignments in front of
+/// it, so the user's other cron jobs are unaffected.
 pub(super) fn build_crontab_entry(
     repo_path: &Path,
     schedule: &str,
     commitbook_bin: &Path,
+    environment: &[(&str, String)],
 ) -> Result<(String, String)> {
     let repo = cron_safe("Repository", repo_path)?;
     let bin = cron_safe("CommitBook binary", commitbook_bin)?;
     let comment = format!("{CRON_COMMENT_PREFIX}{repo}");
+    let assignments: String = environment
+        .iter()
+        .filter(|(_, value)| is_cron_safe(value))
+        .map(|(name, value)| format!("{name}={} ", shell_quote(value)))
+        .collect();
     let entry = format!(
-        "{schedule} cd {} && {} sync",
+        "{schedule} cd {} && {assignments}{} sync",
         shell_quote(&repo),
         shell_quote(&bin)
     );
     Ok((comment, entry))
+}
+
+/// Skip `NAME='value' ` shell assignments in front of the command.
+fn skip_assignments(mut rest: &str) -> Option<&str> {
+    loop {
+        let Some(eq) = rest.find('=') else {
+            return Some(rest);
+        };
+        let name = &rest[..eq];
+        let is_name = !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+        if !is_name {
+            return Some(rest);
+        }
+        let (_, after) = shell_unquote(&rest[eq + 1..])?;
+        rest = after.strip_prefix(' ')?;
+    }
 }
 
 /// The repository and binary of a crontab line CommitBook wrote:
@@ -73,7 +146,7 @@ pub(super) fn build_crontab_entry(
 fn parse_entry(line: &str) -> Option<(String, String)> {
     let start = line.find(" cd ")? + " cd ".len();
     let (repo, rest) = shell_unquote(&line[start..])?;
-    let rest = rest.strip_prefix(" && ")?;
+    let rest = skip_assignments(rest.strip_prefix(" && ")?)?;
     let (bin, rest) = shell_unquote(rest)?;
     matches!(rest.trim_end(), " sync" | " run").then_some((repo, bin))
 }
@@ -104,7 +177,12 @@ pub(super) fn filter_crontab_lines(current: &str, repo_path: &Path) -> String {
 /// Install the crontab entry for the repo, replacing an earlier one. The
 /// crontab is read once and written once.
 pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<()> {
-    let (comment, entry) = build_crontab_entry(repo_path, schedule, commitbook_bin)?;
+    let (comment, entry) = build_crontab_entry(
+        repo_path,
+        schedule,
+        commitbook_bin,
+        &scheduled_environment(),
+    )?;
     let current = get_current_crontab()?;
     let kept = filter_crontab_lines(&current, repo_path);
     let new_crontab = if kept.trim().is_empty() {
