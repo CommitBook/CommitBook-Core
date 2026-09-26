@@ -44,6 +44,14 @@ pub struct CommitBookSummary {
     pub conflict_count: u32,
 }
 
+/// A managed clone whose config could not be loaded; see
+/// `list_broken_commitbooks`.
+#[derive(Debug, Clone)]
+pub struct BrokenCommitBook {
+    pub path: String,
+    pub error: String,
+}
+
 /// Result of `discover_commitbooks`, one entry per remote repo.
 #[derive(Debug, Clone)]
 pub struct DiscoveredCommitBook {

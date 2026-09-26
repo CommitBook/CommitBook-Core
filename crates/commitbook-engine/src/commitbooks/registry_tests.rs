@@ -103,10 +103,9 @@ fn scan_skips_clones_whose_remote_has_no_owner() {
     assert!(cbs.is_empty(), "{cbs:?}");
 }
 
-#[test]
-fn scan_surfaces_config_errors_with_clone_context() {
-    let tmp = tempfile::tempdir().unwrap();
-    let clone = tmp.path().join("manuel__notes");
+/// A clone whose config uses the pre-0.9 format, which no longer loads.
+fn write_old_format_clone(root: &std::path::Path, dir: &str) -> std::path::PathBuf {
+    let clone = root.join(dir);
     git2::Repository::init(&clone).unwrap();
     fs::create_dir_all(clone.join(".CommitBook")).unwrap();
     fs::write(
@@ -114,14 +113,48 @@ fn scan_surfaces_config_errors_with_clone_context() {
         "config_version = \"1\"\nschedule = \"hourly\"\n",
     )
     .unwrap();
+    clone
+}
 
-    let error = format!("{:#}", scan_workspaces_root(tmp.path()).unwrap_err());
+#[test]
+fn scan_reports_a_broken_clone_without_hiding_the_others() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_commitbook(tmp.path(), "manuel", "notes", "main");
+    write_old_format_clone(tmp.path(), "manuel__old");
+
+    let scan = scan_workspaces(tmp.path()).unwrap();
+    let ids: Vec<&str> = scan.commitbooks.iter().map(|cb| cb.id.as_str()).collect();
+    assert_eq!(ids, ["manuel/notes"]);
+    assert_eq!(scan.broken.len(), 1);
+    let error = &scan.broken[0].error;
     assert!(
         error.contains("Failed to load CommitBook config"),
         "{error}"
     );
-    assert!(error.contains("manuel__notes"), "{error}");
+    assert!(error.contains("manuel__old"), "{error}");
     assert!(error.contains("commitbook init"), "{error}");
+
+    // The usable clone is still found by id.
+    assert!(registry::find_by_id(tmp.path(), "manuel/notes")
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn find_by_id_names_broken_clones_when_the_id_is_missing() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_old_format_clone(tmp.path(), "manuel__old");
+    let error = format!(
+        "{:#}",
+        registry::find_by_id(tmp.path(), "manuel/old").unwrap_err()
+    );
+    assert!(error.contains("1 clone(s) could not be loaded"), "{error}");
+    assert!(error.contains("manuel__old"), "{error}");
+
+    let clean = tempfile::tempdir().unwrap();
+    assert!(registry::find_by_id(clean.path(), "manuel/old")
+        .unwrap()
+        .is_none());
 }
 
 #[test]

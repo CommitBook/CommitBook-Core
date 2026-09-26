@@ -154,6 +154,20 @@ impl CommitBookEngineClient {
             .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
     }
 
+    /// Clones that `list_commitbooks` leaves out because their config could
+    /// not be loaded, with the reason, so the app can offer a fix.
+    pub fn list_broken_commitbooks(&self) -> Result<Vec<BrokenCommitBook>> {
+        let scan = commitbook_engine::commitbooks::scan_workspaces(&self.workspaces_root)?;
+        Ok(scan
+            .broken
+            .into_iter()
+            .map(|clone| BrokenCommitBook {
+                path: clone.path.display().to_string(),
+                error: clone.error,
+            })
+            .collect())
+    }
+
     pub fn list_commitbooks(&self) -> Result<Vec<CommitBookSummary>> {
         let books = commitbook_engine::commitbooks::scan_workspaces_root(&self.workspaces_root)?;
         Ok(books

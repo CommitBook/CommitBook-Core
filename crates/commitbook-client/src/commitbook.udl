@@ -72,6 +72,14 @@ dictionary CommitBookSummary {
     u32 conflict_count;
 };
 
+// A clone in the workspaces root whose `.CommitBook/config.toml` could not
+// be loaded (for example an older config format). Listed separately so the
+// app can show it without hiding the other CommitBooks.
+dictionary BrokenCommitBook {
+    string path;
+    string error;
+};
+
 dictionary DiscoveredCommitBook {
     string owner;
     string repo;
@@ -145,6 +153,9 @@ interface CommitBookEngineClient {
 
     [Throws=CommitBookError]
     sequence<CommitBookSummary> list_commitbooks();
+
+    [Throws=CommitBookError]
+    sequence<BrokenCommitBook> list_broken_commitbooks();
 
     [Throws=CommitBookError]
     CommitBookSummary get_commitbook(string commitbook_id);

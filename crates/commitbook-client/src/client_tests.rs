@@ -100,3 +100,47 @@ fn constructor_rejects_symlink_workspace_root() {
     )
     .is_err());
 }
+
+#[test]
+fn a_broken_clone_is_listed_separately_and_does_not_hide_the_others() {
+    let root = tempfile::tempdir().unwrap();
+    let good = root.path().join("owner__notes");
+    std::fs::create_dir(&good).unwrap();
+    git2::Repository::init(&good)
+        .unwrap()
+        .remote("origin", "https://github.com/owner/notes.git")
+        .unwrap();
+    commitbook_engine::config::LocalConfig::new("Notes", "main", "origin")
+        .save(&good)
+        .unwrap();
+    let old = root.path().join("owner__old");
+    std::fs::create_dir_all(old.join(".CommitBook")).unwrap();
+    git2::Repository::init(&old).unwrap();
+    std::fs::write(
+        old.join(".CommitBook/config.toml"),
+        "config_version = \"1\"\n",
+    )
+    .unwrap();
+
+    let client = CommitBookEngineClient::new(
+        "unused-db-path".to_string(),
+        root.path().to_string_lossy().into_owned(),
+        None,
+    )
+    .unwrap();
+    let listed: Vec<String> = client
+        .list_commitbooks()
+        .unwrap()
+        .into_iter()
+        .map(|cb| cb.id)
+        .collect();
+    assert_eq!(listed, ["owner/notes"]);
+    let broken = client.list_broken_commitbooks().unwrap();
+    assert_eq!(broken.len(), 1);
+    assert!(broken[0].path.ends_with("owner__old"), "{:?}", broken[0]);
+    assert!(
+        broken[0].error.contains("commitbook init"),
+        "{:?}",
+        broken[0]
+    );
+}
