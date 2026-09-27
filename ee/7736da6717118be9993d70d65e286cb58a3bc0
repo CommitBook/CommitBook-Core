@@ -1,0 +1,26 @@
+docs/BrandKit/icon-exploration.html
+  s_2dba78f02e1b46::t_2bfb3ea7c07e1a 7,50
+  s_2dba78f02e1b46::t_fb7dfd6e1a8df7 1-6,8-49,51-60
+docs/BrandKit/icon-exploration-round-2.html
+  s_2dba78f02e1b46::t_85f34676ea6484 1-66
+docs/BrandKit/commitbook-timeline-stack.svg
+  s_2dba78f02e1b46::t_09f231a1025faf 1-15
+docs/BrandKit/icon-timeline-stack.html
+  s_2dba78f02e1b46::t_32dc62034f5042 1-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ee7736da6717118be9993d70d65e286cb58a3bc0",
+  "prompts": {},
+  "sessions": {
+    "s_2dba78f02e1b46": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e2bb-0fce-7fb2-b658-823e0d0f8c0b",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
