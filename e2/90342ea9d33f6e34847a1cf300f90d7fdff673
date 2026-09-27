@@ -1,0 +1,33 @@
+docs/BrandKit/icon-system-notes.md
+  s_2dba78f02e1b46::t_b49966c3e333e8 1-4
+docs/BrandKit/README.md
+  s_2dba78f02e1b46::t_b49966c3e333e8 1-42
+docs/BrandKit/commitbook-app-icon.svg
+  s_2dba78f02e1b46::t_67fb63aece3379 1
+docs/BrandKit/commitbook-logo.svg
+  s_2dba78f02e1b46::t_67fb63aece3379 1
+README.md
+  s_2dba78f02e1b46::t_67fb63aece3379 3-4
+docs/BrandKit/index.html
+  s_2dba78f02e1b46::t_b49966c3e333e8 1
+docs/BrandKit/commitbook-product-icon.svg
+  s_2dba78f02e1b46::t_67fb63aece3379 1
+docs/BrandKit/icon-exploration.html
+  s_2dba78f02e1b46::t_67fb63aece3379 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e290342ea9d33f6e34847a1cf300f90d7fdff673",
+  "prompts": {},
+  "sessions": {
+    "s_2dba78f02e1b46": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e2bb-0fce-7fb2-b658-823e0d0f8c0b",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
