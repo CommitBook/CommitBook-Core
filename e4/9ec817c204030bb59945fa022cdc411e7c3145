@@ -1,0 +1,57 @@
+docs/BrandKit/commitbook-113-logo.svg
+  s_2dba78f02e1b46::t_e9acc106b70e68 1
+docs/BrandKit/commitbook-97-logo.svg
+  s_2dba78f02e1b46::t_017712e67cac89 1
+docs/BrandKit/icon-dot-treatments.html
+  s_2dba78f02e1b46::t_c01eeff6b5dfcd 1-40
+docs/BrandKit/commitbook-97-app-square.svg
+  s_2dba78f02e1b46::t_017712e67cac89 1
+docs/BrandKit/commitbook-117-app-square.svg
+  s_2dba78f02e1b46::t_498a9d29650f8f 1
+docs/BrandKit/commitbook-111-app-square.svg
+  s_2dba78f02e1b46::t_c01eeff6b5dfcd 1
+docs/BrandKit/commitbook-110-logo.svg
+  s_2dba78f02e1b46::t_c01eeff6b5dfcd 1
+docs/BrandKit/icon-integrated-timeline.html
+  s_2dba78f02e1b46::t_017712e67cac89 1-39
+docs/BrandKit/icon-system-notes.md
+  s_2dba78f02e1b46::t_84e63272526b34 12-14
+  s_2dba78f02e1b46::t_60619649983000 15-18
+  s_2dba78f02e1b46::t_e1789c040d5940 8-11
+  s_2dba78f02e1b46::t_794c78025959cc 6,19-21
+  s_2dba78f02e1b46::t_e9acc106b70e68 5,7
+docs/BrandKit/commitbook-111-logo.svg
+  s_2dba78f02e1b46::t_c01eeff6b5dfcd 1
+docs/BrandKit/commitbook-113-app-square.svg
+  s_2dba78f02e1b46::t_e9acc106b70e68 1
+docs/BrandKit/icon-vertical-timeline-studies.html
+  s_2dba78f02e1b46::t_5ca63aeecd5ec1 1-50
+docs/BrandKit/commitbook-117-logo.svg
+  s_2dba78f02e1b46::t_498a9d29650f8f 1
+docs/BrandKit/commitbook-103-logo.svg
+  s_2dba78f02e1b46::t_5ca63aeecd5ec1 1
+docs/BrandKit/commitbook-103-app-square.svg
+  s_2dba78f02e1b46::t_5ca63aeecd5ec1 1
+docs/BrandKit/icon-111-refinements.html
+  s_2dba78f02e1b46::t_3a6554a92dd2cb 1-5,7,9-11,14-32,35,37-39
+  s_2dba78f02e1b46::t_e9acc106b70e68 6,8,13,33-34,36
+  s_2dba78f02e1b46::t_498a9d29650f8f 12
+docs/BrandKit/commitbook-110-app-square.svg
+  s_2dba78f02e1b46::t_c01eeff6b5dfcd 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e49ec817c204030bb59945fa022cdc411e7c3145",
+  "prompts": {},
+  "sessions": {
+    "s_2dba78f02e1b46": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e2bb-0fce-7fb2-b658-823e0d0f8c0b",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
