@@ -102,6 +102,28 @@ fn refresh_clears_provider_status_when_disabled_or_config_invalid() {
 }
 
 #[test]
+fn background_refresh_keeps_navigation_and_action_feedback() {
+    let tmp = tempfile::tempdir().unwrap();
+    LocalConfig::init(tmp.path(), &LocalConfig::new("notes", "main", "origin")).unwrap();
+    let mut app = App::blank(tmp.path());
+    let refresh = start_refresh(tmp.path(), false);
+    app.handle_key(KeyCode::Tab, KeyModifiers::NONE);
+    app.log_scroll = 4;
+    app.status_scroll = 2;
+    app.action_error = Some("scheduler failed".into());
+    app.refreshing = true;
+
+    app.apply_refresh(refresh.join().unwrap());
+
+    assert_eq!(app.branch, "main");
+    assert_eq!(app.active_panel, Panel::Logs);
+    assert_eq!(app.log_scroll, 4);
+    assert_eq!(app.status_scroll, 2);
+    assert_eq!(app.action_error.as_deref(), Some("scheduler failed"));
+    assert!(!app.refreshing);
+}
+
+#[test]
 fn preview_navigation_refreshes_and_returns_to_dashboard() {
     let tmp = tempfile::tempdir().unwrap();
     std::process::Command::new("git")

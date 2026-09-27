@@ -269,8 +269,8 @@ fn draw_providers(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(table, area);
 }
 
-fn draw_footer(f: &mut Frame, _app: &App, area: Rect) {
-    let keys = Line::from(vec![
+fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
+    let mut keys = vec![
         Span::styled(
             " Tab",
             Style::default()
@@ -306,9 +306,12 @@ fn draw_footer(f: &mut Frame, _app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(":scroll status/logs  p:preview"),
-    ]);
+    ];
+    if app.refreshing {
+        keys.push(Span::raw("  Refreshing…"));
+    }
 
-    let paragraph = Paragraph::new(keys).style(Style::default().fg(Color::White));
+    let paragraph = Paragraph::new(Line::from(keys)).style(Style::default().fg(Color::White));
     f.render_widget(paragraph, area);
 }
 

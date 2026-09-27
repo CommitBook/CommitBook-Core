@@ -69,6 +69,7 @@ pub struct App {
     pub current_branch: String,
     /// Outcome of the most recent start/stop action, cleared on success.
     pub action_error: Option<String>,
+    pub refreshing: bool,
     pub quit: bool,
 }
 
@@ -91,6 +92,7 @@ impl LogEntry {
 }
 
 impl App {
+    #[cfg(test)]
     pub fn new(repo_path: &Path) -> Self {
         let mut app = Self::blank(repo_path);
         app.refresh();
@@ -122,6 +124,7 @@ impl App {
             changes: ChangesSummary::default(),
             current_branch: String::new(),
             action_error: None,
+            refreshing: false,
             quit: false,
         }
     }
@@ -205,6 +208,33 @@ impl App {
         self.providers = chain.check_availability(&provider_keys);
     }
 
+    /// Apply only repository-derived state from a background refresh. Keep
+    /// panel selection, scroll positions, errors, and quit state on the UI
+    /// thread so a late result cannot undo a key press.
+    fn apply_refresh(&mut self, refreshed: Self) {
+        self.repository_status = refreshed.repository_status;
+        self.last_commit = refreshed.last_commit;
+        self.scheduler = refreshed.scheduler;
+        self.running = refreshed.running;
+        self.scheduler_warning = refreshed.scheduler_warning;
+        self.schedule = refreshed.schedule;
+        self.schedule_desc = refreshed.schedule_desc;
+        self.branch = refreshed.branch;
+        self.commit = refreshed.commit;
+        self.conflicts = refreshed.conflicts;
+        self.log_keep = refreshed.log_keep;
+        self.log_lines = refreshed.log_lines;
+        self.providers = refreshed.providers;
+        self.changes = refreshed.changes;
+        self.current_branch = refreshed.current_branch;
+        if self.preview.is_some() {
+            if let Some(preview) = refreshed.preview {
+                self.preview = Some(preview);
+            }
+        }
+        self.refreshing = false;
+    }
+
     pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
         if self.preview.is_some() {
             match code {
@@ -268,23 +298,74 @@ impl App {
             settings::start_scheduler(&self.repo_path, &context)
         };
         self.action_error = result.err().map(|error| format!("{error:#}"));
-        self.refresh();
     }
+}
+
+fn start_refresh(repo_path: &Path, include_preview: bool) -> std::thread::JoinHandle<App> {
+    let repo_path = repo_path.to_path_buf();
+    std::thread::spawn(move || {
+        let mut snapshot = App::blank(&repo_path);
+        snapshot.refresh();
+        if include_preview {
+            snapshot.preview = Some(commitbook_engine::inspection::preview(&repo_path));
+        }
+        snapshot
+    })
 }
 
 pub fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     repo_path: &Path,
 ) -> Result<()> {
-    let mut app = App::new(repo_path);
+    let mut app = App::blank(repo_path);
+    let mut refresh_job = Some(start_refresh(repo_path, false));
+    let mut refresh_again = false;
+    app.refreshing = true;
     let mut last_tick = Instant::now();
 
     loop {
+        if refresh_job
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
+            match refresh_job.take().expect("finished refresh job").join() {
+                Ok(refreshed) => app.apply_refresh(refreshed),
+                Err(_) => {
+                    app.refreshing = false;
+                    app.action_error = Some("Background refresh failed".into());
+                }
+            }
+            if refresh_again {
+                refresh_job = Some(start_refresh(repo_path, app.preview.is_some()));
+                app.refreshing = true;
+                refresh_again = false;
+            }
+        }
         terminal.draw(|f| crate::ui::draw(f, &app))?;
 
         if event::poll(POLL_RATE)? {
             if let Event::Key(key) = event::read()? {
-                app.handle_key(key.code, key.modifiers);
+                if key.code == KeyCode::Char('r') {
+                    if refresh_job.is_none() {
+                        refresh_job = Some(start_refresh(repo_path, app.preview.is_some()));
+                        app.refreshing = true;
+                    } else {
+                        refresh_again = true;
+                    }
+                    last_tick = Instant::now();
+                } else {
+                    let toggling_scheduler =
+                        key.code == KeyCode::Char('s') && app.preview.is_none();
+                    app.handle_key(key.code, key.modifiers);
+                    if toggling_scheduler {
+                        if refresh_job.is_none() {
+                            refresh_job = Some(start_refresh(repo_path, false));
+                            app.refreshing = true;
+                        } else {
+                            refresh_again = true;
+                        }
+                    }
+                }
             }
         }
 
@@ -293,7 +374,10 @@ pub fn run(
         }
 
         if last_tick.elapsed() >= TICK_RATE {
-            app.refresh();
+            if refresh_job.is_none() {
+                refresh_job = Some(start_refresh(repo_path, app.preview.is_some()));
+                app.refreshing = true;
+            }
             last_tick = Instant::now();
         }
     }
