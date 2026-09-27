@@ -105,3 +105,48 @@ fn remote_identity_reads_the_named_remote() {
     assert_eq!(identity.repo, "notes");
     assert!(remote_identity(tmp.path(), "origin").is_err());
 }
+
+#[test]
+fn windows_drive_paths_and_file_urls_are_local_on_every_platform() {
+    for (url, owner) in [
+        ("C:/notes.git", ""),
+        (r"C:\notes.git", ""),
+        ("c:/books/notes.git", "books"),
+        (r"D:\books\notes.git", "books"),
+        ("file:///C:/notes.git", ""),
+        ("file:///C:/books/notes.git", "books"),
+        ("file:/C:/books/notes.git", "books"),
+        ("file:C:/books/notes.git", "books"),
+        (r"file:///C:\books\notes.git", "books"),
+        ("FILE:///c:/books/notes.git", "books"),
+    ] {
+        let identity = parse_remote_url(url).unwrap();
+        assert_eq!(identity.provider, Provider::GenericGit, "{url}");
+        assert_eq!(identity.owner, owner, "{url}");
+        assert_eq!(identity.repo, "notes", "{url}");
+        assert!(!identity.ssh, "{url}");
+    }
+}
+
+#[test]
+fn local_path_normalization_preserves_scp_and_posix_paths() {
+    for url in [
+        "host:books/notes.git",
+        "git@host:books/notes.git",
+        "ssh://host/books/notes.git",
+    ] {
+        let identity = parse_remote_url(url).unwrap();
+        assert!(identity.ssh, "{url}");
+        assert_eq!(identity.owner, "books");
+        assert_eq!(identity.repo, "notes");
+    }
+    for url in [
+        r"/srv/books\archive/notes.git",
+        r"file:///srv/books\archive/notes.git",
+    ] {
+        let identity = parse_remote_url(url).unwrap();
+        assert!(!identity.ssh);
+        assert_eq!(identity.owner, r"books\archive");
+        assert_eq!(identity.repo, "notes");
+    }
+}

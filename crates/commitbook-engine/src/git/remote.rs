@@ -45,20 +45,19 @@ pub fn parse_remote_url(url: &str) -> Result<RemoteIdentity> {
     if trimmed.is_empty() {
         bail!("Remote URL is empty");
     }
-    let (host, path, ssh) = if let Some((scheme, rest)) = trimmed.split_once("://") {
+    let local = local_remote_path(trimmed);
+    let (host, path, ssh) = if let Some(path) = local.as_deref() {
+        (None, path, false)
+    } else if let Some((scheme, rest)) = trimmed.split_once("://") {
         let scheme = scheme.to_ascii_lowercase();
-        if scheme == "file" {
-            (None, rest, false)
-        } else {
-            let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-            let host = authority.rsplit('@').next().unwrap_or(authority);
-            let host = host.split(':').next().unwrap_or(host);
-            (
-                Some(host),
-                path,
-                scheme == "ssh" || scheme.starts_with("git+ssh"),
-            )
-        }
+        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+        let host = authority.rsplit('@').next().unwrap_or(authority);
+        let host = host.split(':').next().unwrap_or(host);
+        (
+            Some(host),
+            path,
+            scheme == "ssh" || scheme.starts_with("git+ssh"),
+        )
     } else if let Some((authority, path)) = scp_like(trimmed) {
         let host = authority.rsplit('@').next().unwrap_or(authority);
         (Some(host), path, true)
@@ -94,6 +93,31 @@ pub fn parse_remote_url(url: &str) -> Result<RemoteIdentity> {
         repo: repo.to_string(),
         ssh,
     })
+}
+
+/// Normalize absolute Windows paths independently of the host OS. A drive
+/// prefix is not an SSH host or a parent directory in the repository identity.
+/// Only Windows paths get backslash normalization; POSIX names keep theirs.
+fn local_remote_path(url: &str) -> Option<String> {
+    fn windows_path(path: &str) -> Option<String> {
+        let bytes = path.as_bytes();
+        (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'/' | b'\\'))
+        .then(|| path[2..].replace('\\', "/"))
+    }
+    if url
+        .get(..5)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"))
+    {
+        let path = &url[5..];
+        return Some(
+            windows_path(path.trim_start_matches('/'))
+                .unwrap_or_else(|| path.strip_prefix("//").unwrap_or(path).to_string()),
+        );
+    }
+    windows_path(url)
 }
 
 /// Split scp-like `[user@]host:path`, which Git treats as SSH. A colon after
