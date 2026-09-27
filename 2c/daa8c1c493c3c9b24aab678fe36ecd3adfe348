@@ -1,0 +1,28 @@
+crates/commitbook-tui/src/ui.rs
+  s_4e227ad1a6ca8e::t_bd8e38b09478a4 272-273,309-312,314
+crates/commitbook-tui/src/app_tests.rs
+  s_4e227ad1a6ca8e::t_3ef2a7097bcb5e 105-106,108,111-115,117,119-125
+  s_4e227ad1a6ca8e::t_6292402382b11d 107,109-110,116,118
+  s_4e227ad1a6ca8e::t_b51f63ee4c0dab 104
+crates/commitbook-tui/src/app.rs
+  s_4e227ad1a6ca8e::t_05eef71c8c8586 357-358
+  s_4e227ad1a6ca8e::t_bd7a957d12de6b 72,127,211-237,304-315,320-321,323,327-337,343,348-351,354-356,359,367-368,377-380
+  s_4e227ad1a6ca8e::t_c3ca9d9e733c4e 322,338-342,352-353,360-366
+  s_4e227ad1a6ca8e::t_11dcb2f2de6127 95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2cdaa8c1c493c3c9b24aab678fe36ecd3adfe348",
+  "prompts": {},
+  "sessions": {
+    "s_4e227ad1a6ca8e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e1cb-88d7-7770-b109-b3f0bf61abc8",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
