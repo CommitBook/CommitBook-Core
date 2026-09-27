@@ -1,0 +1,46 @@
+docs/BrandKit/commitbook-94-app-square.svg
+  s_2dba78f02e1b46::t_42c1a45ea548bf 1
+docs/BrandKit/commitbook-95-logo.svg
+  s_2dba78f02e1b46::t_3cae18dca1dbb8 1
+docs/BrandKit/commitbook-94-logo.svg
+  s_2dba78f02e1b46::t_42c1a45ea548bf 1
+docs/BrandKit/commitbook-96-app-square.svg
+  s_2dba78f02e1b46::t_06607a1990a5ba 1
+docs/BrandKit/icon-63-variations.html
+  s_2dba78f02e1b46::t_42c1a45ea548bf 19-20,31-34,60
+  s_2dba78f02e1b46::t_e13034adeb6fc2 1-18,21-30,35-59,61-73
+docs/BrandKit/commitbook-96-logo.svg
+  s_2dba78f02e1b46::t_06607a1990a5ba 1
+docs/BrandKit/icon-system-notes.md
+  s_70565235989831::t_23d04c072a782a 7,9
+  s_2dba78f02e1b46::t_42c1a45ea548bf 8
+docs/BrandKit/icon-top-left-stack.html
+  s_2dba78f02e1b46::t_3cae18dca1dbb8 1-3,7,9,11,13-26,29-32,35-36,38-39
+  s_70565235989831::t_23d04c072a782a 4-6,8,10,12,27-28,33-34,37
+docs/BrandKit/commitbook-95-app-square.svg
+  s_2dba78f02e1b46::t_3cae18dca1dbb8 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4e80bd88fa20739aae4b9b3438787c201c5f3364",
+  "prompts": {},
+  "sessions": {
+    "s_2dba78f02e1b46": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e2bb-0fce-7fb2-b658-823e0d0f8c0b",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_70565235989831": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e37e-0732-7811-9e2f-e3558b3547ea",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
