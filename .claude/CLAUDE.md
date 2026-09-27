@@ -61,7 +61,7 @@ commitbook status      # Show local commit, remote, scheduler, devices, and last
 commitbook devices     # List devices; `rename <name>` renames this one, `remove <id>` another
 commitbook preview     # List what the next sync would commit (read-only, --json)
 commitbook schedule    # Change schedule
-commitbook doctor      # Health check
+commitbook doctor      # Health check (--json for structured output, --fix for locked repairs)
 commitbook log         # Activity log
 commitbook completions # Generate shell completion scripts
 ```
@@ -107,7 +107,7 @@ keep = "30d"            # <N>d | forever
 
 ## Commit messages
 
-`[commit] mode = "timestamp"` (default) uses only the deterministic `FallbackProvider` (a `Writing <timestamp> (...)` message) and never spawns an AI CLI. `mode = "ai"` asks `[commit] agent` (or, for `any`, Copilot, Claude, Codex, Gemini, Cursor in order), then falls back to the timestamp. Key selection lives in `commitbook_engine::ai::commit_provider_keys`.
+`[commit] mode = "timestamp"` (default) uses only the deterministic `FallbackProvider` (`Writing <timestamp>`) and never spawns an AI CLI. `mode = "ai"` asks `[commit] agent` (or, for `any`, Copilot, Claude, Codex, Gemini, Cursor in order), then falls back to the timestamp. Key selection lives in `commitbook_engine::ai::commit_provider_keys`.
 
 ## Status, preview, and settings
 
@@ -118,16 +118,16 @@ keep = "30d"            # <N>d | forever
 - `last_sync_at` marks a successful cycle, not a push. `last_attempt_at`, `last_fetch_at`, `last_push_at`, and `last_error_stage` distinguish attempts, remote checks, publication, and the failing stage.
 - `commitbook preview`, web `/changes`, and the TUI `p` screen show what normal staging would commit: every non-ignored Git file of any type, not only Markdown. Preview writes nothing.
 - The web dashboard (127.0.0.1 only, no login) rejects any request whose `Host` is not a local name (DNS rebinding) and any state-changing request whose `Origin`/`Sec-Fetch-Site` is not its own origin (CSRF); see `guard_local_requests` in `commitbook-web/src/routes.rs`.
-- Settings changes from CLI, web, and TUI go through `commitbook-engine/src/settings/` under the repository lock; config writes are atomic and an active scheduler is reinstalled (or rolled back) when the schedule changes. A branch change is accepted only when that branch is checked out; `[git] remote` is not editable after `init`.
+- Settings changes from CLI and web go through `commitbook-engine/src/settings/` under the repository lock; the TUI displays settings and can start or stop the scheduler. Config writes are atomic and an active scheduler is reinstalled (or rolled back) when the schedule changes. A branch change is accepted only when that branch is checked out; `[git] remote` is not editable after `init`.
 
 ## Code Conventions
 
 - **Tests are colocated** in separate `*_tests.rs` files, referenced via `#[cfg(test)] #[path = "..._tests.rs"] mod tests;`. Never write tests inline in source files.
 - **No database or ORM.** State is TOML files + directory structure.
-- **Rust edition 2021.** `set_var` requires `unsafe` blocks.
+- **Rust edition 2021.** `std::env::set_var` does not require an `unsafe` block in this workspace.
 - Async traits use `#[async_trait]`.
 - Every subprocess spawned during sync (AI CLIs, `gh` probes, `gpg`/`ssh-keygen` signing) goes through `process::run_bounded`, which enforces one deadline covering exit and output draining and kills the process group on timeout. Never call `.output()` or `wait_with_output()` there.
-- Desktop git operations shell out to `git` CLI; mobile builds skip these via `#[cfg(not(any(target_os = "ios", target_os = "android")))]` and reach git through the `CredentialProvider`-based git2 path.
+- Desktop and mobile Git operations use git2/libgit2 through the shared engine and `CredentialProvider` abstraction. Desktop uses system Git credentials and may spawn `gpg` or `ssh-keygen` for commit signing; mobile does not spawn signing subprocesses.
 
 ## .CommitBook/ Directory
 
