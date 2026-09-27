@@ -4,7 +4,9 @@ Open `icon-system-exploration.html` directly in a browser. It contains 12 new di
 
 ## Current direction
 
-The user selected **50 / Matched tones** and rejected the other connected variants. Continue with `icon-50-refinements.html` (62–70), which varies only the corner treatment and timeline line tone. **63 / No fold + lighter line** is the new design recommendation, pending user selection. Its logo and square app source are `commitbook-63-logo.svg` and `commitbook-63-app-square.svg`. Earlier assets are retained as exploration history, not approved replacements.
+The latest composition is **96 / Five lines, refined** in `icon-top-left-stack.html`. The front sheet is upper left and the oldest sheet is lower right. The timeline remains on the left and ends at dot three, with no tail. The five text strokes begin near the top and use lengths **13, 25, 25, 20, 25** units: short, long, long, slightly shorter, long. All have equal weight and spacing, with no heading hierarchy.
+
+Current editable sources are `commitbook-96-logo.svg` and `commitbook-96-app-square.svg`. The no-fold geometry, smaller check, lighter rail, and customizable matched page/node colors remain. Earlier sources, including 95, are exploration history rather than the current direction.
 
 ## Previous recommendation (superseded)
 
