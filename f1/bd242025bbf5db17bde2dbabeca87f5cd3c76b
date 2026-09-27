@@ -1,0 +1,23 @@
+crates/commitbook-engine/src/git/remote.rs
+  s_369a7f50f81cd6::t_29ce39344663e3 53-60,110-113
+  s_369a7f50f81cd6::t_665601aa4887fd 48-51,98-109,114-120
+  s_369a7f50f81cd6::t_ef43df7b527eae 121-122
+crates/commitbook-engine/src/git/remote_tests.rs
+  s_369a7f50f81cd6::t_af148d52d60a75 108-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f1bd242025bbf5db17bde2dbabeca87f5cd3c76b",
+  "prompts": {},
+  "sessions": {
+    "s_369a7f50f81cd6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e450-5b79-7bb2-b66f-042172ef914c",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
