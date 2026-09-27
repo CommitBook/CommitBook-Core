@@ -78,10 +78,145 @@ fn delete_never_follows_workspace_symlink() {
     .unwrap();
 
     let error = client
-        .delete_commitbook("owner/repo".to_string())
+        .delete_commitbook("owner/repo".to_string(), false)
         .expect_err("symlinked clone must not be registered or deleted");
     assert!(matches!(error, CommitBookError::NotFound { .. }));
     assert!(outside.path().join(".CommitBook/config.toml").exists());
+}
+
+fn deletion_fixture() -> (tempfile::TempDir, CommitBookEngineClient, PathBuf) {
+    let root = tempfile::tempdir().unwrap();
+    let clone = root.path().join("owner__repo");
+    let repo = git2::Repository::init(&clone).unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.remote("origin", "https://github.com/owner/repo.git")
+        .unwrap();
+    commitbook_engine::config::LocalConfig::new("Notes", "main", "origin")
+        .save(&clone)
+        .unwrap();
+    commitbook_engine::config::LocalConfig::ensure_gitignore(&clone).unwrap();
+    std::fs::write(clone.join("note.md"), "published\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_path(std::path::Path::new(".CommitBook/config.toml"))
+        .unwrap();
+    index
+        .add_path(std::path::Path::new(".CommitBook/.gitignore"))
+        .unwrap();
+    index.add_path(std::path::Path::new("note.md")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+    let published = repo
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "published",
+            &tree,
+            &[],
+        )
+        .unwrap();
+    repo.reference("refs/remotes/origin/main", published, true, "test")
+        .unwrap();
+    assert!(
+        !commitbook_engine::git::GitRepo::open(&clone)
+            .unwrap()
+            .has_dirty_changes()
+            .unwrap(),
+        "published fixture must start clean"
+    );
+    let client = CommitBookEngineClient::new(
+        "unused".to_string(),
+        root.path().to_string_lossy().into_owned(),
+        None,
+    )
+    .unwrap();
+    (root, client, clone)
+}
+
+fn assert_delete_refused(client: &CommitBookEngineClient, clone: &std::path::Path, reason: &str) {
+    let error = client
+        .delete_commitbook("owner/repo".to_string(), false)
+        .expect_err("unsaved work must prevent deletion");
+    assert!(
+        matches!(error, CommitBookError::InvalidInput { .. }),
+        "{error}"
+    );
+    assert!(error.to_string().contains(reason), "{error}");
+    assert!(clone.exists(), "refused deletion must leave clone intact");
+}
+
+#[test]
+fn delete_clean_clone() {
+    let (_root, client, clone) = deletion_fixture();
+    client
+        .delete_commitbook("owner/repo".to_string(), false)
+        .unwrap();
+    assert!(!clone.exists());
+}
+
+#[test]
+fn delete_refuses_uncommitted_changes() {
+    let (_root, client, clone) = deletion_fixture();
+    std::fs::write(clone.join("draft.md"), "uncommitted\n").unwrap();
+    assert_delete_refused(&client, &clone, "never committed");
+}
+
+#[test]
+fn delete_refuses_git_operation_in_progress() {
+    let (_root, client, clone) = deletion_fixture();
+    let repo = git2::Repository::open(&clone).unwrap();
+    let head = repo.head().unwrap().target().unwrap();
+    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{head}\n")).unwrap();
+    assert_delete_refused(&client, &clone, "git operation in progress");
+}
+
+#[test]
+fn delete_refuses_unpushed_commits() {
+    let (_root, client, clone) = deletion_fixture();
+    let repo = git2::Repository::open(&clone).unwrap();
+    std::fs::write(clone.join("note.md"), "local edit\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("note.md")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "local",
+        &tree,
+        &[&parent],
+    )
+    .unwrap();
+    assert_delete_refused(&client, &clone, "1 commit(s) not pushed");
+}
+
+#[test]
+fn delete_refuses_missing_tracking_ref() {
+    let (_root, client, clone) = deletion_fixture();
+    git2::Repository::open(&clone)
+        .unwrap()
+        .find_reference("refs/remotes/origin/main")
+        .unwrap()
+        .delete()
+        .unwrap();
+    assert_delete_refused(&client, &clone, "no local record");
+}
+
+#[test]
+fn force_delete_discards_uncommitted_work() {
+    let (_root, client, clone) = deletion_fixture();
+    std::fs::write(clone.join("draft.md"), "uncommitted\n").unwrap();
+    client
+        .delete_commitbook("owner/repo".to_string(), true)
+        .unwrap();
+    assert!(!clone.exists());
 }
 
 #[cfg(unix)]

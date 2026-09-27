@@ -203,10 +203,21 @@ impl CommitBookEngineClient {
         })
     }
 
-    pub fn delete_commitbook(&self, commitbook_id: String) -> Result<()> {
+    /// Delete a clone from this device. Unless `force` is set, a clone with
+    /// work that exists only here (uncommitted changes, unpushed commits, or
+    /// a merge in progress) is kept and the reason returned, because the
+    /// deletion could not be undone from the remote.
+    pub fn delete_commitbook(&self, commitbook_id: String, force: bool) -> Result<()> {
         let cb = crate::paths::find_managed_commitbook(&self.workspaces_root, &commitbook_id)?;
         let _lock = commitbook_engine::state::RepoLock::acquire(&cb.local_path)
             .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
+        if !force {
+            if let Some(reason) = unsaved_work(&cb.local_path, &cb.branch)? {
+                return Err(CommitBookError::invalid_input(format!(
+                    "Not deleting {commitbook_id}: it has {reason}. Sync first, or delete with force to discard it."
+                )));
+            }
+        }
         std::fs::remove_dir_all(&cb.local_path).map_err(|e| {
             CommitBookError::database(format!(
                 "Failed to delete clone at {}: {e}",
@@ -275,6 +286,47 @@ impl CommitBookEngineClient {
     pub fn resolve_conflict(&self, input: ResolveConflictInput) -> Result<()> {
         crate::conflicts::resolve_conflict(&self.workspaces_root, &input)
     }
+}
+
+/// Work that exists only in this clone, described for the user, or `None`
+/// when everything is committed and pushed to the configured remote branch.
+fn unsaved_work(clone: &std::path::Path, branch: &str) -> Result<Option<String>> {
+    let repo = commitbook_engine::git::GitRepo::open(clone)
+        .map_err(|error| CommitBookError::database(format!("Open repo: {error:#}")))?;
+    if repo.repository_state() != git2::RepositoryState::Clean {
+        return Ok(Some(
+            "a merge or other git operation in progress".to_string(),
+        ));
+    }
+    if repo
+        .has_dirty_changes()
+        .map_err(|error| CommitBookError::database(format!("Check clone changes: {error:#}")))?
+    {
+        return Ok(Some("changes that were never committed".to_string()));
+    }
+    let config = commitbook_engine::config::LocalConfig::load(clone)
+        .map_err(|error| CommitBookError::database(format!("Load clone config: {error:#}")))?;
+    let current_branch = repo
+        .current_branch()
+        .map_err(|error| CommitBookError::database(format!("Check clone branch: {error:#}")))?;
+    if current_branch != branch {
+        return Ok(Some(format!(
+            "a different branch checked out ({current_branch}, expected {branch})"
+        )));
+    }
+    if repo.rev_parse("HEAD").is_err() {
+        return Ok(Some("no readable local HEAD".to_string()));
+    };
+    let tracking_ref = format!("refs/remotes/{}/{branch}", config.git.remote);
+    if repo.rev_parse(&tracking_ref).is_err() {
+        return Ok(Some(format!(
+            "no local record of the pushed {branch} branch"
+        )));
+    };
+    let (ahead, _) = repo
+        .ahead_behind("HEAD", &tracking_ref)
+        .map_err(|error| CommitBookError::database(format!("Check unpushed commits: {error:#}")))?;
+    Ok((ahead > 0).then(|| format!("{ahead} commit(s) not pushed yet")))
 }
 
 #[cfg(test)]

@@ -43,7 +43,7 @@ The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `Workspace
   - Rename methods: `createWorkspace` → `initCommitBook(_ input: CommitBookInput, token: String) async throws -> CommitBookSummary`. (Note: `init_commitbook` is now async on the engine side because cloning is a network op.)
   - `listWorkspaces` → `listCommitBooks() throws -> [CommitBookSummary]`.
   - `getWorkspace` → `getCommitBook(_ id: String) throws -> CommitBookSummary`.
-  - `deleteWorkspace` → `deleteCommitBook(_ id: String) throws`.
+  - `deleteWorkspace` → `deleteCommitBook(_ id: String, force: Bool = false) throws`. The default refuses deletion when the clone has uncommitted or unpushed work, or a Git operation in progress; only an explicit `force: true` discards it.
   - `syncWorkspace(_ id: String) async throws -> SyncResultSummary` → `syncCommitBook(_ id: String, mode: SyncMode, token: String) async throws -> SyncResultSummary`, note the new `mode` and `token` parameters.
   - Add `validatePAT(_ token: String) async throws -> [RepoInfo]` (was already in the protocol per the current file).
   - Add `discoverCommitBooks(_ token: String) async throws -> [DiscoveredCommitBook]`, new, lets the user pick which repo to register.

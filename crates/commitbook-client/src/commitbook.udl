@@ -160,8 +160,11 @@ interface CommitBookEngineClient {
     [Throws=CommitBookError]
     CommitBookSummary get_commitbook(string commitbook_id);
 
+    // Refused with InvalidInput while the clone has uncommitted changes,
+    // commits not yet pushed, or a merge in progress, since deleting would
+    // lose them. force = true deletes anyway.
     [Throws=CommitBookError]
-    void delete_commitbook(string commitbook_id);
+    void delete_commitbook(string commitbook_id, optional boolean force = false);
 
     [Throws=CommitBookError]
     sequence<DocumentSummary> list_documents(string commitbook_id);
