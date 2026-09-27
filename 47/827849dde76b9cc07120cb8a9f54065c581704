@@ -1,0 +1,46 @@
+crates/commitbook-cli/tests/doctor_json.rs
+  s_4e227ad1a6ca8e::t_ec4113e09ec0a8 21-26
+  s_4e227ad1a6ca8e::t_f4eac03309a51a 1-20,27-53
+docs/README.md
+  s_4e227ad1a6ca8e::t_ff3fbb89b3cf91 408-412
+crates/commitbook-cli/src/commands/doctor.rs
+  s_4e227ad1a6ca8e::t_b84264548f4986 131,133-138,143,147
+  s_4e227ad1a6ca8e::t_51eec61cf3aa4b 392,425-427
+  s_4e227ad1a6ca8e::t_9237b2af21088e 113,125-130,132,149-154,157
+  s_4e227ad1a6ca8e::t_e999ffe21b14fa 250,276-278,451,517-525
+  s_4e227ad1a6ca8e::t_09e75f7f0dad30 266,270
+  s_4e227ad1a6ca8e::t_7aea39415199d2 435-440,444,447,449-450,452,460-461,465,467,477,485-493,495,498,500-503,507-514
+  s_4e227ad1a6ca8e::t_ec4113e09ec0a8 139-142,144-146
+  s_4e227ad1a6ca8e::t_fe1eff4751def4 12,14-19,21-27,30,32-44,47-65,68-75,77-81,84-98,100-107,110,112,115-116,118,121-122,124,158,160-189,191-193,195,197-215,217-249,251-265,267-269,271-273,280,284,288-291,293-301,303,311,313-354,357-364,366,368,370-377,383-385,388-390,393-424,428,432
+  s_4e227ad1a6ca8e::t_4d13b7e77b0d95 190
+  s_c6da7668f6b633::t_1c701c06da5684 114
+crates/commitbook-cli/src/commands/doctor_tests.rs
+  s_4e227ad1a6ca8e::t_8680081a6f6e64 56-74,79-81,83-88,94-98
+  s_4e227ad1a6ca8e::t_20a547460baf34 75-78
+  s_4e227ad1a6ca8e::t_1c54ecafc010f8 99-114
+  s_4e227ad1a6ca8e::t_07a06dc157bd36 82,89-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "47827849dde76b9cc07120cb8a9f54065c581704",
+  "prompts": {},
+  "sessions": {
+    "s_4e227ad1a6ca8e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e1cb-88d7-7770-b109-b3f0bf61abc8",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_c6da7668f6b633": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e29c-4366-7cc1-afbf-0084b1c2a217",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
