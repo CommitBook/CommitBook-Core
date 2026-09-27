@@ -2,7 +2,23 @@
 
 Open `icon-system-exploration.html` directly in a browser. It contains 12 new directions (50–61), palette controls, app-icon and bare-mark views, light/dark/tint studies, a single-color test, and SVG downloads. Existing explorations and the original combined icon are unchanged.
 
-## Current direction
+## Chosen direction
+
+The user selected **111 / White dot**. `icon-111-refinements.html` now compares **12 options, 112–123**, all with a white checked node, smaller borderless dots, and the line starting only at the front sheet’s bottom edge (y=62, flat cap). Horizontal paper steps stay equal at 14 units; vertical steps increase to 12, 13, or 14 units. Four dot-size pairs are compared per spacing. The lower edges of dots two and three align with the bottom edges of their respective papers; their centers account for each variant’s dot radius. The user chose **113 / Balanced small · 12 step**. Current sources are `commitbook-113-logo.svg` and `commitbook-113-app-square.svg`. Paper steps are 14 units right and 12 down; the checked node radius is 4.5 and lower-node radii are 3.5. The preview defaults and resets to 113. Earlier exports remain historical explorations.
+
+## Previous A/B comparison
+
+`icon-dot-treatments.html` compares **110 / A — Dark violet dot** and **111 / B — White dot**. All papers use the same 14-unit horizontal and 11-unit vertical step, correcting the uneven 14/8 horizontal offsets of 103. All three timeline circles are borderless and vertically aligned. A uses the chosen color darkened 35% toward black with a white check; B uses a white dot with a check in the chosen color. Sources: `commitbook-110-logo.svg`, `commitbook-110-app-square.svg`, `commitbook-111-logo.svg`, and `commitbook-111-app-square.svg`. The user subsequently selected B / 111.
+
+## Prior positioning studies
+
+`icon-vertical-timeline-studies.html` contains **12 positioning variants, 98–109**, correcting the stepped timeline: all three node centers share one x-coordinate in every variant. The studies vary rear-paper rightward offsets, the timeline inset inside the front corner, and vertical spacing. Four text lines and the no-tail timeline remain. **103 / Balanced inset** is a tentative recommendation, not a user-approved choice. Sources: `commitbook-103-logo.svg` and `commitbook-103-app-square.svg`.
+
+## Prior experiment (stepped timeline, superseded)
+
+**97 / Integrated timeline** is in `icon-integrated-timeline.html`. It removes the fifth text line, moves the checked node into the front sheet’s bottom-left corner, and runs a stepped timeline downward to nodes on the left edges of sheets two and three. The composition is recentered after removing the separate left rail. Editable sources: `commitbook-97-logo.svg` and `commitbook-97-app-square.svg`. This is a new experiment; 96 remains intact for comparison.
+
+## Previous composition
 
 The latest composition is **96 / Five lines, refined** in `icon-top-left-stack.html`. The front sheet is upper left and the oldest sheet is lower right. The timeline remains on the left and ends at dot three, with no tail. Its visible bounds align with the paper stack: top y=13, bottom y=84. Node centers are y=20, 49.85, and 79.7, with equal center-to-center spacing. The five text strokes begin near the top and use lengths **13, 25, 25, 20, 25** units: short, long, long, slightly shorter, long. All have equal weight and spacing, with no heading hierarchy.
 
