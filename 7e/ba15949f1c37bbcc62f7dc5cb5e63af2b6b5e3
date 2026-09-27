@@ -1,0 +1,38 @@
+docs/BrandKit/commitbook-113-app-square.svg
+  s_2dba78f02e1b46::t_6e583cc169e6b6 1
+docs/BrandKit/commitbook-147-logo.svg
+  s_2dba78f02e1b46::t_ab7778b7592e5e 1
+docs/BrandKit/icon-113-color-studies.html
+  s_2dba78f02e1b46::t_0ed2bf5cee959c 6-34,57-58
+  s_2dba78f02e1b46::t_6e583cc169e6b6 55
+  s_2dba78f02e1b46::t_fcb79fa3cd0758 1-5,35-54,56,59-64
+docs/BrandKit/icon-124-dot-sizes.html
+  s_2dba78f02e1b46::t_934f47335523d7 1-6,8,10-11,13,15-34,37,39-42
+  s_2dba78f02e1b46::t_ab7778b7592e5e 7,9,12,14,35-36,38
+docs/BrandKit/commitbook-124-logo.svg
+  s_2dba78f02e1b46::t_0ed2bf5cee959c 1
+docs/BrandKit/commitbook-124-app-square.svg
+  s_2dba78f02e1b46::t_0ed2bf5cee959c 1
+docs/BrandKit/icon-system-notes.md
+  s_2dba78f02e1b46::t_0ed2bf5cee959c 11
+  s_2dba78f02e1b46::t_28bd20545a01cb 10,12-14
+  s_2dba78f02e1b46::t_ab7778b7592e5e 5-9
+docs/BrandKit/commitbook-147-app-square.svg
+  s_2dba78f02e1b46::t_ab7778b7592e5e 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7eba15949f1c37bbcc62f7dc5cb5e63af2b6b5e3",
+  "prompts": {},
+  "sessions": {
+    "s_2dba78f02e1b46": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e2bb-0fce-7fb2-b658-823e0d0f8c0b",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
