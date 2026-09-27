@@ -1,0 +1,42 @@
+crates/commitbook-client/src/commitbook.udl
+  s_acb8881477f1c1::t_d921a5732ade9c 163-165,167
+crates/commitbook-client/src/client_tests.rs
+  s_4e227ad1a6ca8e::t_19d7e8bca2aeb7 81,87-96,98-99,106,108-111,120-122,130-142,147-153,157-182,184-187,197-215,219-220
+  s_4e227ad1a6ca8e::t_b8ac30ef7eeeea 123-127,129
+  s_4e227ad1a6ca8e::t_7c520baf90faf4 97,102-104
+  s_4e227ad1a6ca8e::t_7c5336dc106f44 128
+  s_4e227ad1a6ca8e::t_9c46b4272d7cd0 100-101,105,112-119,143-146,154-156,188-196,216-218
+  s_4e227ad1a6ca8e::t_6f3c6b12b1ba09 107,183
+  s_4e227ad1a6ca8e::t_f4ff8b2399c329 221
+docs/handoff/apple-app-todo.md
+  s_4e227ad1a6ca8e::t_a78d4a72ae9037 46
+crates/commitbook-client/src/client.rs
+  s_4e227ad1a6ca8e::t_9c46b4272d7cd0 297-299,301-304,309-311,322-324,326-328
+  s_acb8881477f1c1::t_d921a5732ade9c 206-210,214-220,291-293,296,300,305-306,319,325,329
+  s_4e227ad1a6ca8e::t_32d3ea5596af86 294-295,307-308,312-318,320-321
+  s_4e227ad1a6ca8e::t_b1fa7d8400be3e 330-331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "216a0cb6debf634db7f1b08033703087f7778332",
+  "prompts": {},
+  "sessions": {
+    "s_4e227ad1a6ca8e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e1cb-88d7-7770-b109-b3f0bf61abc8",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_acb8881477f1c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d866877b-0c18-4d7a-bf81-6acebb67f32f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
