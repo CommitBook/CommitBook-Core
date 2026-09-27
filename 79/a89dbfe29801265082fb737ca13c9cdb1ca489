@@ -1,0 +1,19 @@
+.github/workflows/ci.yml
+  s_4e227ad1a6ca8e::t_c925232fa6d1c2 70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "79a89dbfe29801265082fb737ca13c9cdb1ca489",
+  "prompts": {},
+  "sessions": {
+    "s_4e227ad1a6ca8e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e1cb-88d7-7770-b109-b3f0bf61abc8",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
