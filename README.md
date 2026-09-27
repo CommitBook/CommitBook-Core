@@ -1,5 +1,7 @@
 # CommitBook
 
+<img src="docs/BrandKit/commitbook-product-icon.png" width="96" height="96" alt="CommitBook logo: stacked pages and saved-history timeline">
+
 Automated git commits and sync for your markdown notebooks. Turn any git repository into a self-saving, self-syncing note-taking workspace.
 
 ## Install

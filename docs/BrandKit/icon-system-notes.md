@@ -1,3 +1,7 @@
+# Final CommitBook identity
+
+The approved logo is now published under stable, unnumbered filenames. Use [the final asset guide](README.md) and [asset preview](index.html); numbered files below are exploration history, not production sources.
+
 # CommitBook connected icon system
 
 Open `icon-system-exploration.html` directly in a browser. It contains 12 new directions (50–61), palette controls, app-icon and bare-mark views, light/dark/tint studies, a single-color test, and SVG downloads. Existing explorations and the original combined icon are unchanged.
