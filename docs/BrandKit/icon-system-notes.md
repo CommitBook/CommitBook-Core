@@ -2,6 +2,16 @@
 
 Open `icon-system-exploration.html` directly in a browser. It contains 12 new directions (50–61), palette controls, app-icon and bare-mark views, light/dark/tint studies, a single-color test, and SVG downloads. Existing explorations and the original combined icon are unchanged.
 
+## Current chosen logo: 147
+
+The user selected **147 / Medium** in `icon-124-dot-sizes.html`: all three dots have radius **4 units**, using the white text, white checked dot, and violet check from 124. Lower dots remain bottom-aligned to papers two and three. Equal paper spacing, the timeline starting below the front sheet, and the 18% larger app framing are unchanged. Current sources: `commitbook-147-logo.svg` and `commitbook-147-app-square.svg`. The dot-size preview defaults and resets to 147; earlier sources are retained as history.
+
+## Previous color selection: 124
+
+`icon-113-color-studies.html` adds **20 color presets, 124–143**, based on 113, now with equal-radius dots. Text, checked-dot fill, and checkmark color can be edited independently per option; these session-only edits are included in SVG downloads. Presets test white, black, tinted, timeline-colored, violet, and complementary accents. The user selected **124 / White on violet** and requested equal-size dots. All three dots now have radius **3.5 units**; the check scales down with its dot. The lower-dot bottom alignments, 18% larger app framing, and equal paper offsets remain unchanged. Current sources are `commitbook-124-logo.svg` and `commitbook-124-app-square.svg`.
+
+The artwork is now **18% larger inside the app-icon frame**, using `translate(7.36 7.36) scale(1.18)` on the 128-unit canvas. This placement is applied to the color lab and the current `commitbook-113-app-square.svg`; the bare-logo source is unchanged. Earlier exploration previews retain their original framing.
+
 ## Chosen direction
 
 The user selected **111 / White dot**. `icon-111-refinements.html` now compares **12 options, 112–123**, all with a white checked node, smaller borderless dots, and the line starting only at the front sheet’s bottom edge (y=62, flat cap). Horizontal paper steps stay equal at 14 units; vertical steps increase to 12, 13, or 14 units. Four dot-size pairs are compared per spacing. The lower edges of dots two and three align with the bottom edges of their respective papers; their centers account for each variant’s dot radius. The user chose **113 / Balanced small · 12 step**. Current sources are `commitbook-113-logo.svg` and `commitbook-113-app-square.svg`. Paper steps are 14 units right and 12 down; the checked node radius is 4.5 and lower-node radii are 3.5. The preview defaults and resets to 113. Earlier exports remain historical explorations.
