@@ -1,0 +1,25 @@
+docs/BrandKit/commitbook-96-logo.svg
+  s_2dba78f02e1b46::t_724238655f6742 1
+docs/BrandKit/icon-system-notes.md
+  s_2dba78f02e1b46::t_724238655f6742 7
+docs/BrandKit/commitbook-96-app-square.svg
+  s_2dba78f02e1b46::t_724238655f6742 1
+docs/BrandKit/icon-top-left-stack.html
+  s_2dba78f02e1b46::t_724238655f6742 5,8,28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "66e8877750361cc71e8f1e1dbb0ad795d1d18330",
+  "prompts": {},
+  "sessions": {
+    "s_2dba78f02e1b46": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e2bb-0fce-7fb2-b658-823e0d0f8c0b",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
