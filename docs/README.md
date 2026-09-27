@@ -405,6 +405,11 @@ launchctl list | grep commitbook
 commitbook log
 ```
 
+For scripts, `commitbook --json doctor` emits one JSON object with `ok`,
+`checks`, and `repairs`. Each check includes its status, failure flag, and
+details. `doctor --fix` holds the repository lock while applying repairs; its
+exit status still reflects the diagnostic results from before those repairs.
+
 On Linux, `commitbook start` writes one crontab line for the repository and
 leaves your other entries alone. cron starts jobs without your login
 session's environment, so the line sets `PATH` (the directories of `git` and

@@ -9,180 +9,298 @@ use commitbook_engine::cron;
 use commitbook_engine::git::GitRepo;
 use commitbook_engine::state::auth::AuthConfig;
 use commitbook_engine::state::sync_state::SyncState;
+use commitbook_engine::state::RepoLock;
 
-pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()> {
-    println!("{}", "CommitBook Doctor".bold().cyan());
-    println!();
+struct Check {
+    name: &'static str,
+    status: &'static str,
+    failed: bool,
+    details: Vec<String>,
+}
 
-    let mut all_ok = true;
-
-    // 1. Git.
-    print!("  Git installed... ");
-    match Command::new("git").arg("--version").output() {
-        Ok(output) if output.status.success() => {
-            println!("{}", "OK".green().bold());
-        }
-        _ => {
-            println!("{}", "FAILED".red().bold());
-            all_ok = false;
+impl Check {
+    fn new(name: &'static str, status: &'static str, failed: bool, details: Vec<String>) -> Self {
+        Self {
+            name,
+            status,
+            failed,
+            details,
         }
     }
+}
 
-    // 2. Git repo.
-    print!("  Git repository... ");
-    if GitRepo::is_repo(repo_root) {
-        println!("{}", "OK".green().bold());
-    } else {
-        println!("{}", "FAILED".red().bold());
-        println!("    {}", "Not a git repository.".dimmed());
-        all_ok = false;
+#[derive(Default)]
+struct DoctorReport {
+    checks: Vec<Check>,
+    repairs: Vec<Check>,
+}
+
+impl DoctorReport {
+    fn ok(&self) -> bool {
+        !self
+            .checks
+            .iter()
+            .chain(&self.repairs)
+            .any(|check| check.failed)
     }
 
-    // 2b. Git filters libgit2 cannot run (git-crypt, Git LFS): sync would
-    //     commit those files unfiltered, so it refuses such a repository.
-    print!("  Git filters... ");
-    match commitbook_engine::git::attributes::unsupported_filters(repo_root) {
-        Ok(filters) if filters.is_empty() => println!("{}", "OK".green().bold()),
-        Ok(filters) => {
-            println!("{}", "UNSUPPORTED".red().bold());
-            for filter in &filters {
-                println!("    {filter}");
+    fn json(&self) -> Result<String> {
+        let items = |checks: &[Check]| {
+            checks
+                .iter()
+                .map(|check| {
+                    serde_json::json!({
+                        "name": check.name,
+                        "status": check.status,
+                        "failed": check.failed,
+                        "details": check.details,
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "ok": self.ok(),
+            "checks": items(&self.checks),
+            "repairs": items(&self.repairs),
+        }))?)
+    }
+
+    fn print_text(&self, fix: bool) {
+        println!("{}", "CommitBook Doctor".bold().cyan());
+        println!();
+        for check in &self.checks {
+            let status = if check.failed {
+                check.status.red().bold().to_string()
+            } else if check.status == "ok" || check.status == "running" {
+                check.status.green().bold().to_string()
+            } else {
+                check.status.yellow().to_string()
+            };
+            println!("  {}... {status}", check.name);
+            for detail in &check.details {
+                println!("    {detail}");
             }
-            println!(
-                "    {}",
-                "Sync refuses to commit here: these filters would be skipped and files pushed unfiltered.".dimmed()
-            );
-            all_ok = false;
         }
-        Err(_) => println!("{}", "SKIP".dimmed()),
+        if fix {
+            println!();
+            println!("  {}", "Auto-repair:".bold().cyan());
+            if self.repairs.is_empty() {
+                println!("    Nothing to repair.");
+            }
+            for repair in &self.repairs {
+                println!("    {}... {}", repair.name, repair.status);
+                for detail in &repair.details {
+                    println!("      {detail}");
+                }
+            }
+            if self.repairs.iter().any(|repair| repair.status == "applied") {
+                println!("  Repairs applied. Re-run `commitbook doctor` to verify.");
+            }
+        }
+        println!();
+        if self.ok() {
+            println!("  {}", "All checks passed.".green().bold());
+        } else {
+            println!("  {}", "Some checks failed. See above.".red().bold());
+            if !fix {
+                println!("  Try `commitbook doctor --fix` to auto-repair common issues.");
+            }
+        }
+    }
+}
+
+pub fn run(cb_dir: &Path, repo_root: &Path, json: bool, fix: bool) -> Result<()> {
+    let report = build_report(cb_dir, repo_root, fix);
+
+    if json {
+        println!("{}", report.json()?);
+    } else {
+        report.print_text(fix);
     }
 
-    // 3. Remote, CommitBook requires exactly one remote. Also verify the
-    //    name in config matches what's actually configured.
-    print!("  Git remote... ");
-    match commitbook_engine::git::remote::list_remote_names(repo_root) {
+    if report.ok() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("doctor reported one or more failures"))
+    }
+}
+
+fn build_report(cb_dir: &Path, repo_root: &Path, fix: bool) -> DoctorReport {
+    let mut report = diagnose(cb_dir, repo_root);
+    if fix {
+        let logs_were_missing = !LocalConfig::logs_dir(repo_root).is_dir();
+        match RepoLock::acquire(repo_root) {
+            Ok(_lock) => {
+                report.repairs = run_fixes(repo_root);
+                // RepoLock creates the local layout before taking its file
+                // lock, so it may have already recreated logs/ for this run.
+                if logs_were_missing
+                    && LocalConfig::logs_dir(repo_root).is_dir()
+                    && !report
+                        .repairs
+                        .iter()
+                        .any(|repair| repair.name == "Creating logs/")
+                {
+                    report
+                        .repairs
+                        .insert(0, Check::new("Creating logs/", "applied", false, vec![]));
+                }
+            }
+            Err(error) => report.repairs.push(Check::new(
+                "Repository lock",
+                "failed",
+                true,
+                vec![format!("{error:#}")],
+            )),
+        }
+    }
+    report
+}
+
+fn diagnose(cb_dir: &Path, repo_root: &Path) -> DoctorReport {
+    let mut report = DoctorReport::default();
+    let config = LocalConfig::load_read_only(repo_root);
+
+    let git_installed = Command::new("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    report.checks.push(Check::new(
+        "Git installed",
+        if git_installed { "ok" } else { "failed" },
+        !git_installed,
+        vec![],
+    ));
+
+    let is_repo = GitRepo::is_repo(repo_root);
+    report.checks.push(Check::new(
+        "Git repository",
+        if is_repo { "ok" } else { "failed" },
+        !is_repo,
+        if is_repo {
+            vec![]
+        } else {
+            vec!["Not a git repository.".into()]
+        },
+    ));
+
+    let filters = match commitbook_engine::git::attributes::unsupported_filters(repo_root) {
+        Ok(filters) if filters.is_empty() => Check::new("Git filters", "ok", false, vec![]),
+        Ok(filters) => {
+            let mut details = filters.iter().map(ToString::to_string).collect::<Vec<_>>();
+            details.push(
+                "Sync refuses to commit here: these filters would be skipped and files pushed unfiltered."
+                    .into(),
+            );
+            Check::new("Git filters", "unsupported", true, details)
+        }
+        Err(error) => Check::new("Git filters", "skip", false, vec![format!("{error:#}")]),
+    };
+    report.checks.push(filters);
+
+    let remote = match commitbook_engine::git::remote::list_remote_names(repo_root) {
         Ok(names) if names.len() == 1 => {
             let actual = &names[0];
-            let configured = LocalConfig::load(repo_root).ok().map(|c| c.git.remote);
-            if let Some(cfg_remote) = configured {
-                if cfg_remote == *actual {
-                    println!("{} ({})", "OK".green().bold(), actual);
-                } else {
-                    println!("{}", "MISMATCH".red().bold());
-                    println!(
-                        "    Config says `{}`, git has `{}`. Re-run `commitbook init`.",
-                        cfg_remote, actual
-                    );
-                    all_ok = false;
-                }
-            } else {
-                println!("{} ({})", "OK".green().bold(), actual);
+            match config.as_ref().ok() {
+                Some(cfg) if cfg.git.remote != *actual => Check::new(
+                    "Git remote",
+                    "mismatch",
+                    true,
+                    vec![format!(
+                        "Config says `{}`, git has `{}`. Re-run `commitbook init`.",
+                        cfg.git.remote, actual
+                    )],
+                ),
+                _ => Check::new("Git remote", "ok", false, vec![actual.clone()]),
             }
         }
-        Ok(names) if names.is_empty() => {
-            println!("{}", "FAILED".red().bold());
-            println!(
-                "    {}",
-                "No remote configured. CommitBook requires exactly 1 remote.".dimmed()
-            );
-            all_ok = false;
-        }
-        Ok(names) => {
-            println!("{}", "FAILED".red().bold());
-            println!(
-                "    Found {} remotes ({}). CommitBook requires exactly 1.",
+        Ok(names) if names.is_empty() => Check::new(
+            "Git remote",
+            "failed",
+            true,
+            vec!["No remote configured. CommitBook requires exactly 1 remote.".into()],
+        ),
+        Ok(names) => Check::new(
+            "Git remote",
+            "failed",
+            true,
+            vec![format!(
+                "Found {} remotes ({}). CommitBook requires exactly 1.",
                 names.len(),
                 names.join(", ")
-            );
-            all_ok = false;
-        }
-        Err(_) => {
-            println!("{}", "SKIP".dimmed());
-        }
-    }
+            )],
+        ),
+        Err(error) => Check::new("Git remote", "skip", false, vec![format!("{error:#}")]),
+    };
+    report.checks.push(remote);
 
-    // 4. .CommitBook/ structure.
-    print!("  .CommitBook/ directory... ");
-    if cb_dir.is_dir() {
-        println!("{}", "OK".green().bold());
+    let directory_exists = cb_dir.is_dir();
+    report.checks.push(Check::new(
+        ".CommitBook/ directory",
+        if directory_exists { "ok" } else { "failed" },
+        !directory_exists,
+        vec![],
+    ));
+
+    let config_check = if !LocalConfig::exists(repo_root) {
+        Check::new("config.toml", "missing", true, vec![])
     } else {
-        println!("{}", "FAILED".red().bold());
-        all_ok = false;
-    }
+        match config.as_ref() {
+            Ok(_) => Check::new("config.toml", "ok", false, vec![]),
+            Err(error) => Check::new("config.toml", "invalid", true, vec![format!("{error:#}")]),
+        }
+    };
+    report.checks.push(config_check);
 
-    // 5. config.toml: it must parse, or every sync stops before it starts.
-    print!("  config.toml... ");
-    if !LocalConfig::exists(repo_root) {
-        println!("{}", "MISSING".yellow().bold());
-    } else {
-        match LocalConfig::load(repo_root) {
-            Ok(_) => println!("{}", "OK".green().bold()),
-            Err(error) => {
-                println!("{}", "INVALID".red().bold());
-                println!("    {}", format!("{error:#}").dimmed());
-                all_ok = false;
-            }
-        }
-    }
+    let auth = match AuthConfig::load(cb_dir) {
+        Ok(auth) if auth.has_token() => Check::new("Token auth (optional)", "ok", false, vec![]),
+        Ok(_) => Check::new(
+            "Token auth (optional)",
+            "not configured",
+            false,
+            vec![
+                "Normal for desktop git sync; `commitbook token set` is only needed for token-backed transports."
+                    .into(),
+            ],
+        ),
+        Err(_) => Check::new(
+            "Token auth (optional)",
+            "failed",
+            true,
+            vec!["Error reading auth.toml.".into()],
+        ),
+    };
+    report.checks.push(auth);
 
-    // 6. Optional token-backed auth. Normal desktop sync uses the user's
-    // system Git credentials (SSH agent, keychain, .git-credentials, etc.).
-    print!("  Token auth (optional)... ");
-    match AuthConfig::load(cb_dir) {
-        Ok(auth) if auth.has_token() => {
-            println!("{}", "OK".green().bold());
-        }
-        Ok(_) => {
-            println!("{}", "not configured".dimmed());
-            println!(
-                "    {}",
-                "Normal for desktop git sync; `commitbook token set` is only needed for token-backed transports.".dimmed()
-            );
-        }
-        Err(_) => {
-            println!("{}", "error reading auth.toml".red());
-            all_ok = false;
-        }
-    }
-
-    // 7. Scheduler.
-    print!("  Scheduler... ");
     let scheduler = cron::health(repo_root);
-    let config = LocalConfig::load_read_only(repo_root).ok();
-    let last_attempt = SyncState::load(cb_dir).ok().and_then(|s| s.last_attempt_at);
+    let last_attempt = SyncState::load(cb_dir)
+        .ok()
+        .and_then(|state| state.last_attempt_at);
     let warning = scheduler.warning(
-        config.as_ref().map(|c| c.sync.schedule.as_str()),
+        config.as_ref().ok().map(|cfg| cfg.sync.schedule.as_str()),
         last_attempt.as_deref(),
         chrono::Utc::now(),
     );
-    match (&scheduler, &warning) {
-        (cron::SchedulerHealth::Broken(_), _) => {
-            println!("{}", "BROKEN".red().bold());
-            all_ok = false;
-        }
-        (cron::SchedulerHealth::Running, Some(_)) => println!("{}", "STALE".yellow().bold()),
-        (cron::SchedulerHealth::Running, None) => println!("{}", "running".green().bold()),
-        (cron::SchedulerHealth::Stopped, _) => println!("{}", "stopped".dimmed()),
-    }
-    if let Some(warning) = &warning {
-        println!("    {}", warning.dimmed());
-    }
+    let mut scheduler_details = warning.into_iter().collect::<Vec<_>>();
     if let Some(binary) = cron::scheduled_binary(repo_root)
         .filter(|binary| scheduler.is_loaded() && cron::is_transient_binary(binary))
     {
-        println!(
-            "    {}",
-            format!(
-                "Scheduler runs a build artifact ({}); it stops working when that build is removed.",
-                binary.display()
-            )
-            .dimmed()
-        );
+        scheduler_details.push(format!(
+            "Scheduler runs a build artifact ({}); it stops working when that build is removed.",
+            binary.display()
+        ));
     }
+    let (status, failed) = match scheduler {
+        cron::SchedulerHealth::Broken(_) => ("broken", true),
+        cron::SchedulerHealth::Running if !scheduler_details.is_empty() => ("stale", false),
+        cron::SchedulerHealth::Running => ("running", false),
+        cron::SchedulerHealth::Stopped => ("stopped", false),
+    };
+    report
+        .checks
+        .push(Check::new("Scheduler", status, failed, scheduler_details));
 
-    // 8. AI agents: only the ones the configured modes actually use.
-    print!("  AI agents... ");
-    match LocalConfig::load(repo_root) {
+    let agents = match config.as_ref() {
         Ok(config) => {
             let commit_ai = config.commit.mode == CommitMode::Ai;
             let conflict_ai = matches!(
@@ -190,195 +308,148 @@ pub fn run(cb_dir: &Path, repo_root: &Path, _json: bool, fix: bool) -> Result<()
                 ConflictMode::Ai | ConflictMode::Review
             );
             if !commit_ai && !conflict_ai {
-                println!("{}", "not used".dimmed());
+                Check::new("AI agents", "not used", false, vec![])
             } else {
-                println!();
-            }
-            if commit_ai {
-                let agents = match config.commit.agent.agent() {
-                    Some(agent) => vec![agent],
-                    None => ANY_AGENT_ORDER.to_vec(),
-                };
-                let keys: Vec<String> = agents
-                    .iter()
-                    .map(|agent| agent.commit_provider_key().to_string())
-                    .collect();
-                let available: Vec<String> = commitbook_engine::ai::ProviderChain::new()
-                    .check_availability(&keys)
-                    .into_iter()
-                    .filter(|(_, _, installed)| *installed)
-                    .map(|(_, name, _)| name)
-                    .collect();
-                let found = if available.is_empty() {
-                    "not installed; commit messages use timestamp text"
-                        .yellow()
-                        .to_string()
-                } else {
-                    available.join(", ").green().to_string()
-                };
-                println!("    Commit messages ({}): {found}", config.commit.agent);
-            }
-            if conflict_ai {
-                let installed = commitbook_engine::ai::ResolverRegistry::new()
-                    .get(config.conflicts.agent.as_str())
-                    .is_some();
-                let found = if installed {
-                    "installed".green().to_string()
-                } else {
-                    "not installed; conflicts are left for manual resolution"
-                        .yellow()
-                        .to_string()
-                };
-                println!(
-                    "    Conflicts ({}, {}): {found}",
-                    config.conflicts.mode, config.conflicts.agent
-                );
+                let mut details = Vec::new();
+                if commit_ai {
+                    let agents = match config.commit.agent.agent() {
+                        Some(agent) => vec![agent],
+                        None => ANY_AGENT_ORDER.to_vec(),
+                    };
+                    let keys = agents
+                        .iter()
+                        .map(|agent| agent.commit_provider_key().to_string())
+                        .collect::<Vec<_>>();
+                    let available = commitbook_engine::ai::ProviderChain::new()
+                        .check_availability(&keys)
+                        .into_iter()
+                        .filter(|(_, _, installed)| *installed)
+                        .map(|(_, name, _)| name)
+                        .collect::<Vec<_>>();
+                    details.push(format!(
+                        "Commit messages ({}): {}",
+                        config.commit.agent,
+                        if available.is_empty() {
+                            "not installed; commit messages use timestamp text".to_string()
+                        } else {
+                            available.join(", ")
+                        }
+                    ));
+                }
+                if conflict_ai {
+                    let installed = commitbook_engine::ai::ResolverRegistry::new()
+                        .get(config.conflicts.agent.as_str())
+                        .is_some();
+                    details.push(format!(
+                        "Conflicts ({}, {}): {}",
+                        config.conflicts.mode,
+                        config.conflicts.agent,
+                        if installed {
+                            "installed"
+                        } else {
+                            "not installed; conflicts are left for manual resolution"
+                        }
+                    ));
+                }
+                Check::new("AI agents", "checked", false, details)
             }
         }
-        Err(_) => println!("{}", "unknown (config unreadable)".yellow()),
-    }
+        Err(_) => Check::new(
+            "AI agents",
+            "unknown",
+            false,
+            vec!["Configuration is unreadable.".into()],
+        ),
+    };
+    report.checks.push(agents);
 
-    // 9. Sync checkpoint.
-    print!("  Sync checkpoint... ");
-    match SyncState::load(cb_dir) {
+    let checkpoint = match SyncState::load(cb_dir) {
         Ok(state) if state.last_sync_at.is_some() => {
-            println!("{}", "OK".green().bold());
+            Check::new("Sync checkpoint", "ok", false, vec![])
         }
-        _ => {
-            println!("{}", "not yet established".dimmed());
-            println!(
-                "    {}",
-                "Will be set after the first successful sync.".dimmed()
-            );
-        }
-    }
+        _ => Check::new(
+            "Sync checkpoint",
+            "not yet established",
+            false,
+            vec!["Will be set after the first successful sync.".into()],
+        ),
+    };
+    report.checks.push(checkpoint);
 
-    // 10. Local vs <remote> divergence.
     if let Ok(repo) = GitRepo::open(repo_root) {
         if repo.has_remote() {
-            let config = LocalConfig::load(repo_root).ok();
             let branch = config
                 .as_ref()
-                .map(|c| c.git.branch.clone())
-                .unwrap_or_else(|| "main".to_string());
+                .ok()
+                .map(|cfg| cfg.git.branch.as_str())
+                .unwrap_or("main");
             let remote_name = config
                 .as_ref()
-                .map(|c| c.git.remote.clone())
-                .unwrap_or_else(|| "origin".to_string());
+                .ok()
+                .map(|cfg| cfg.git.remote.as_str())
+                .unwrap_or("origin");
             let remote_ref = format!("{remote_name}/{branch}");
-
-            print!("  Local vs {}... ", remote_ref);
-            match repo.ahead_behind("HEAD", &remote_ref) {
-                Ok((0, 0)) => println!("{}", "in sync".green().bold()),
-                Ok((ahead, 0)) => {
-                    println!("{}", format!("{} commit(s) ahead", ahead).yellow().bold());
-                    println!("    {}", "Next sync will try to push.".dimmed());
-                }
-                Ok((0, behind)) => {
-                    println!("{}", format!("{} commit(s) behind", behind).yellow().bold());
-                    println!("    Run: {}", "git pull --ff-only".dimmed());
-                }
-                Ok((ahead, behind)) => {
-                    println!("{}", "DIVERGED".red().bold());
-                    println!(
-                        "    {} ahead, {} behind: local and {} have different histories.",
-                        ahead, behind, remote_name
-                    );
-                    println!(
-                        "    If CommitBook has been pushing your content, local-only commits are redundant. Recovery:"
-                    );
-                    println!("    {}", format!("git fetch {}", remote_name).dimmed());
-                    println!(
-                        "    {}",
-                        format!("git diff {} -- '*.md' '*.markdown'", remote_ref).dimmed()
-                    );
-                    println!(
-                        "    If the diff is empty/expected:  {}",
-                        format!("git reset --hard {}", remote_ref).dimmed()
-                    );
-                    println!(
-                        "    Otherwise, merge by hand:       {}",
-                        format!("git merge {}", remote_ref).dimmed()
-                    );
-                    all_ok = false;
-                }
-                Err(_) => {
-                    println!("{}", "SKIP".dimmed());
-                    println!(
-                        "    {}",
-                        "Could not determine divergence (fetch may have failed).".dimmed()
-                    );
-                }
-            }
+            let mut divergence = match repo.ahead_behind("HEAD", &remote_ref) {
+                Ok((0, 0)) => Check::new("Local vs remote", "in sync", false, vec![]),
+                Ok((ahead, 0)) => Check::new(
+                    "Local vs remote",
+                    "ahead",
+                    false,
+                    vec![format!("{ahead} commit(s) ahead. Next sync will try to push.")],
+                ),
+                Ok((0, behind)) => Check::new(
+                    "Local vs remote",
+                    "behind",
+                    false,
+                    vec![format!("{behind} commit(s) behind. Run: git pull --ff-only")],
+                ),
+                Ok((ahead, behind)) => Check::new(
+                    "Local vs remote",
+                    "diverged",
+                    true,
+                    vec![
+                        format!("{ahead} ahead, {behind} behind: local and {remote_name} have different histories."),
+                        format!("Inspect: git fetch {remote_name}"),
+                        format!("Compare: git diff {remote_ref} -- '*.md' '*.markdown'"),
+                        format!("If the diff is empty/expected: git reset --hard {remote_ref}"),
+                        format!("Otherwise merge by hand: git merge {remote_ref}"),
+                    ],
+                ),
+                Err(_) => Check::new(
+                    "Local vs remote",
+                    "skip",
+                    false,
+                    vec!["Could not determine divergence (fetch may have failed).".into()],
+                ),
+            };
+            divergence
+                .details
+                .insert(0, format!("Reference: {remote_ref}"));
+            report.checks.push(divergence);
         }
     }
 
-    if fix {
-        println!();
-        println!("  {}", "Auto-repair:".bold().cyan());
-        let repaired = run_fixes(cb_dir, repo_root);
-        if repaired > 0 {
-            // Do not force `all_ok`: the exit status must keep reflecting the
-            // checks so `--fix` cannot mask a still-failing condition.
-            println!(
-                "  {}",
-                "Repairs applied. Re-run `commitbook doctor` to verify.".dimmed()
-            );
-        }
-    }
-
-    println!();
-    if all_ok {
-        println!("  {}", "All checks passed.".green().bold());
-        Ok(())
-    } else {
-        println!("  {}", "Some checks failed. See above.".red().bold());
-        if !fix {
-            println!(
-                "  {}",
-                "Try `commitbook doctor --fix` to auto-repair common issues.".dimmed()
-            );
-        }
-        Err(anyhow::anyhow!("doctor reported one or more failures"))
-    }
+    report
 }
 
-/// Run auto-repair for known-fixable cases. Returns the number of fixes
-/// successfully applied. Each fix prints its own status line.
-fn run_fixes(_cb_dir: &Path, repo_root: &Path) -> u32 {
-    let mut fixed = 0u32;
-
-    if fix_logs_dir(repo_root) {
-        fixed += 1;
-    }
-    if fix_plist_binary_path(repo_root) {
-        fixed += 1;
-    }
-
-    if fixed == 0 {
-        println!("    {}", "Nothing to repair.".dimmed());
-    }
-
-    fixed
+/// Only called while holding the repository mutation lock.
+fn run_fixes(repo_root: &Path) -> Vec<Check> {
+    [fix_logs_dir(repo_root), fix_plist_binary_path(repo_root)]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// Recreate `.CommitBook/local/logs/` if missing. Cheap and idempotent.
-fn fix_logs_dir(repo_root: &Path) -> bool {
+fn fix_logs_dir(repo_root: &Path) -> Option<Check> {
     let logs = LocalConfig::logs_dir(repo_root);
     if logs.is_dir() {
-        return false;
+        return None;
     }
-    print!("    Creating logs/... ");
-    match std::fs::create_dir_all(&logs) {
-        Ok(()) => {
-            println!("{}", "OK".green().bold());
-            true
-        }
-        Err(e) => {
-            println!("{} {}", "FAILED".red().bold(), e);
-            false
-        }
-    }
+    Some(match std::fs::create_dir_all(&logs) {
+        Ok(()) => Check::new("Creating logs/", "applied", false, vec![]),
+        Err(error) => Check::new("Creating logs/", "failed", true, vec![error.to_string()]),
+    })
 }
 
 /// If a launchd plist exists for this repo and points at a stale binary path
@@ -386,14 +457,14 @@ fn fix_logs_dir(repo_root: &Path) -> bool {
 /// different checkout), reinstall it pointing at the binary actually running
 /// `commitbook doctor` right now.
 #[cfg(not(target_os = "macos"))]
-fn fix_plist_binary_path(_repo_root: &Path) -> bool {
-    false
+fn fix_plist_binary_path(_repo_root: &Path) -> Option<Check> {
+    None
 }
 
 #[cfg(target_os = "macos")]
-fn fix_plist_binary_path(repo_root: &Path) -> bool {
+fn fix_plist_binary_path(repo_root: &Path) -> Option<Check> {
     let Ok(current_exe) = std::env::current_exe() else {
-        return false;
+        return None;
     };
 
     let legacy_path = commitbook_engine::cron::macos::legacy_plist_path(repo_root);
@@ -403,7 +474,7 @@ fn fix_plist_binary_path(repo_root: &Path) -> bool {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .is_some_and(|contents| contents.contains(&current_exe.to_string_lossy().to_string()));
     if !legacy_exists && !legacy_loaded && binary_is_current {
-        return false;
+        return None;
     }
 
     // A dormant legacy plist is stale state: `commitbook stop` removes both
@@ -411,49 +482,47 @@ fn fix_plist_binary_path(repo_root: &Path) -> bool {
     // Remove that file directly when neither label is loaded.
     if !cron::is_loaded(repo_root) {
         if legacy_exists {
-            print!("    Removing legacy scheduler plist... ");
-            return match std::fs::remove_file(&legacy_path) {
-                Ok(()) => {
-                    println!("{}", "OK".green().bold());
-                    true
-                }
-                Err(e) => {
-                    println!("{} {}", "FAILED".red().bold(), e);
-                    false
-                }
-            };
+            return Some(match std::fs::remove_file(&legacy_path) {
+                Ok(()) => Check::new("Removing legacy scheduler plist", "applied", false, vec![]),
+                Err(error) => Check::new(
+                    "Removing legacy scheduler plist",
+                    "failed",
+                    true,
+                    vec![error.to_string()],
+                ),
+            });
         }
-        return false;
+        return None;
     }
 
+    let mut details = Vec::new();
     if cron::is_transient_binary(&current_exe) {
-        println!(
-            "    {}",
-            format!(
-                "Warning: {} is a build artifact; install `commitbook` (e.g. `cargo install --path crates/commitbook-cli`) and rerun `doctor --fix` from it.",
-                current_exe.display()
-            )
-            .yellow()
-        );
+        details.push(format!(
+            "Warning: {} is a build artifact; install `commitbook` (e.g. `cargo install --path crates/commitbook-cli`) and rerun `doctor --fix` from it.",
+            current_exe.display()
+        ));
     }
-    print!("    Reinstalling scheduler with current label and binary path... ");
     let config = match LocalConfig::load(repo_root) {
         Ok(c) => c,
-        Err(e) => {
-            println!("{} {}", "FAILED".red().bold(), e);
-            return false;
+        Err(error) => {
+            details.push(format!("{error:#}"));
+            return Some(Check::new(
+                "Reinstalling scheduler",
+                "failed",
+                true,
+                details,
+            ));
         }
     };
-    match cron::install(repo_root, &config.sync.schedule, &current_exe) {
-        Ok(_) => {
-            println!("{}", "OK".green().bold());
-            true
-        }
-        Err(e) => {
-            println!("{} {}", "FAILED".red().bold(), e);
-            false
-        }
-    }
+    Some(
+        match cron::install(repo_root, &config.sync.schedule, &current_exe) {
+            Ok(_) => Check::new("Reinstalling scheduler", "applied", false, details),
+            Err(error) => {
+                details.push(format!("{error:#}"));
+                Check::new("Reinstalling scheduler", "failed", true, details)
+            }
+        },
+    )
 }
 
 #[cfg(test)]
