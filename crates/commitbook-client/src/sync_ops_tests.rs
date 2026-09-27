@@ -488,4 +488,37 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
         proposals[0].proposal.as_ref().unwrap().content.as_deref(),
         Some("resolved on phone\n")
     );
+
+    let listed = crate::conflicts::list_conflicts(root.path(), "owner/repo").unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        listed[0].proposal_content.as_deref(),
+        Some("resolved on phone\n")
+    );
+    assert!(!listed[0].proposal_stale);
+    assert!(!listed[0].proposal_rejected);
+    let input = crate::types::ResolveConflictInput {
+        commitbook_id: "owner/repo".to_string(),
+        conflict_id: listed[0].id.clone(),
+        resolution_type: "accept".to_string(),
+        manual_content: None,
+        revision: listed[0].revision.clone(),
+        proposal_version: listed[0].proposal_version.clone(),
+    };
+    let mut missing = input.clone();
+    missing.proposal_version = None;
+    assert!(matches!(
+        crate::conflicts::resolve_conflict(root.path(), &missing),
+        Err(crate::errors::CommitBookError::InvalidInput { .. })
+    ));
+    let mut stale = input.clone();
+    stale.proposal_version = Some("outdated".to_string());
+    assert!(crate::conflicts::resolve_conflict(root.path(), &stale).is_err());
+    assert!(local_repo.merge_in_progress());
+    crate::conflicts::resolve_conflict(root.path(), &input).unwrap();
+    assert!(!local_repo.merge_in_progress());
+    assert_eq!(
+        std::fs::read_to_string(clone.join("shared.md")).unwrap(),
+        "resolved on phone\n"
+    );
 }

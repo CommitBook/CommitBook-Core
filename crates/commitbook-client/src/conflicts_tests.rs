@@ -77,6 +77,8 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
             conflict_id: "base.md".to_string(),
             resolution_type: "delete".to_string(),
             manual_content: None,
+            revision: None,
+            proposal_version: None,
         },
     )
     .unwrap_err();
@@ -99,6 +101,8 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
             conflict_id: "base.md".to_string(),
             resolution_type: "delete".to_string(),
             manual_content: None,
+            revision: None,
+            proposal_version: None,
         },
     )
     .unwrap_err();

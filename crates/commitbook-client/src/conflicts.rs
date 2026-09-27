@@ -10,33 +10,28 @@ use crate::types::{ConflictSummary, ResolveConflictInput};
 
 pub fn list_conflicts(workspaces_root: &Path, commitbook_id: &str) -> Result<Vec<ConflictSummary>> {
     let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
-    let repo = GitRepo::open(&commitbook.local_path)
-        .map_err(|error| CommitBookError::database(format!("Open repo: {error}")))?;
-    let conflicts = repo
-        .list_conflicts_structured()
-        .map_err(|error| CommitBookError::database(format!("List conflicts: {error}")))?;
+    let conflicts = commitbook_engine::review::list(&commitbook.local_path)
+        .map_err(|error| CommitBookError::database(format!("List conflicts: {error:#}")))?;
 
     let now = chrono::Utc::now().to_rfc3339();
     Ok(conflicts
         .into_iter()
-        .map(|conflict| {
-            let conflict_type = conflict.classification().to_string();
-            let binary = conflict.is_binary_or_special();
-            let ancestor_content = conflict.ancestor_text().map(ToOwned::to_owned);
-            let local_content = conflict.local_text().map(ToOwned::to_owned);
-            let remote_content = conflict.remote_text().map(ToOwned::to_owned);
-            ConflictSummary {
-                id: conflict.path.clone(),
-                path: conflict.path,
-                section_path: None,
-                conflict_type,
-                status: "open".to_string(),
-                binary,
-                ancestor_content,
-                local_content,
-                remote_content,
-                opened_at: now.clone(),
-            }
+        .map(|conflict| ConflictSummary {
+            id: conflict.path.clone(),
+            path: conflict.path,
+            section_path: None,
+            conflict_type: conflict.conflict_type,
+            status: "open".to_string(),
+            binary: conflict.binary,
+            ancestor_content: conflict.ancestor,
+            local_content: conflict.local,
+            remote_content: conflict.remote,
+            opened_at: now.clone(),
+            revision: Some(conflict.revision),
+            proposal_content: conflict.proposal.as_ref().and_then(|p| p.content.clone()),
+            proposal_version: conflict.proposal_version,
+            proposal_stale: conflict.proposal_stale,
+            proposal_rejected: conflict.proposal.as_ref().is_some_and(|p| p.rejected),
         })
         .collect())
 }
@@ -76,13 +71,20 @@ pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) ->
         .into_iter()
         .find(|c| c.path == conflict.path)
         .ok_or_else(|| CommitBookError::not_found("Conflict disappeared"))?;
+    if input.resolution_type == "accept"
+        && (input.revision.is_none() || input.proposal_version.is_none())
+    {
+        return Err(CommitBookError::invalid_input(
+            "Accepting a proposal requires its conflict revision and proposal version; refresh the conflict list",
+        ));
+    }
     commitbook_engine::review::apply_locked(
         &commitbook.local_path,
         &commitbook.branch,
         &commitbook_engine::review::ResolutionInput {
-            proposal_version: None,
+            proposal_version: input.proposal_version.clone(),
             path: input.conflict_id.clone(),
-            revision: view.revision,
+            revision: input.revision.clone().unwrap_or(view.revision),
             action: input.resolution_type.clone(),
             content: input.manual_content.clone(),
         },

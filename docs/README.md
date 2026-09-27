@@ -548,8 +548,9 @@ An acceptance checks both the current conflict revision and the proposal
 version. If files or the proposal changed since the page loaded, refresh and
 review the new version. Conflict actions and settings changes share the
 repository mutation lock, so concurrent operations report that the repository
-is busy. Native sync also honors review mode; existing native manual-resolution
-APIs remain available without an FFI signature change.
+is busy. Native sync also honors review mode. Native clients can list the
+proposal content, revision, and version, then pass both tokens with
+`resolutionType: "accept"`; existing manual-resolution calls can omit them.
 
 Sync timestamps and error stages are stored in `local/state.toml`. Older state
 files remain supported. The existing `last_sync_at` field denotes a successful

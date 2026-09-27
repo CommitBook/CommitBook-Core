@@ -122,6 +122,11 @@ dictionary ConflictSummary {
     string? local_content;
     string? remote_content;
     string opened_at;
+    string? revision = null;
+    string? proposal_content = null;
+    string? proposal_version = null;
+    boolean proposal_stale = false;
+    boolean proposal_rejected = false;
 };
 
 dictionary ResolveConflictInput {
@@ -129,6 +134,8 @@ dictionary ResolveConflictInput {
     string conflict_id;
     string resolution_type;
     string? manual_content;
+    string? revision = null;
+    string? proposal_version = null;
 };
 
 dictionary RepoInfo {

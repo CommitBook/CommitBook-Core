@@ -171,6 +171,11 @@ pub struct ConflictSummary {
     pub local_content: Option<String>,
     pub remote_content: Option<String>,
     pub opened_at: String,
+    pub revision: Option<String>,
+    pub proposal_content: Option<String>,
+    pub proposal_version: Option<String>,
+    pub proposal_stale: bool,
+    pub proposal_rejected: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +184,8 @@ pub struct ResolveConflictInput {
     pub conflict_id: String,
     pub resolution_type: String,
     pub manual_content: Option<String>,
+    pub revision: Option<String>,
+    pub proposal_version: Option<String>,
 }
 
 #[derive(Debug, Clone)]

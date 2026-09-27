@@ -36,7 +36,7 @@ The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `Workspace
   - `WorkspaceSummary` → `CommitBookSummary`. Add fields the engine returns: `owner: String`, `repo: String`, `docCount: Int`, `conflictCount: Int`. Note: `docCount`/`conflictCount` come back as `0` from `list_commitbooks`, populate them by calling `list_documents` / `list_conflicts` per book if the UI needs accurate counts.
   - Add new types: `DiscoveredCommitBook { owner, repo, defaultBranch, isPrivate, hasDotCommitBook, alreadyLocal }`, `RepoInfo { owner, name, defaultBranch, isPrivate }`, `SyncMode { case aiResolve, manual }`.
   - Add `AiConflictRequest` (nullable ancestor/local/remote content plus conflict type and binary flag), `AiConflictResolutionAction { writeContent, deleteFile }`, `AiConflictResolution` (nullable content/error), and `ConflictResolutionContinuation`.
-  - Update `ConflictSummary`: ancestor/local/remote content is nullable and binary/special conflicts are flagged explicitly.
+  - Update `ConflictSummary`: ancestor/local/remote content is nullable and binary/special conflicts are flagged explicitly. Review proposals expose `revision`, `proposalContent`, `proposalVersion`, `proposalStale`, and `proposalRejected`; a present version with null content means the proposal deletes the file. To accept one, pass the displayed `revision` and `proposalVersion` in `ResolveConflictInput` with `resolutionType: "accept"`. Older manual-resolution calls may omit both fields.
   - `SyncResultSummary`: add `committed: Bool`, `conflictsResolved: Int`, `manualConflicts: Int` (engine returns these now).
 
 - [ ] `Packages/CommitBookAppleCore/Sources/CommitBookAppleCore/CommitBookEngineProtocol.swift`:
