@@ -1,0 +1,25 @@
+crates/commitbook-client/src/types.rs
+  s_369a7f50f81cd6::t_eb0f7837321755 9-10
+docs/details/sync-architecture.md
+  s_369a7f50f81cd6::t_eb0f7837321755 152
+crates/commitbook-client/src/sync_ops.rs
+  s_369a7f50f81cd6::t_eb0f7837321755 159-163
+crates/commitbook-client/src/sync_ops_tests.rs
+  s_369a7f50f81cd6::t_d1363bf1efccc3 492-508,542-619
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0d71b7072f567c8e155c2b0c4b0ac4f92197ae50",
+  "prompts": {},
+  "sessions": {
+    "s_369a7f50f81cd6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e450-5b79-7bb2-b66f-042172ef914c",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
