@@ -144,10 +144,17 @@ fn skip_assignments(mut rest: &str) -> Option<&str> {
 /// `<schedule> cd <repo> && <bin> sync` (`run` in older releases). Any other
 /// line, including a user's own job that mentions the repository, is `None`.
 fn parse_entry(line: &str) -> Option<(String, String)> {
+    if line.trim_start().starts_with('#') {
+        return None;
+    }
     let start = line.find(" cd ")? + " cd ".len();
     let (repo, rest) = shell_unquote(&line[start..])?;
     let rest = skip_assignments(rest.strip_prefix(" && ")?)?;
     let (bin, rest) = shell_unquote(rest)?;
+    let binary = Path::new(&bin);
+    if !binary.is_absolute() || binary.file_name()? != "commitbook" {
+        return None;
+    }
     matches!(rest.trim_end(), " sync" | " run").then_some((repo, bin))
 }
 

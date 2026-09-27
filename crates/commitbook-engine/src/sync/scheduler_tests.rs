@@ -1676,3 +1676,85 @@ async fn sync_refuses_a_repository_with_a_git_crypt_filter() {
     assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
     assert_eq!(remote_branch_oid(&fx), remote);
 }
+
+#[tokio::test]
+async fn both_mode_preserves_pending_rejected_and_stale_reviews() {
+    for proposal_state in ["pending", "rejected", "stale"] {
+        let (fx, logger) = setup_with_state();
+        let root = fx.repo_dir.path();
+        let mut config = LocalConfig::new("notes", &fx.branch, "origin");
+        config.conflicts.mode = ConflictMode::Review;
+        config.save(root).unwrap();
+        diverge_files(&fx, &[("notes.md", "base\n", "local\n", "remote\n")]);
+        let mut options = SyncOptions::new("origin", &fx.branch, true);
+        options.review_ai_resolutions = true;
+        // Review must win even if a caller enables both options, including
+        // when the merge has just created the conflicts.
+        options.keep_both = true;
+        let resolver = MockResolver::ok("proposal\n");
+        let first = sync_with_resolver(
+            root,
+            &options,
+            Some(&resolver),
+            &SystemCredentials,
+            &logger,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.manual_conflicts, 1);
+        assert!(first.kept_both.is_empty());
+        assert_eq!(first.pushed, 0);
+        let view = crate::review::list(root).unwrap().remove(0);
+        assert!(view.proposal.is_some());
+        match proposal_state {
+            "rejected" => {
+                crate::review::proposal_action(
+                    root,
+                    &crate::review::ResolutionInput {
+                        path: view.path,
+                        revision: view.revision,
+                        proposal_version: view.proposal_version,
+                        action: "reject".into(),
+                        content: None,
+                    },
+                )
+                .await
+                .unwrap();
+                assert!(
+                    crate::review::list(root).unwrap()[0]
+                        .proposal
+                        .as_ref()
+                        .unwrap()
+                        .rejected
+                );
+            }
+            "stale" => {
+                std::fs::write(root.join("notes.md"), "user's in-progress resolution\n").unwrap();
+                assert!(crate::review::list(root).unwrap()[0].proposal_stale);
+            }
+            _ => {}
+        }
+        config.conflicts.mode = ConflictMode::Both;
+        config.save(root).unwrap();
+        let before = std::fs::read(root.join("notes.md")).unwrap();
+        let head = fx.repo.rev_parse("HEAD").unwrap();
+        let remote = remote_branch_oid(&fx);
+        let proposals_path = LocalConfig::local_dir(root).join("conflict-proposals.toml");
+        let proposals = std::fs::read(&proposals_path).unwrap();
+        let second = sync_repository(root, &config, &logger, None).await.unwrap();
+        assert_eq!(second.manual_conflicts, 1, "{proposal_state}: {second:?}");
+        assert!(!second.committed);
+        assert_eq!(second.pushed, 0);
+        assert!(second.kept_both.is_empty());
+        assert_eq!(std::fs::read(root.join("notes.md")).unwrap(), before);
+        assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
+        assert_eq!(remote_branch_oid(&fx), remote);
+        assert_eq!(std::fs::read(proposals_path).unwrap(), proposals);
+        assert_eq!(fx.repo.list_conflicted_paths().unwrap(), ["notes.md"]);
+        assert!(fx.repo.merge_in_progress());
+        let state = SyncState::load(&cb_dir_of(&fx)).unwrap();
+        assert_eq!(state.last_error_stage.as_deref(), Some("review"));
+        assert!(state.last_error.unwrap().contains("await review"));
+    }
+}

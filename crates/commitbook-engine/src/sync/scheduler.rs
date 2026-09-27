@@ -265,26 +265,26 @@ async fn sync_cycle(
         //    Guarding on merge_in_progress() makes this a no-op on retries.
         *stage = "merge";
         if repo.merge_in_progress() {
-            let unresolved = keep_both_notes(
-                &repo,
-                repo.list_conflicted_paths()?,
-                options.keep_both,
-                &mut outcome,
-                logger,
-            );
+            let unresolved = repo.list_conflicted_paths()?;
+            // Stored proposals must block every automatic resolution mode,
+            // including keep-both after a configuration change.
+            *stage = "ai_resolution";
+            if crate::review::prepare_locked(
+                repo_root,
+                options.review_ai_resolutions,
+                resolver,
+                lock,
+            )
+            .await?
+            {
+                record_review_pause(&unresolved, &mut outcome, stage, logger);
+                return Ok(outcome);
+            }
+            *stage = "merge";
+            let unresolved =
+                keep_both_notes(&repo, unresolved, options.keep_both, &mut outcome, logger);
             if !unresolved.is_empty() {
                 *stage = "ai_resolution";
-                if crate::review::prepare_locked(
-                    repo_root,
-                    options.review_ai_resolutions,
-                    resolver,
-                    lock,
-                )
-                .await?
-                {
-                    record_review_pause(&unresolved, &mut outcome, stage, logger);
-                    return Ok(outcome);
-                }
                 match resolver {
                     Some(resolver) => {
                         if let Err(error) =
@@ -394,6 +394,19 @@ async fn sync_cycle(
                 outcome.pulled += behind;
             }
             MergeOutcome::Conflicts(conflicted) => {
+                *stage = "ai_resolution";
+                if crate::review::prepare_locked(
+                    repo_root,
+                    options.review_ai_resolutions,
+                    resolver,
+                    lock,
+                )
+                .await?
+                {
+                    record_review_pause(&conflicted, &mut outcome, stage, logger);
+                    return Ok(outcome);
+                }
+                *stage = "merge";
                 let conflicted =
                     keep_both_notes(&repo, conflicted, options.keep_both, &mut outcome, logger);
                 if conflicted.is_empty() {
@@ -402,17 +415,6 @@ async fn sync_cycle(
                     // Fall through to push below.
                 } else {
                     *stage = "ai_resolution";
-                    if crate::review::prepare_locked(
-                        repo_root,
-                        options.review_ai_resolutions,
-                        resolver,
-                        lock,
-                    )
-                    .await?
-                    {
-                        record_review_pause(&conflicted, &mut outcome, stage, logger);
-                        return Ok(outcome);
-                    }
                     match resolver {
                         Some(r) => {
                             match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger)

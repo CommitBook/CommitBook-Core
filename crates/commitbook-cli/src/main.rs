@@ -70,6 +70,7 @@ enum Commands {
     },
 
     /// Commit locally and sync with remote
+    #[command(alias = "run")]
     Sync,
 
     /// Preview the next local snapshot without changing files or contacting the remote
@@ -212,3 +213,7 @@ async fn run(cli: Cli) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;

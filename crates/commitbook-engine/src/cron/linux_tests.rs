@@ -210,3 +210,35 @@ fn scheduled_environment_has_a_usable_path() {
     }
     assert!(environment.iter().all(|(_, value)| is_cron_safe(value)));
 }
+
+#[test]
+fn unrelated_and_commented_jobs_are_neither_removed_nor_reported() {
+    let repo = Path::new("/tmp/notes");
+    for binary in [
+        "/usr/local/bin/notebook-backup",
+        "/opt/commitbook-helper",
+        "commitbook",
+        "./commitbook",
+    ] {
+        for command in ["run", "sync"] {
+            // Even a marker cannot make another executable our job.
+            let line = format!(
+                "# CommitBook: /tmp/notes\n0 * * * * cd \"/tmp/notes\" && \"{binary}\" {command}"
+            );
+            assert_eq!(filter_crontab_lines(&line, repo), line);
+            assert_eq!(crontab_binary(&line, repo), None);
+        }
+    }
+    let (_, active) = entry("/tmp/notes", "/usr/bin/commitbook");
+    for prefix in ["#", "  # "] {
+        let commented = format!("{prefix}{active}");
+        assert_eq!(filter_crontab_lines(&commented, repo), commented);
+        assert_eq!(crontab_binary(&commented, repo), None);
+        let mixed = format!("{commented}\n{active}");
+        assert_eq!(filter_crontab_lines(&mixed, repo), commented);
+        assert_eq!(
+            crontab_binary(&mixed, repo),
+            Some(PathBuf::from("/usr/bin/commitbook"))
+        );
+    }
+}
