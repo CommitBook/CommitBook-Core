@@ -67,9 +67,7 @@ jobs:
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
       - run: cargo test --workspace
 
-  # The mobile SDK's iOS/Android code paths are behind cfg gates the desktop
-  # jobs never compile, so they broke unnoticed before. iOS only: an Android
-  # check needs the NDK as a C cross-compiler for OpenSSL and aws-lc.
+  # Desktop jobs do not compile iOS-only cfg paths, so check the SDK for iOS.
   mobile:
     name: Mobile SDK (iOS)
     runs-on: macos-latest
