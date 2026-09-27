@@ -1,0 +1,31 @@
+crates/commitbook-cli/src/main_tests.rs
+  s_369a7f50f81cd6::t_ad797305b72e90 1-13
+crates/commitbook-engine/src/sync/scheduler.rs
+  s_369a7f50f81cd6::t_ad797305b72e90 284-285
+  s_369a7f50f81cd6::t_4ec38515d0bbac 268-283,397-409
+crates/commitbook-engine/src/sync/scheduler_tests.rs
+  s_369a7f50f81cd6::t_ad797305b72e90 1679-1760
+crates/commitbook-engine/src/cron/linux_tests.rs
+  s_369a7f50f81cd6::t_ad797305b72e90 213-244
+crates/commitbook-cli/src/main.rs
+  s_369a7f50f81cd6::t_ad797305b72e90 216-219
+  s_369a7f50f81cd6::t_4ec38515d0bbac 73
+crates/commitbook-engine/src/cron/linux.rs
+  s_369a7f50f81cd6::t_4ec38515d0bbac 147-149,154-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d365ec452a3b1cf00c23c13cf58ba0d25938f7ed",
+  "prompts": {},
+  "sessions": {
+    "s_369a7f50f81cd6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e450-5b79-7bb2-b66f-042172ef914c",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
