@@ -149,7 +149,7 @@ pub enum SyncMode {
 ```
 
 Apps decide per-sync. Typical patterns:
-- Mobile apps default to `AiResolve` for transparent background sync. Opt into `Manual` from a "review conflicts" UI.
+- Mobile apps default to `AiResolve` for transparent background sync. Opt into `Manual` from a "review conflicts" UI. An explicit `Manual` call disables keep-both resolution and new AI proposals regardless of shared configuration; existing proposals still block automatic resolution.
 - Desktop sync follows `[conflicts] mode`: `both` and `manual` → `Manual` (after the keep-both pass for `both`); `ai` and `review` → `AiResolve` with `[conflicts] agent`.
 
 `AiResolve` can complete a conflict-free mobile sync without a callback. If a

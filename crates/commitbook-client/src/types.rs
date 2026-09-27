@@ -6,7 +6,8 @@ pub enum SyncMode {
     /// Auto-resolve via the configured AI resolver. Falls back to
     /// `manual_conflicts` only when the resolver fails.
     AiResolve,
-    /// Don't auto-resolve. Leaves conflict markers in working tree
+    /// Don't auto-resolve, even when shared config selects both or review.
+    /// Existing review proposals remain protected. Leaves conflict markers in working tree
     /// and returns `manual_conflicts` count for the caller to handle
     /// via `list_conflicts` + `resolve_conflict`.
     Manual,

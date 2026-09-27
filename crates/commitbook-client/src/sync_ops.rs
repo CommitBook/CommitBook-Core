@@ -156,8 +156,11 @@ pub fn sync_one_commitbook(
     let config = LocalConfig::load(&commitbook.local_path)
         .map_err(|error| CommitBookError::database(format!("Load config: {error}")))?;
     let mut options = SyncOptions::from(&config.git);
-    options.review_ai_resolutions = config.conflicts.mode == ConflictMode::Review;
-    options.keep_both = config.conflicts.mode == ConflictMode::Both;
+    // An explicit manual call overrides shared automatic conflict modes.
+    // Existing proposals still block sync through the engine's review guard.
+    let automatic = matches!(mode, SyncMode::AiResolve);
+    options.review_ai_resolutions = automatic && config.conflicts.mode == ConflictMode::Review;
+    options.keep_both = automatic && config.conflicts.mode == ConflictMode::Both;
 
     let host_resolver = callback.map(|callback| HostConflictResolver {
         commitbook_id: commitbook_id.to_string(),

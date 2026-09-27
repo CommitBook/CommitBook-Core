@@ -489,6 +489,23 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
         Some("resolved on phone\n")
     );
 
+    // Manual must preserve an existing proposal without accepting or replacing it.
+    let before = std::fs::read(clone.join("shared.md")).unwrap();
+    let proposal_version = proposals[0].proposal_version.clone();
+    let manual =
+        sync_one_commitbook(root.path(), "owner/repo", SyncMode::Manual, "unused", None).unwrap();
+    assert_eq!(manual.manual_conflicts, 1);
+    assert_eq!(manual.pushed, 0);
+    assert!(manual
+        .errors
+        .iter()
+        .any(|error| error.contains("await review")));
+    assert_eq!(std::fs::read(clone.join("shared.md")).unwrap(), before);
+    assert_eq!(
+        commitbook_engine::review::list(&clone).unwrap()[0].proposal_version,
+        proposal_version
+    );
+
     let listed = crate::conflicts::list_conflicts(root.path(), "owner/repo").unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(
@@ -521,4 +538,82 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
         std::fs::read_to_string(clone.join("shared.md")).unwrap(),
         "resolved on phone\n"
     );
+}
+
+#[test]
+fn manual_mode_overrides_shared_both_and_review_without_invoking_callback() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CountCallback(Arc<AtomicUsize>);
+    impl ConflictResolverCallback for CountCallback {
+        fn resolve(
+            &self,
+            request: AiConflictRequest,
+            continuation: Arc<ConflictResolutionContinuation>,
+        ) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            ContentCallback.resolve(request, continuation);
+        }
+    }
+    for shared_mode in [ConflictMode::Both, ConflictMode::Review] {
+        let (root, remote, clone, branch) = managed_sync_fixture();
+        let local = commitbook_engine::git::GitRepo::open(&clone).unwrap();
+        let mut config = LocalConfig::load(&clone).unwrap();
+        config.conflicts.mode = shared_mode;
+        config.save(&clone).unwrap();
+        std::fs::write(clone.join("shared.md"), "local\n").unwrap();
+        local.stage_all().unwrap();
+        local.commit("local changes").unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let repository = git2::build::RepoBuilder::new()
+            .branch(&branch)
+            .clone(remote_path(&remote).to_str().unwrap(), other.path())
+            .unwrap();
+        let mut git_config = repository.config().unwrap();
+        git_config.set_str("user.name", "Remote").unwrap();
+        git_config
+            .set_str("user.email", "remote@example.com")
+            .unwrap();
+        git_config.set_bool("commit.gpgsign", false).unwrap();
+        std::fs::write(other.path().join("shared.md"), "remote\n").unwrap();
+        let other_repo = commitbook_engine::git::GitRepo::open(other.path()).unwrap();
+        other_repo.stage_all().unwrap();
+        other_repo.commit("remote edit").unwrap();
+        other_repo
+            .push_with("origin", &branch, &TokenCredentials::new("unused"))
+            .unwrap();
+        let remote_repo = git2::Repository::open_bare(remote_path(&remote)).unwrap();
+        let remote_ref = format!("refs/heads/{branch}");
+        let remote_tip = remote_repo.refname_to_id(&remote_ref).unwrap();
+        let head = local.rev_parse("HEAD").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        // Exercise both a newly created conflict and recovery of that merge.
+        for _ in 0..2 {
+            let outcome = sync_one_commitbook(
+                root.path(),
+                "owner/repo",
+                SyncMode::Manual,
+                "unused",
+                Some(Arc::new(CountCallback(Arc::clone(&calls)))),
+            )
+            .unwrap();
+            assert_eq!(outcome.manual_conflicts, 1, "{shared_mode:?}: {outcome:?}");
+            assert_eq!(outcome.conflicts_resolved, 0);
+            assert_eq!(outcome.pushed, 0);
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            assert_eq!(local.rev_parse("HEAD").unwrap(), head);
+            assert_eq!(remote_repo.refname_to_id(&remote_ref).unwrap(), remote_tip);
+            assert!(local.merge_in_progress());
+            let conflicts = crate::conflicts::list_conflicts(root.path(), "owner/repo").unwrap();
+            assert_eq!(conflicts.len(), 1);
+            assert!(conflicts[0].proposal_version.is_none());
+            assert!(std::fs::read_to_string(clone.join("shared.md"))
+                .unwrap()
+                .contains("<<<<<<<"));
+            let state = commitbook_engine::state::sync_state::SyncState::load(
+                &LocalConfig::commitbook_dir(&clone),
+            )
+            .unwrap();
+            assert_ne!(state.last_error_stage.as_deref(), Some("review"));
+        }
+    }
 }
