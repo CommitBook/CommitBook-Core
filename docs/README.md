@@ -182,7 +182,10 @@ CommitBook stores all state inside `.CommitBook/` in the repository root. No glo
 
 `commitbook init` creates this directory and commits its metadata. The nested
 `.CommitBook/.gitignore` excludes `/local/`; the repository-root `.gitignore`
-is left untouched.
+is left untouched. From `.CommitBook/`, sync only ever adds `config.toml`,
+`.gitignore`, and `devices/*.toml`. Other new files there, such as Finder's
+`.DS_Store` or an editor swap file, stay on this device and never stop sync,
+even when no ignore rule covers them.
 
 ### `config.toml` (committed)
 
@@ -230,7 +233,10 @@ run on any other branch.
 
 CommitBook follows ordinary Git staging and ignore behavior. Every dirty
 tracked or non-ignored file is eligible, including hidden files, non-Markdown
-files, staged changes, and deletions. Sync always pushes after a successful
+files, staged changes, and deletions. The one exception is `.CommitBook/`,
+where new files other than the published metadata above are never added;
+files already tracked there follow normal Git behavior. Plain `git status`
+still lists those files as untracked. Sync always pushes after a successful
 merge.
 
 ### `devices/` (committed)
@@ -390,9 +396,8 @@ See [workflow stages](workflows.md) for publishing setup and validation.
 
 Stop scheduled syncs before replacing an installed binary, then start them
 again using the new installation. Pre-launch development layouts have no
-migration support: preserve any local credentials/state you need and initialize
-a fresh clone. Do not run old and new development binaries against the same
-clone. Old LaunchAgent labels and crontab entries are not discovered or
+migration support; see [Pre-launch compatibility](#pre-launch-compatibility).
+Do not run old and new development binaries against the same clone. Old LaunchAgent labels and crontab entries are not discovered or
 removed by current commands.
 
 ## Requirements
@@ -531,7 +536,9 @@ commitbook preview --json
 Preview lists the files that normal staging would include in the next local
 snapshot, with staged/unstaged indicators and any sync blockers. It includes
 all eligible Git files, including non-Markdown files, hidden files, and
-deletions, and respects Git ignore rules. It does not stage, commit, fetch,
+deletions, and respects Git ignore rules. New files inside `.CommitBook/` that
+sync never adds are left out, and pre-release files there are shown as a
+warning. It does not stage, commit, fetch,
 invoke AI, or write application state. It is a snapshot: later edits can change
 what the next sync commits. A blocked CLI preview returns a nonzero exit code,
 including when JSON output is requested.
@@ -588,10 +595,15 @@ shared detailed status. Unknown change counts are null rather than zero.
 
 Only the current schema and `.CommitBook/local/` layout are supported. There
 are no upgrades for older development layouts or commands (`run` is removed;
-use `sync`). Old files are left untouched. Sync refuses unexpected top-level `.CommitBook/`
-entries so abandoned state cannot be accidentally published. For obsolete development setups,
-back up local credentials and state, stop old schedulers, and initialize a fresh
-clone with the current CLI. The current advisory lock is `local/.lock`; its file
+use `sync`). Old files are left untouched, and sync never publishes them:
+it never adds new files inside `.CommitBook/` other than `config.toml`,
+`.gitignore`, and `devices/*.toml`. `commitbook doctor` and `commitbook preview`
+warn when pre-release files remain at the top of `.CommitBook/` (`auth.toml`,
+`state.toml`, `base/`, `logs/`, `.lock`, or the Go build's `config.json` and
+`Logs/`); they may hold a Git token or device state. Stop any old scheduler,
+then delete them or move them into `.CommitBook/local/`. Deleting a copy that
+an old version committed publishes the deletion; if `auth.toml` was ever
+pushed, revoke its token. The current advisory lock is `local/.lock`; its file
 remains after unlocking and does not itself indicate a running process.
 
 ## Local CommitBook ID (`commitbook_local_id`)
