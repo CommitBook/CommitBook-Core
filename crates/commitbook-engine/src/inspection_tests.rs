@@ -88,7 +88,7 @@ fn status_is_read_only_and_reports_actual_head_and_unknown_remote() {
     assert!(status
         .diagnostics
         .iter()
-        .any(|d| d.contains("CommitBook-Id")));
+        .any(|d| d.contains("commitbook_local_id")));
     assert_eq!(status.diagnostics.len(), 1, "{:?}", status.diagnostics);
     assert_eq!(before, snapshot(&fx.repo_root));
 }

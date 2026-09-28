@@ -33,6 +33,7 @@ tokio = { version = "1.53.1", features = ["full"] }
 toml = "1.1.6"
 tempfile = "3.27.0"
 toml_edit = "0.25.15"
+url = "2.5.8"
 
 # Desktop-only deps. iOS/Android builds skip these; their consumers
 # (cron/*, ai/{claude,copilot,codex,gemini,cursor}.rs, git/signing.rs) are

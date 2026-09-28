@@ -34,7 +34,7 @@ is enabled. Do not substitute a public issue for a private report.
 - The web dashboard is loopback-only and has no login. Host/origin checks protect
   against browser-driven cross-site requests; it is not intended for public
   hosting and does not isolate the CommitBook from other processes on the device.
-- CommitBook-Ids are short local selectors, not secrets or authorization tokens.
+- Local CommitBook IDs are short selectors, not secrets or authorization tokens.
   Filesystem containment and the host application's permissions remain required.
 - Advisory locks coordinate CommitBook writers, not unrelated editors or Git
   commands. They are not a security boundary against a malicious local process.

@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use git2::Repository;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use url::Url;
 
 /// Hosting service a remote URL points at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +144,92 @@ fn scp_like(url: &str) -> Option<(&str, &str)> {
 /// Identity of the named remote, parsed from its configured URL.
 pub fn remote_identity(repo_path: &Path, remote: &str) -> Result<RemoteIdentity> {
     parse_remote_url(&get_remote_url(repo_path, remote)?)
+}
+
+/// A URL suitable for UI and credential callbacks. HTTP userinfo and any
+/// URL password are removed; SSH usernames (normally `git`) are preserved.
+pub fn credential_free_url(remote_url: &str) -> Result<String> {
+    let remote_url = remote_url.trim();
+    if remote_url.is_empty() || remote_url.chars().any(char::is_control) {
+        bail!("Git remote URL must be non-empty and contain no control characters");
+    }
+    if let Ok(mut parsed) = Url::parse(remote_url) {
+        if parsed.scheme() == "http" || parsed.scheme() == "https" {
+            parsed
+                .set_username("")
+                .map_err(|_| anyhow::anyhow!("Invalid Git URL"))?;
+        }
+        parsed
+            .set_password(None)
+            .map_err(|_| anyhow::anyhow!("Invalid Git URL"))?;
+        parsed.set_query(None);
+        parsed.set_fragment(None);
+        return Ok(parsed.to_string());
+    }
+    parse_remote_url(remote_url)?;
+    Ok(remote_url.to_string())
+}
+
+/// Reject credentials embedded in clone input; the host callback owns them.
+pub fn validate_clone_url(remote_url: &str) -> Result<()> {
+    credential_free_url(remote_url)?;
+    if let Ok(parsed) = Url::parse(remote_url) {
+        if parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+            || (matches!(parsed.scheme(), "http" | "https") && !parsed.username().is_empty())
+        {
+            bail!("Put Git credentials in the host callback, not the remote URL");
+        }
+    }
+    Ok(())
+}
+
+/// Compare remote endpoints, not transport schemes or usernames. GitHub
+/// names are case-insensitive; generic hosts retain path case.
+pub fn same_remote(a: &str, b: &str) -> bool {
+    fn key(remote_url: &str) -> Option<(String, String)> {
+        if let Ok(parsed) = Url::parse(remote_url) {
+            if parsed.scheme() == "file" {
+                let path = parsed.to_file_path().ok()?.canonicalize().ok()?;
+                return Some(("local".into(), path.to_string_lossy().into_owned()));
+            }
+            if let Some(host) = parsed.host_str() {
+                let port = parsed.port().filter(|port| {
+                    !matches!(
+                        (parsed.scheme(), *port),
+                        ("https", 443) | ("http", 80) | ("ssh", 22)
+                    )
+                });
+                let authority = match port {
+                    Some(port) => format!("{}:{port}", host.to_ascii_lowercase()),
+                    None => host.to_ascii_lowercase(),
+                };
+                let path = parsed.path().trim_end_matches('/').trim_end_matches(".git");
+                let path = if host.eq_ignore_ascii_case("github.com") {
+                    path.to_ascii_lowercase()
+                } else {
+                    path.to_string()
+                };
+                return Some((authority, path));
+            }
+        }
+        let identity = parse_remote_url(remote_url).ok()?;
+        if let Some(host) = identity.host {
+            let path = format!("/{}/{}", identity.owner, identity.repo);
+            return Some((
+                host.clone(),
+                if host == "github.com" {
+                    path.to_ascii_lowercase()
+                } else {
+                    path
+                },
+            ));
+        }
+        let path = std::path::Path::new(remote_url).canonicalize().ok()?;
+        Some(("local".into(), path.to_string_lossy().into_owned()))
+    }
+    key(a).zip(key(b)).is_some_and(|(a, b)| a == b)
 }
 
 /// Get the remote URL for the given remote name.

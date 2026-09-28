@@ -8,8 +8,11 @@ use commitbook_engine::state::RepoLock;
 use crate::errors::{CommitBookError, Result};
 use crate::types::{ConflictSummary, ResolveConflictInput};
 
-pub fn list_conflicts(workspaces_root: &Path, commitbook_id: &str) -> Result<Vec<ConflictSummary>> {
-    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
+pub fn list_conflicts(
+    workspaces_root: &Path,
+    commitbook_local_id: &str,
+) -> Result<Vec<ConflictSummary>> {
+    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_local_id)?;
     let conflicts = commitbook_engine::review::list(&commitbook.local_path)
         .map_err(|error| CommitBookError::storage(format!("List conflicts: {error:#}")))?;
 
@@ -37,7 +40,8 @@ pub fn list_conflicts(workspaces_root: &Path, commitbook_id: &str) -> Result<Vec
 }
 
 pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) -> Result<()> {
-    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, &input.commitbook_id)?;
+    let commitbook =
+        crate::paths::find_managed_commitbook(workspaces_root, &input.commitbook_local_id)?;
     let _lock = RepoLock::acquire(&commitbook.local_path)
         .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
     let repo = GitRepo::open(&commitbook.local_path)
@@ -62,7 +66,7 @@ pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) ->
         .ok_or_else(|| {
             CommitBookError::not_found(format!(
                 "Conflict {} not found in CommitBook {}",
-                input.conflict_id, input.commitbook_id
+                input.conflict_id, input.commitbook_local_id
             ))
         })?;
 

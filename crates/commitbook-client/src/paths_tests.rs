@@ -2,7 +2,11 @@ use super::*;
 
 #[test]
 fn validates_github_components_and_branch_names() {
-    assert!(validate_init_input("openai", "commit-book_2.0", "feature/mobile").is_ok());
+    assert!(validate_init_input(
+        "https://github.com/openai/commit-book_2.0.git",
+        "feature/mobile"
+    )
+    .is_ok());
     for value in [
         "",
         ".",
@@ -26,6 +30,19 @@ fn validates_github_components_and_branch_names() {
         "bad\0name",
     ] {
         assert!(validate_branch(branch).is_err(), "{branch:?}");
+    }
+}
+
+#[test]
+fn direct_onboarding_accepts_https_ssh_and_local_git_urls() {
+    let remote = tempfile::tempdir().unwrap();
+    for url in [
+        "https://gitlab.com/team/notes.git",
+        "ssh://git@gitlab.com/team/notes.git",
+        "git@gitlab.com:team/notes.git",
+        remote.path().to_str().unwrap(),
+    ] {
+        assert!(validate_init_input(url, "main").is_ok(), "{url}");
     }
 }
 
@@ -80,10 +97,19 @@ fn discovery_uses_host_and_remote_not_folder_name_or_local_id() {
     commitbook_engine::config::LocalConfig::new("Notes", "main", "upstream")
         .save(&clone)
         .unwrap();
-    assert!(!github_remote_is_local(root.path(), "owner", "notes"));
+    assert!(!remote_is_local(
+        root.path(),
+        "https://github.com/owner/notes.git"
+    ));
     repo.remote_set_url("upstream", "git@github.com:Owner/Notes.git")
         .unwrap();
-    assert!(github_remote_is_local(root.path(), "owner", "notes"));
-    assert!(!github_remote_is_local(root.path(), "other", "notes"));
+    assert!(remote_is_local(
+        root.path(),
+        "https://github.com/owner/notes.git"
+    ));
+    assert!(!remote_is_local(
+        root.path(),
+        "https://github.com/other/notes.git"
+    ));
     assert!(!commitbook_engine::commitbooks::identity::path(&clone).exists());
 }

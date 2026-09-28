@@ -3,31 +3,39 @@
 //! operations that take seconds.
 
 use std::path::Path;
+use std::sync::Arc;
 
+use commitbook_engine::commitbooks::init_dot_commitbook;
 use commitbook_engine::commitbooks::publication::PublicationError;
-use commitbook_engine::commitbooks::{init_dot_commitbook, slug_for};
 use commitbook_engine::config::{Auth, LocalConfig};
-use commitbook_engine::git::remote::remote_identity;
+use commitbook_engine::git::remote::{
+    credential_free_url, get_remote_url, remote_identity, same_remote,
+};
 use commitbook_engine::git::GitRepo;
-use commitbook_engine::platform::{CredentialProvider, TokenCredentials};
+use commitbook_engine::platform::CredentialProvider;
 use commitbook_engine::state::RepoLock;
 
 use crate::errors::{CommitBookError, Result};
-use crate::types::{CommitBookInput, CommitBookSummary};
+use crate::types::{CommitBookInput, CommitBookSummary, GitCredentialCallback};
 
 pub fn init_local_commitbook(
     workspaces_root: &Path,
     input: &CommitBookInput,
-    token: &str,
+    credential_callback: Option<Arc<dyn GitCredentialCallback>>,
 ) -> Result<CommitBookSummary> {
-    crate::paths::validate_provider(&input.provider)?;
-    crate::paths::validate_init_input(&input.owner, &input.repo, &input.branch)?;
+    crate::paths::validate_init_input(&input.remote_url, &input.branch)?;
     let workspaces_root = crate::paths::canonicalize_workspaces_root(workspaces_root)?;
-    let slug = slug_for(&input.owner, &input.repo);
-    let clone_path = workspaces_root.join(&slug);
+    let existing = find_existing_clone(&workspaces_root, &input.remote_url)?;
+    let (clone_path, reserved_id) = match existing {
+        Some(path) => (path, None),
+        None => {
+            let id = allocate_local_id(&workspaces_root)?;
+            (workspaces_root.join(&id), Some(id))
+        }
+    };
     crate::paths::validate_clone_destination(&workspaces_root, &clone_path)?;
 
-    let creds = TokenCredentials::new(token.to_string());
+    let creds = crate::credentials::HostCredentials::new(credential_callback);
 
     if clone_path.exists() {
         // Already cloned. Repair and publish metadata while holding the same
@@ -39,46 +47,41 @@ pub fn init_local_commitbook(
         ensure_commitbook_initialized(&clone_path, input, &remote, &creds)?;
         commitbook_engine::commitbooks::identity::ensure_locked(&clone_path, &lock)?;
     } else {
-        let repo_url = format!("https://github.com/{}/{}.git", input.owner, input.repo);
-        clone_repo_with_creds(&repo_url, &clone_path, &input.branch, &creds)?;
+        clone_repo_with_creds(&input.remote_url, &clone_path, &input.branch, &creds)?;
         let lock = RepoLock::acquire(&clone_path)
             .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
         // A fork, transfer, or stale committed config can identify a
         // different CommitBook even in a freshly-created local clone. Do not
-        // publish or return an ID that disagrees with the requested GitHub
-        // repository.
+        // publish or return an ID that disagrees with the requested remote.
         let (remote, _branch) = prepare_fresh_clone(&clone_path, input)?;
         ensure_commitbook_initialized(&clone_path, input, &remote, &creds)?;
-        commitbook_engine::commitbooks::identity::ensure_locked(&clone_path, &lock)?;
+        commitbook_engine::commitbooks::identity::ensure_locked_with_id(
+            &clone_path,
+            &lock,
+            reserved_id.as_deref().expect("new clone has reserved ID"),
+        )?;
     }
 
     let config = LocalConfig::load(&clone_path)
         .map_err(|e| CommitBookError::storage(format!("Failed to load config: {e}")))?;
 
-    // Identity comes from the remote URL; a remote without an owner (a bare
-    // local path) falls back to the requested repository.
-    let (owner, repo, provider) = match remote_identity(&clone_path, &config.git.remote) {
-        Ok(identity) if !identity.owner.is_empty() => (
-            identity.owner,
-            identity.repo,
-            identity.provider.as_str().to_string(),
-        ),
-        _ => (
-            input.owner.clone(),
-            input.repo.clone(),
-            input.provider.clone(),
-        ),
-    };
+    let remote_url = get_remote_url(&clone_path, &config.git.remote)
+        .and_then(|url| credential_free_url(&url))
+        .map_err(|e| CommitBookError::storage(format!("Read remote URL: {e:#}")))?;
+    let provider = remote_identity(&clone_path, &config.git.remote)
+        .map_err(|e| CommitBookError::storage(format!("Read remote provider: {e:#}")))?
+        .provider
+        .as_str()
+        .to_string();
     let mode = commitbook_engine::devices::this_device(&clone_path)
         .map_err(|e| CommitBookError::storage(format!("Read this device: {e:#}")))?
         .map(|(_, device)| device.auth.as_str().to_string())
         .unwrap_or_else(|| input.mode.clone());
 
     Ok(CommitBookSummary {
-        commitbook_id: commitbook_engine::commitbooks::identity::load(&clone_path)
+        commitbook_local_id: commitbook_engine::commitbooks::identity::load(&clone_path)
             .map_err(|e| CommitBookError::storage(format!("Read identity: {e:#}")))?,
-        owner,
-        repo,
+        remote_url,
         name: config.commitbook.name,
         mode,
         provider,
@@ -87,6 +90,80 @@ pub fn init_local_commitbook(
         doc_count: 0,
         conflict_count: 0,
     })
+}
+
+fn find_existing_clone(
+    workspaces_root: &Path,
+    remote_url: &str,
+) -> Result<Option<std::path::PathBuf>> {
+    let mut matches = Vec::new();
+    for entry in std::fs::read_dir(workspaces_root)
+        .map_err(|e| CommitBookError::storage(format!("Scan workspaces: {e}")))?
+    {
+        let entry = entry.map_err(|e| CommitBookError::storage(format!("Read workspace: {e}")))?;
+        let path = entry.path();
+        if crate::paths::validate_managed_clone(workspaces_root, &path).is_err() {
+            continue;
+        }
+        let Ok(config) = LocalConfig::load(&path) else {
+            continue;
+        };
+        let Ok(existing_url) = get_remote_url(&path, &config.git.remote) else {
+            continue;
+        };
+        if same_remote(&existing_url, remote_url) {
+            matches.push(path);
+        }
+    }
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.pop()),
+        _ => Err(CommitBookError::invalid_input(
+            "Multiple local clones use this remote; choose one with its commitbook_local_id",
+        )),
+    }
+}
+
+fn allocate_local_id(workspaces_root: &Path) -> Result<String> {
+    for _ in 0..100 {
+        let id = commitbook_engine::commitbooks::identity::generate_candidate()
+            .map_err(|e| CommitBookError::storage(format!("Generate local ID: {e:#}")))?;
+        if local_id_available(workspaces_root, &id)? {
+            return Ok(id);
+        }
+    }
+    Err(CommitBookError::storage(
+        "Could not allocate a unique local ID",
+    ))
+}
+
+fn local_id_available(workspaces_root: &Path, id: &str) -> Result<bool> {
+    let workspaces_root = crate::paths::canonicalize_workspaces_root(workspaces_root)?;
+    commitbook_engine::commitbooks::identity::validate(id)
+        .map_err(|e| CommitBookError::invalid_input(format!("Invalid local ID: {e:#}")))?;
+    match std::fs::symlink_metadata(workspaces_root.join(id)) {
+        Ok(_) => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(CommitBookError::storage(format!(
+                "Inspect local ID path: {error}"
+            )))
+        }
+    }
+    for entry in std::fs::read_dir(&workspaces_root)
+        .map_err(|e| CommitBookError::storage(format!("Scan local IDs: {e}")))?
+    {
+        let path = entry
+            .map_err(|e| CommitBookError::storage(format!("Read local ID entry: {e}")))?
+            .path();
+        if crate::paths::validate_managed_clone(&workspaces_root, &path).is_ok()
+            && commitbook_engine::commitbooks::identity::load(&path)
+                .is_ok_and(|existing| existing == id)
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// A clone created by libgit2 initially names its remote `origin`. If the
@@ -292,6 +369,19 @@ fn clone_repo_with_creds(
     branch: &str,
     creds: &dyn CredentialProvider,
 ) -> Result<()> {
+    match std::fs::symlink_metadata(dest) {
+        Ok(_) => {
+            return Err(CommitBookError::invalid_input(
+                "Clone destination already exists",
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(CommitBookError::storage(format!(
+                "Inspect clone destination: {error}"
+            )))
+        }
+    }
     let config = git2::Config::open_default()
         .map_err(|error| CommitBookError::storage(format!("Open Git config: {error}")))?;
     let mut callbacks = git2::RemoteCallbacks::new();
@@ -310,9 +400,24 @@ fn clone_repo_with_creds(
     // otherwise the later push of `<branch>:<branch>` has no matching source ref.
     builder.branch(branch);
 
-    builder
-        .clone(url, dest)
-        .map_err(|e| CommitBookError::transport(format!("Clone failed for {url}: {e}")))?;
+    if let Err(error) = builder.clone(url, dest) {
+        // This destination was absent before cloning and has not yet been
+        // exposed to the app. Remove libgit2's incomplete directory so a
+        // retry does not strand an unregistered ID-named clone.
+        if std::fs::symlink_metadata(dest)
+            .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        {
+            if let Err(cleanup) = std::fs::remove_dir_all(dest) {
+                return Err(CommitBookError::storage(format!(
+                    "Clone failed for {url}: {error}; remove incomplete directory {} manually: {cleanup}",
+                    dest.display()
+                )));
+            }
+        }
+        return Err(CommitBookError::transport(format!(
+            "Clone failed for {url}: {error}"
+        )));
+    }
     Ok(())
 }
 
@@ -425,16 +530,11 @@ fn validate_existing_identity(clone_path: &Path, input: &CommitBookInput) -> Res
             names[0].to_string()
         }
     };
-    let identity = remote_identity(clone_path, &remote)?;
-    if !matches!(
-        identity.host.as_deref(),
-        Some("github.com" | "www.github.com")
-    ) || !identity.owner.eq_ignore_ascii_case(&input.owner)
-        || !identity.repo.eq_ignore_ascii_case(&input.repo)
-    {
+    let existing_url = get_remote_url(clone_path, &remote)?;
+    if !same_remote(&existing_url, &input.remote_url) {
         return Err(CommitBookError::invalid_input(format!(
-            "Existing clone syncs with {}/{}/{} but initialization requested github.com/{}/{}; use local registration for an existing non-GitHub clone",
-            identity.host.as_deref().unwrap_or("local"), identity.owner, identity.repo, input.owner, input.repo)));
+            "Existing clone syncs with {} but initialization requested {}; use local registration for a separate clone",
+            credential_free_url(&existing_url)?, credential_free_url(&input.remote_url)?)));
     }
     Ok(())
 }

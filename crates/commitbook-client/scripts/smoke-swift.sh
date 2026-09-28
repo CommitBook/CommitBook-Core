@@ -48,8 +48,16 @@ import Foundation
 
 let tmp = NSTemporaryDirectory() + "cb-smoke-\(UUID().uuidString)"
 defer { try? FileManager.default.removeItem(atPath: tmp) }
+final class SmokeCredentials: GitCredentialCallback {
+    func provide(request: GitCredentialRequest) -> GitCredentialResponse {
+        return GitCredentialResponse(kind: .default, username: nil, password: nil,
+                                     publicKey: nil, privateKey: nil, passphrase: nil,
+                                     errorMessage: "No network credential expected in smoke test")
+    }
+}
 let client = try! CommitBookEngineClient(workspacesRoot: tmp,
-                                         conflictResolver: nil)
+                                         conflictResolver: nil,
+                                         credentialCallback: SmokeCredentials())
 
 // Synchronous method: proves the FFI boundary works at all.
 let books = try! client.listCommitbooks()
@@ -91,8 +99,9 @@ agent = "claude"
 """
 try! config.write(toFile: clone + "/.CommitBook/config.toml", atomically: true, encoding: .utf8)
 let registered = try! client.registerLocalCommitbook(relativePath: "notes")
-precondition(registered.commitbookId.count == 8)
-precondition(try! client.getCommitbook(commitbookId: registered.commitbookId).commitbookId == registered.commitbookId)
+precondition(registered.commitbookLocalId.count == 8)
+precondition(registered.remoteUrl == "https://github.com/example/notes.git")
+precondition(try! client.getCommitbook(commitbookLocalId: registered.commitbookLocalId).commitbookLocalId == registered.commitbookLocalId)
 print("registerLocalCommitbook -> persistent local identity")
 
 // Async method: this traps if the shared tokio runtime is missing. A bogus id
@@ -101,9 +110,8 @@ let sem = DispatchSemaphore(value: 0)
 var ok = false
 Task {
     do {
-        _ = try await client.syncCommitbook(commitbookId: "does-not-exist",
-                                            mode: .manual,
-                                            token: "token")
+        _ = try await client.syncCommitbook(commitbookLocalId: "does-not-exist",
+                                            mode: .manual)
         print("FAIL: expected a NotFound error")
     } catch {
         print("syncCommitbook -> expected error: \(error)")

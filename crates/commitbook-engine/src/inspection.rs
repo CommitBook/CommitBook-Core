@@ -237,7 +237,7 @@ impl RepositoryStatus {
         }
         if let Err(error) = crate::commitbooks::identity::load(root) {
             s.diagnostics
-                .push(format!("Local CommitBook-Id: {error:#}"));
+                .push(format!("Local commitbook_local_id: {error:#}"));
         }
         match crate::devices::list(root) {
             Ok((devices, warnings)) => {

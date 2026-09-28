@@ -16,16 +16,13 @@ use super::*;
 fn async_ffi_methods_run_without_ambient_tokio_runtime() {
     let tmp = tempfile::tempdir().unwrap();
     let client =
-        CommitBookEngineClient::new(tmp.path().to_string_lossy().into_owned(), None).unwrap();
+        CommitBookEngineClient::new(tmp.path().to_string_lossy().into_owned(), None, None).unwrap();
 
     // A bogus id resolves to NotFound before any network call is attempted.
     // Pre-fix this line panicked instead of returning.
-    let err = pollster::block_on(client.sync_commitbook(
-        "does-not-exist".to_string(),
-        SyncMode::Manual,
-        "token".to_string(),
-    ))
-    .expect_err("a bogus commitbook id should error, not succeed");
+    let err =
+        pollster::block_on(client.sync_commitbook("does-not-exist".to_string(), SyncMode::Manual))
+            .expect_err("a bogus commitbook id should error, not succeed");
 
     assert!(
         matches!(err, CommitBookError::NotFound { .. }),
@@ -34,11 +31,8 @@ fn async_ffi_methods_run_without_ambient_tokio_runtime() {
 
     // The shared runtime is a process-global OnceLock, so a second call must
     // reuse it rather than panic or deadlock.
-    let second = pollster::block_on(client.sync_commitbook(
-        "also-missing".to_string(),
-        SyncMode::Manual,
-        "token".to_string(),
-    ));
+    let second =
+        pollster::block_on(client.sync_commitbook("also-missing".to_string(), SyncMode::Manual));
     assert!(
         matches!(second, Err(CommitBookError::NotFound { .. })),
         "second call should also return NotFound, got: {second:?}"
@@ -68,7 +62,8 @@ fn delete_never_follows_workspace_symlink() {
     crate::test_support::set_identity(outside.path());
     symlink(outside.path(), root.path().join("owner__repo")).unwrap();
     let client =
-        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None).unwrap();
+        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
+            .unwrap();
 
     let error = client
         .delete_commitbook("a1b2c3d4".to_string(), false)
@@ -122,7 +117,8 @@ fn deletion_fixture() -> (tempfile::TempDir, CommitBookEngineClient, PathBuf) {
         "published fixture must start clean"
     );
     let client =
-        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None).unwrap();
+        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
+            .unwrap();
     (root, client, clone)
 }
 
@@ -218,7 +214,9 @@ fn constructor_rejects_symlink_workspace_root() {
     let outside = tempfile::tempdir().unwrap();
     let linked = parent.path().join("linked-root");
     symlink(outside.path(), &linked).unwrap();
-    assert!(CommitBookEngineClient::new(linked.to_string_lossy().into_owned(), None,).is_err());
+    assert!(
+        CommitBookEngineClient::new(linked.to_string_lossy().into_owned(), None, None).is_err()
+    );
 }
 
 #[test]
@@ -244,12 +242,13 @@ fn a_broken_clone_is_listed_separately_and_does_not_hide_the_others() {
     .unwrap();
 
     let client =
-        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None).unwrap();
+        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
+            .unwrap();
     let listed: Vec<String> = client
         .list_commitbooks()
         .unwrap()
         .into_iter()
-        .map(|cb| cb.commitbook_id)
+        .map(|cb| cb.commitbook_local_id)
         .collect();
     assert_eq!(listed, ["a1b2c3d4"]);
     let broken = client.list_broken_commitbooks().unwrap();
@@ -278,7 +277,7 @@ fn registration_is_local_read_listing_is_pure_and_paths_are_constrained() {
     let summary = client
         .register_local_commitbook("owner__repo".into())
         .unwrap();
-    assert_eq!(summary.commitbook_id.len(), 8);
+    assert_eq!(summary.commitbook_local_id.len(), 8);
     assert_eq!(
         before,
         git2::Repository::open(&clone)
@@ -288,11 +287,11 @@ fn registration_is_local_read_listing_is_pure_and_paths_are_constrained() {
             .target()
     );
     assert_eq!(
-        summary.commitbook_id,
+        summary.commitbook_local_id,
         client
             .register_local_commitbook("owner__repo".into())
             .unwrap()
-            .commitbook_id
+            .commitbook_local_id
     );
     assert!(client.get_commitbook("owner/repo".into()).is_err());
     for path in ["../outside", "/tmp", "owner__repo/../owner__repo", ".", ""] {
@@ -302,9 +301,9 @@ fn registration_is_local_read_listing_is_pure_and_paths_are_constrained() {
     std::fs::rename(&clone, &moved).unwrap();
     assert_eq!(
         client
-            .get_commitbook(summary.commitbook_id.clone())
+            .get_commitbook(summary.commitbook_local_id.clone())
             .unwrap()
-            .commitbook_id,
-        summary.commitbook_id
+            .commitbook_local_id,
+        summary.commitbook_local_id
     );
 }

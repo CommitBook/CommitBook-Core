@@ -14,28 +14,25 @@ pub mod init;
 pub mod preferences;
 pub mod publication;
 pub mod registry;
-pub mod slug;
 
 use std::path::PathBuf;
 
 pub use init::init_dot_commitbook;
 pub use preferences::{load_preferences, save_preferences, Preferences};
 pub use registry::{scan_workspaces, scan_workspaces_root, BrokenClone, WorkspaceScan};
-pub use slug::slug_for;
 
 /// Runtime view of a CommitBook clone on this device.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitBook {
     /// Persisted eight-character identity of this local clone.
-    pub commitbook_id: String,
-    pub owner: String,
-    pub repo: String,
+    pub commitbook_local_id: String,
+    pub remote_url: String,
     pub name: String,
     pub provider: String,
     pub mode: String,
     pub branch: String,
     pub auto_sync: bool,
-    /// `<workspacesRoot>/<owner>__<repo>` on disk.
+    /// A direct child of the workspaces root; new clones use their local ID.
     pub local_path: PathBuf,
 }
 

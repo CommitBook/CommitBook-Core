@@ -80,7 +80,7 @@ pub(crate) async fn fetch_user_repos(token: &str) -> Result<Vec<RepoInfo>> {
         let count = body.len();
         for r in body {
             all.push(RepoInfo {
-                owner: r.owner.login,
+                remote_url: format!("https://github.com/{}/{}.git", r.owner.login, r.name),
                 name: r.name,
                 default_branch: r.default_branch.unwrap_or_else(|| "main".into()),
                 is_private: r.private,

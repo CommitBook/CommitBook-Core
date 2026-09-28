@@ -141,7 +141,7 @@ Each device writes only its own `devices/<id>.toml`, and only when it registers 
   .gitignore         # Contains /local/ (COMMITTED to git)
   devices/           # One file per device: name, platform, auth (COMMITTED to git)
   local/             # All local state (GITIGNORED via single entry)
-    CommitBook-ID.toml # CommitBook-Id: eight hex characters identifying this local clone
+    commitbook_local_id.toml # commitbook_local_id: eight hex characters identifying this local clone
     device-id        # This device's id (names its devices/<id>.toml)
     auth.toml        # Credentials (0o600 permissions)
     state.toml       # Sync state (last_sync_at, last_attempt_at, last_fetch_at, last_push_at, last_error, last_error_stage, kept_both_paths, kept_both_at)
@@ -162,9 +162,9 @@ Path helpers in code:
 
 ## Local identity and SDK
 
-Use the persisted `CommitBook-Id` from `local/CommitBook-ID.toml`, never
-`owner/repo`, as a local clone selector. IDs use path plus OS randomness once;
-no global registry or generation-time collision check exists. Scans are
+Use the persisted `commitbook_local_id` from `local/commitbook_local_id.toml`, never
+`owner/repo`, as a local clone selector. IDs use OS randomness once;
+no global registry exists; SDK-created clones check local ID collisions. Scans are
 read-only and report missing/invalid/duplicate IDs. Registration and first
 mutating sync generate missing IDs under the current repository lock.
 

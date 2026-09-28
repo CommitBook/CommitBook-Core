@@ -1,12 +1,11 @@
 use super::*;
+use commitbook_engine::platform::TokenCredentials;
 
 fn input(branch: &str) -> CommitBookInput {
     CommitBookInput {
         name: "Notes".to_string(),
         mode: "pat".to_string(),
-        provider: "github".to_string(),
-        owner: "owner".to_string(),
-        repo: "notes".to_string(),
+        remote_url: "https://github.com/owner/notes.git".to_string(),
         branch: branch.to_string(),
         device_name: Some("Phone".to_string()),
     }
@@ -709,17 +708,19 @@ fn existing_clone_summary_uses_config_name_remote_identity_and_device_auth() {
     request.name = "Ignored input name".to_string();
     request.mode = "pat".to_string();
     let client =
-        crate::CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None)
+        crate::CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
             .unwrap();
     let summary = client
         .register_local_commitbook("owner__notes".into())
         .unwrap();
     assert_eq!(
-        summary.commitbook_id,
+        summary.commitbook_local_id,
         commitbook_engine::commitbooks::identity::load(&clone).unwrap()
     );
-    assert_eq!(summary.owner, "owner");
-    assert_eq!(summary.repo, "notes");
+    assert_eq!(
+        summary.remote_url,
+        remote_path(&remote).display().to_string()
+    );
     assert_eq!(summary.name, "Preserved name");
     assert_eq!(summary.provider, "generic_git");
     assert_eq!(summary.mode, "existing_local_repo");
@@ -727,18 +728,16 @@ fn existing_clone_summary_uses_config_name_remote_identity_and_device_auth() {
 }
 
 #[test]
-fn existing_slug_collision_rejects_a_clone_of_another_repository() {
+fn direct_url_does_not_reuse_a_different_remote() {
     let root = tempfile::tempdir().unwrap();
     let request = CommitBookInput {
         name: "Requested".to_string(),
         mode: "pat".to_string(),
-        provider: "github".to_string(),
-        owner: "a__b".to_string(),
-        repo: "c".to_string(),
+        remote_url: "https://github.com/a__b/c.git".to_string(),
         branch: "main".to_string(),
         device_name: None,
     };
-    let clone = root.path().join(slug_for(&request.owner, &request.repo));
+    let clone = root.path().join("existing-clone");
     std::fs::create_dir(&clone).unwrap();
     let (_repo, branch) = initialize_repo(&clone);
     git2::Repository::open(&clone)
@@ -756,7 +755,7 @@ fn existing_slug_collision_rejects_a_clone_of_another_repository() {
     .unwrap();
     let before = std::fs::read(clone.join(".CommitBook/config.toml")).unwrap();
 
-    let error = init_local_commitbook(root.path(), &request, "unused").unwrap_err();
+    let error = validate_existing_identity(&clone, &request).unwrap_err();
     assert!(
         matches!(error, CommitBookError::InvalidInput { .. }),
         "{error}"
@@ -790,14 +789,14 @@ fn invalid_auth_mode_is_rejected() {
 }
 
 #[test]
-fn unsupported_provider_is_rejected_before_filesystem_changes() {
+fn embedded_credentials_are_rejected_before_filesystem_changes() {
     let root = tempfile::tempdir().unwrap();
     let nonexistent = root.path().join("not-created");
     let mut request = input("main");
-    request.provider = "gitlab".into();
-    let error = init_local_commitbook(&nonexistent, &request, "unused").unwrap_err();
+    request.remote_url = "https://secret:token@gitlab.com/owner/notes.git".into();
+    let error = init_local_commitbook(&nonexistent, &request, None).unwrap_err();
     assert!(matches!(error, CommitBookError::InvalidInput { .. }));
-    assert!(error.to_string().contains("only provider github"));
+    assert!(error.to_string().contains("credentials"));
     assert!(!nonexistent.exists());
 }
 
@@ -808,11 +807,80 @@ fn same_owner_repo_on_another_host_is_not_the_requested_clone() {
     let repo = git2::Repository::init(&clone).unwrap();
     repo.remote("origin", "https://gitlab.com/owner/notes.git")
         .unwrap();
-    let error = init_local_commitbook(root.path(), &input("main"), "unused").unwrap_err();
+    let error = validate_existing_identity(&clone, &input("main")).unwrap_err();
     assert!(matches!(error, CommitBookError::InvalidInput { .. }));
     assert!(error.to_string().contains("gitlab.com"));
     assert!(!LocalConfig::config_path(&clone).exists());
     repo.remote_set_url("origin", "git@github.com:owner/notes.git")
         .unwrap();
     validate_existing_identity(&clone, &input("main")).unwrap();
+}
+
+#[test]
+fn direct_local_url_uses_id_folder_and_reuses_existing_clone() {
+    let root = tempfile::tempdir().unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    let seed = tempfile::tempdir().unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
+    let (seed_repo, branch) = initialize_repo(seed.path());
+    git2::Repository::open(seed.path())
+        .unwrap()
+        .remote("origin", remote_path(&remote).to_str().unwrap())
+        .unwrap();
+    seed_repo
+        .push_with("origin", &branch, &TokenCredentials::new("unused"))
+        .unwrap();
+
+    let mut request = input(&branch);
+    request.mode = "existing_local_repo".into();
+    request.remote_url = remote_path(&remote).to_string_lossy().into_owned();
+    let first = init_local_commitbook(root.path(), &request, None).unwrap();
+    let clone = root.path().join(&first.commitbook_local_id);
+    assert!(clone.is_dir());
+    assert_eq!(first.remote_url, request.remote_url);
+    assert_eq!(
+        std::fs::read_to_string(clone.join(".CommitBook/local/commitbook_local_id.toml")).unwrap(),
+        format!("commitbook_local_id = \"{}\"\n", first.commitbook_local_id)
+    );
+    let second = init_local_commitbook(root.path(), &request, None).unwrap();
+    assert_eq!(first.commitbook_local_id, second.commitbook_local_id);
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn local_id_allocation_rejects_folder_and_registered_clone_collisions() {
+    let root = tempfile::tempdir().unwrap();
+    let id = "a1b2c3d4";
+    assert!(local_id_available(root.path(), id).unwrap());
+    std::fs::create_dir(root.path().join(id)).unwrap();
+    assert!(!local_id_available(root.path(), id).unwrap());
+    std::fs::remove_dir(root.path().join(id)).unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("missing", root.path().join(id)).unwrap();
+        assert!(!local_id_available(root.path(), id).unwrap());
+        std::fs::remove_file(root.path().join(id)).unwrap();
+    }
+
+    let imported = root.path().join("imported");
+    std::fs::create_dir(&imported).unwrap();
+    let lock = RepoLock::acquire(&imported).unwrap();
+    commitbook_engine::commitbooks::identity::ensure_locked_with_id(&imported, &lock, id).unwrap();
+    assert!(!local_id_available(root.path(), id).unwrap());
+}
+
+#[test]
+fn failed_direct_clone_leaves_no_incomplete_id_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let absent = tempfile::tempdir().unwrap();
+    let mut request = input("main");
+    request.remote_url = absent
+        .path()
+        .join("missing.git")
+        .to_string_lossy()
+        .into_owned();
+    for _ in 0..2 {
+        assert!(init_local_commitbook(root.path(), &request, None).is_err());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
 }

@@ -51,7 +51,7 @@ packaging and crates.io publication are not supported launch channels.
 Describe the user-visible outcome, relevant tests, and any API/format changes.
 Split unrelated features into separate commits, each with its tests and docs.
 Use imperative titles under 72 characters that explain what and why, such as:
-`Add local CommitBook-Ids to distinguish CommitBook clones`.
+`Add clone IDs to distinguish local CommitBooks`.
 Avoid unrelated formatting, generated artifacts, and dependency upgrades.
 
 Follow the repository's agent approval rule: propose exact commit messages and

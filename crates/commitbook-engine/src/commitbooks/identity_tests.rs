@@ -14,7 +14,7 @@ fn identity_is_persistent_local_and_survives_move() {
     assert_eq!(id, ensure(&root).unwrap());
     assert_eq!(
         std::fs::read_to_string(path(&root)).unwrap(),
-        format!("CommitBook-Id = \"{id}\"\n")
+        format!("commitbook_local_id = \"{id}\"\n")
     );
     let moved = parent.path().join("after");
     std::fs::rename(&root, &moved).unwrap();
@@ -28,7 +28,7 @@ fn identity_is_persistent_local_and_survives_move() {
         .unwrap()
         .index()
         .unwrap()
-        .get_path(Path::new(".CommitBook/local/CommitBook-ID.toml"), 0)
+        .get_path(Path::new(".CommitBook/local/commitbook_local_id.toml"), 0)
         .is_none());
 }
 
@@ -50,14 +50,25 @@ fn missing_reads_do_not_write_and_malformed_files_are_preserved() {
     ensure(tmp.path()).unwrap();
     for bad in [
         "id = \"a7c39e2b\"",
-        "CommitBook-Id = \"ABCDEF01\"",
-        "CommitBook-Id = \"123\"",
+        "commitbook_local_id = \"ABCDEF01\"",
+        "commitbook_local_id = \"123\"",
         "bad toml",
     ] {
         std::fs::write(path(tmp.path()), bad).unwrap();
         assert!(ensure(tmp.path()).is_err());
         assert_eq!(std::fs::read_to_string(path(tmp.path())).unwrap(), bad);
     }
+}
+
+#[test]
+fn old_identity_file_is_rejected_without_repair() {
+    let tmp = tempfile::tempdir().unwrap();
+    ensure(tmp.path()).unwrap();
+    let old = LocalConfig::local_dir(tmp.path()).join("CommitBook-ID.toml");
+    std::fs::write(&old, "CommitBook-Id = \"a1b2c3d4\"\n").unwrap();
+    assert!(load(tmp.path()).is_err());
+    assert!(ensure(tmp.path()).is_err());
+    assert!(old.exists());
 }
 
 #[cfg(unix)]
@@ -69,7 +80,7 @@ fn symlinked_file_or_parent_is_rejected() {
     ensure(tmp.path()).unwrap();
     std::fs::write(
         outside.path().join(FILE_NAME),
-        "CommitBook-Id = \"a7c39e2b\"\n",
+        "commitbook_local_id = \"a7c39e2b\"\n",
     )
     .unwrap();
     std::fs::remove_file(path(tmp.path())).unwrap();

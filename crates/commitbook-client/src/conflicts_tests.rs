@@ -74,7 +74,7 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
     let error = resolve_conflict(
         root.path(),
         &ResolveConflictInput {
-            commitbook_id: "a1b2c3d4".to_string(),
+            commitbook_local_id: "a1b2c3d4".to_string(),
             conflict_id: "base.md".to_string(),
             resolution_type: "delete".to_string(),
             manual_content: None,
@@ -98,7 +98,7 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
     let error = resolve_conflict(
         root.path(),
         &ResolveConflictInput {
-            commitbook_id: "a1b2c3d4".to_string(),
+            commitbook_local_id: "a1b2c3d4".to_string(),
             conflict_id: "base.md".to_string(),
             resolution_type: "delete".to_string(),
             manual_content: None,

@@ -56,15 +56,8 @@ pub fn validate_branch(branch: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn validate_provider(provider: &str) -> Result<()> {
-    if provider != "github" {
-        return Err(CommitBookError::invalid_input("Native cloning supports only provider github; use local registration for existing clones"));
-    }
-    Ok(())
-}
-
 /// Discovery matches remote metadata, even if a clone's local identity needs repair.
-pub fn github_remote_is_local(root: &Path, owner: &str, repo: &str) -> bool {
+pub fn remote_is_local(root: &Path, remote_url: &str) -> bool {
     let Ok(root) = canonicalize_workspaces_root(root) else {
         return false;
     };
@@ -78,21 +71,15 @@ pub fn github_remote_is_local(root: &Path, owner: &str, repo: &str) -> bool {
         let Ok(config) = commitbook_engine::config::LocalConfig::load(&path) else {
             return false;
         };
-        commitbook_engine::git::remote::remote_identity(&path, &config.git.remote).is_ok_and(
-            |identity| {
-                matches!(
-                    identity.host.as_deref(),
-                    Some("github.com" | "www.github.com")
-                ) && identity.owner.eq_ignore_ascii_case(owner)
-                    && identity.repo.eq_ignore_ascii_case(repo)
-            },
+        commitbook_engine::git::remote::get_remote_url(&path, &config.git.remote).is_ok_and(
+            |existing| commitbook_engine::git::remote::same_remote(&existing, remote_url),
         )
     })
 }
 
-pub fn validate_init_input(owner: &str, repo: &str, branch: &str) -> Result<()> {
-    validate_repo_component("owner", owner)?;
-    validate_repo_component("repository", repo)?;
+pub fn validate_init_input(remote_url: &str, branch: &str) -> Result<()> {
+    commitbook_engine::git::remote::validate_clone_url(remote_url)
+        .map_err(|error| CommitBookError::invalid_input(format!("Invalid Git URL: {error:#}")))?;
     validate_branch(branch)
 }
 

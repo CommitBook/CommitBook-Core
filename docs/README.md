@@ -202,7 +202,7 @@ name = "notes"                # display name
 
 [git]
 branch = "main"
-remote = "origin"             # provider, owner and repo are read from this remote's URL
+remote = "origin"             # provider and remote location are read from this remote's URL
 
 [sync]
 schedule = "1h"               # 5m | 15m | 30m | 1h | 2h | 4h | daily | 5-field cron expression
@@ -224,7 +224,7 @@ keep = "30d"                  # <N>d (e.g. 7d, 30d, 90d) | forever
 ```
 
 The web Config page edits every setting except the remote, which is chosen at
-`commitbook init` and shown read-only with its provider, owner, and repository.
+`commitbook init` and shown read-only with its provider and remote location.
 A new branch is accepted only once it is checked out, because sync refuses to
 run on any other branch.
 
@@ -594,34 +594,48 @@ back up local credentials and state, stop old schedulers, and initialize a fresh
 clone with the current CLI. The current advisory lock is `local/.lock`; its file
 remains after unlocking and does not itself indicate a running process.
 
-## Local CommitBook-Id
+## Local CommitBook ID (`commitbook_local_id`)
 
 Each local clone has its own eight-character lowercase hexadecimal
-`CommitBook-Id`, stored only in `.CommitBook/local/CommitBook-ID.toml`:
+`commitbook_local_id`, stored only in `.CommitBook/local/commitbook_local_id.toml`:
 
 ```toml
-CommitBook-Id = "a7c39e2b"
+commitbook_local_id = "a7c39e2b"
 ```
 
-Initialization or the first sync creates it under the repository lock, using a
-SHA-256 hash of the canonical path and fresh OS randomness. It is saved once,
-not recalculated when the folder, display name, or remote changes. Git never
+Initialization or the first sync creates it under the repository lock, using
+fresh OS randomness. It is saved once, not recalculated when the folder,
+display name, or remote changes. Git never
 stages or synchronizes this file. Device IDs remain separate.
 
-IDs are probabilistically unique, not global identifiers. There is no registry
-or generation-time comparison with other clones. A workspace scan reports
+IDs are probabilistically unique, not global identifiers. New SDK-managed
+clones check for local ID collisions before cloning; externally copied clones
+can still duplicate an ID. A workspace scan reports
 both clones if a copied folder or chance collision produces duplicate IDs;
 operations never silently choose one. To repair, remove **only the intended
-copy's** `local/CommitBook-ID.toml` and run `commitbook init` (which asks before
+copy's** `local/commitbook_local_id.toml` and run `commitbook init` (which asks before
 publishing metadata), or use the SDK's local-only registration method.
 
-SDK consumers use `commitbook_id` returned by initialization/listing for all
-operations, not `owner/repo` or absolute paths. Register an externally cloned
+SDK consumers use `commitbook_local_id` returned by initialization/listing for all
+operations, not a remote URL or absolute path. Register an externally cloned
 workspace with `register_local_commitbook(relative_path)`; this writes only
 local identity, without committing or contacting the remote. Lists and status
 never create or repair IDs; missing, malformed, and unsafe identity files are
-reported for explicit repair. A Git remote identifies the remote repository,
-not this local clone.
+reported for explicit repair. A Git remote URL identifies the remote repository,
+not this local clone. Native apps can select a discovered GitHub HTTPS URL or
+provide any Git URL directly; new clones use the local ID as their folder name.
+Repeated additions of the same remote reuse the existing clone. Native HTTPS
+and SSH credentials come from an app-provided callback, never from the URL.
+
+The UniFFI constructor accepts an optional `GitCredentialCallback` alongside
+the conflict resolver. `init_commitbook` takes a `CommitBookInput.remote_url`
+and `sync_commitbook` takes the local ID and sync mode; neither takes a token.
+The callback receives the credential-free remote URL, an optional username,
+and the credential types libgit2 accepts. It can return a username, HTTPS
+username/password, an in-memory SSH key with an optional passphrase, or a
+default credential when offered. The host app should retrieve secrets from
+its secure store. GitHub `validate_pat` and `discover_commitbooks` still take
+a token for GitHub API access; discovery returns HTTPS clone URLs.
 
 ## Release artifacts
 

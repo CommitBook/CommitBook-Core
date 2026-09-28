@@ -11,6 +11,7 @@ mod auth;
 mod client;
 mod commitbooks_ops;
 mod conflicts;
+mod credentials;
 mod documents;
 mod errors;
 mod paths;
@@ -30,7 +31,7 @@ mod test_support {
         commitbook_engine::commitbooks::identity::ensure(root).unwrap();
         std::fs::write(
             commitbook_engine::commitbooks::identity::path(root),
-            "CommitBook-Id = \"a1b2c3d4\"\n",
+            "commitbook_local_id = \"a1b2c3d4\"\n",
         )
         .unwrap();
     }

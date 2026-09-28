@@ -4,7 +4,7 @@ use std::fs;
 
 /// A managed clone whose remote URL identifies `owner/repo`.
 fn write_commitbook(root: &std::path::Path, owner: &str, repo: &str, branch: &str) {
-    let slug = slug_for(owner, repo);
+    let slug = format!("{owner}__{repo}");
     let clone = root.join(&slug);
     fs::create_dir_all(&clone).unwrap();
     git2::Repository::init(&clone)
@@ -67,11 +67,10 @@ fn scan_finds_one_commitbook() {
     assert_eq!(cbs.len(), 1);
     let cb = &cbs[0];
     assert_eq!(
-        cb.commitbook_id,
+        cb.commitbook_local_id,
         identity::load(&tmp.path().join("manuel__notes")).unwrap()
     );
-    assert_eq!(cb.owner, "manuel");
-    assert_eq!(cb.repo, "notes");
+    assert_eq!(cb.remote_url, "https://github.com/manuel/notes.git");
     assert_eq!(cb.name, "notes display");
     assert_eq!(cb.branch, "main");
     assert_eq!(cb.provider, "github");
@@ -87,7 +86,7 @@ fn scan_returns_sorted_results() {
     write_commitbook(tmp.path(), "alice", "notes", "main");
     write_commitbook(tmp.path(), "alice", "todo", "main");
     let cbs = scan_workspaces_root(tmp.path()).unwrap();
-    let ids: Vec<_> = cbs.iter().map(|c| c.commitbook_id.as_str()).collect();
+    let ids: Vec<_> = cbs.iter().map(|c| c.commitbook_local_id.as_str()).collect();
     assert_eq!(ids.len(), 3);
     assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
 }
@@ -132,7 +131,7 @@ fn scan_reports_a_broken_clone_without_hiding_the_others() {
     let ids: Vec<&str> = scan
         .commitbooks
         .iter()
-        .map(|cb| cb.commitbook_id.as_str())
+        .map(|cb| cb.commitbook_local_id.as_str())
         .collect();
     assert_eq!(
         ids,
@@ -177,7 +176,7 @@ fn find_by_id_names_broken_clones_when_the_id_is_missing() {
 fn scan_reports_this_devices_auth_as_mode() {
     let tmp = tempfile::tempdir().unwrap();
     write_commitbook(tmp.path(), "manuel", "notes", "main");
-    let clone = tmp.path().join(slug_for("manuel", "notes"));
+    let clone = tmp.path().join("manuel__notes");
     crate::devices::register(&clone, Some("Phone"), Auth::GithubApp).unwrap();
 
     let cb = scan_workspaces_root(tmp.path()).unwrap().pop().unwrap();
@@ -202,7 +201,7 @@ fn find_by_id_returns_match() {
     )
     .unwrap()
     .unwrap();
-    assert_eq!(cb.repo, "notes");
+    assert_eq!(cb.remote_url, "https://github.com/manuel/notes.git");
 }
 
 #[test]

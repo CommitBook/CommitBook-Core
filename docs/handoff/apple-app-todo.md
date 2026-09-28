@@ -32,36 +32,37 @@ Work needed in [`CommitBook/CommitBook-Apple`](https://github.com/CommitBook/Com
 The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `WorkspaceSummary` must follow.
 
 - [ ] `Packages/CommitBookAppleCore/Sources/CommitBookAppleCore/Types.swift`:
-  - `WorkspaceInput` → `CommitBookInput`. Trim fields: drop `remoteURL` (engine derives from `owner`+`repo`), `localRoot` (engine derives from `workspacesRoot` + slug). Keep `name`, `mode`, `provider`, `owner`, `repo` (renamed from `repoName`), `branch`.
-  - `WorkspaceSummary` → `CommitBookSummary`. Add fields the engine returns: `owner: String`, `repo: String`, `docCount: Int`, `conflictCount: Int`. Note: `docCount`/`conflictCount` come back as `0` from `list_commitbooks`, populate them by calling `list_documents` / `list_conflicts` per book if the UI needs accurate counts.
-  - Add new types: `DiscoveredCommitBook { owner, repo, defaultBranch, isPrivate, hasDotCommitBook, alreadyLocal }`, `RepoInfo { owner, name, defaultBranch, isPrivate }`, `SyncMode { case aiResolve, manual }`.
+  - `WorkspaceInput` → `CommitBookInput`. Trim fields: keep `remoteURL`, `name`, `mode`, and `branch`; drop `localRoot`, `provider`, `owner`, and `repo`. New clone folders are named by `commitbookLocalId`.
+  - `WorkspaceSummary` → `CommitBookSummary`. Add `remoteURL: String`, `commitbookLocalId: String`, `docCount: Int`, and `conflictCount: Int`. Note: `docCount`/`conflictCount` come back as `0` from `list_commitbooks`, populate them by calling `list_documents` / `list_conflicts` per book if the UI needs accurate counts.
+  - Add new types: `DiscoveredCommitBook { remoteURL, name, defaultBranch, isPrivate, hasDotCommitBook, alreadyLocal }`, `RepoInfo { remoteURL, name, defaultBranch, isPrivate }`, `SyncMode { case aiResolve, manual }`.
   - Add `AiConflictRequest` (nullable ancestor/local/remote content plus conflict type and binary flag), `AiConflictResolutionAction { writeContent, deleteFile }`, `AiConflictResolution` (nullable content/error), and `ConflictResolutionContinuation`.
   - Update `ConflictSummary`: ancestor/local/remote content is nullable and binary/special conflicts are flagged explicitly. Review proposals expose `revision`, `proposalContent`, `proposalVersion`, `proposalStale`, and `proposalRejected`; a present version with null content means the proposal deletes the file. To accept one, pass the displayed `revision` and `proposalVersion` in `ResolveConflictInput` with `resolutionType: "accept"`. Older manual-resolution calls may omit both fields.
   - `SyncResultSummary`: add `committed: Bool`, `conflictsResolved: Int`, `manualConflicts: Int` (engine returns these now).
 
 - [ ] `Packages/CommitBookAppleCore/Sources/CommitBookAppleCore/CommitBookEngineProtocol.swift`:
-  - Rename methods: `createWorkspace` → `initCommitBook(_ input: CommitBookInput, token: String) async throws -> CommitBookSummary`. (Note: `init_commitbook` is now async on the engine side because cloning is a network op.)
+  - Rename methods: `createWorkspace` → `initCommitBook(_ input: CommitBookInput) async throws -> CommitBookSummary`. (Note: `init_commitbook` is now async on the engine side because cloning is a network op.)
   - `listWorkspaces` → `listCommitBooks() throws -> [CommitBookSummary]`.
   - `getWorkspace` → `getCommitBook(_ id: String) throws -> CommitBookSummary`.
   - `deleteWorkspace` → `deleteCommitBook(_ id: String, force: Bool = false) throws`. The default refuses deletion when the clone has uncommitted or unpushed work, or a Git operation in progress; only an explicit `force: true` discards it.
-  - `syncWorkspace(_ id: String) async throws -> SyncResultSummary` → `syncCommitBook(_ id: String, mode: SyncMode, token: String) async throws -> SyncResultSummary`, note the new `mode` and `token` parameters.
+  - `syncWorkspace(_ id: String) async throws -> SyncResultSummary` → `syncCommitBook(_ id: String, mode: SyncMode) async throws -> SyncResultSummary`, note the per-call `mode` parameter; Git credentials come from the host callback.
   - Add `validatePAT(_ token: String) async throws -> [RepoInfo]` (was already in the protocol per the current file).
   - Add `discoverCommitBooks(_ token: String) async throws -> [DiscoveredCommitBook]`, new, lets the user pick which repo to register.
-  - Document `id` is `<owner>/<repo>`.
+  - Document `id` is the returned `commitbookLocalId`, never a remote path.
 
 ## 4. Implement `RealEngine.swift` against the new FFI
 
 - [ ] Replace the body of every method in `RealEngine.swift` with a call into the UniFFI-generated `CommitBookEngineClient`. Most methods are thin pass-throughs.
-- [ ] `RealEngine.makeDefault()` should construct `CommitBookEngineClient(workspacesRoot:, conflictResolver:)` with paths under the app's `Application Support` directory:
+- [ ] `RealEngine.makeDefault()` should construct `CommitBookEngineClient(workspacesRoot:, conflictResolver:, credentialCallback:)` with paths under the app's `Application Support` directory:
   - `workspacesRoot` → `<AppSupport>/CommitBook/repos/`
   - Create both directories if missing.
 - [ ] Implement `ConflictResolverCallback` in the app. Its synchronous entry point receives structured conflict sides plus a continuation: start the app's async HTTPS request, return immediately, then call `continuation.complete(...)` with explicit content, deletion, or an error within 120 seconds. It does not call a CommitBook desktop app. Pass `nil` until an AI service is configured; conflict-free `aiResolve` syncs still work, while a conflict returns an actionable configuration error and remains available for manual review.
+- [ ] Implement `GitCredentialCallback` using Keychain-backed credentials. Return a username, HTTPS username/password, or in-memory SSH key according to the request's allowed types; never put credentials in `remoteURL`. Direct URL entry may use HTTPS, SSH, or a local Git path.
 - [ ] Replace the import: `import CommitBookCoreFFI` → `import CommitBookEngineFFI`.
 - [ ] Update the `#if canImport(CommitBookCoreFFI)` guard to `#if canImport(CommitBookEngineFFI)`.
 
 ## 5. Update `FFIMapper.swift` and `FFIErrorAdapter.swift`
 
-- [ ] `FFIMapper.swift`: rename `FFIWorkspaceInput`/`FFIWorkspaceSummary` typealiases. Update field names in mappers to match the new contract (`owner`, `repo`, `docCount`, `conflictCount` etc.).
+- [ ] `FFIMapper.swift`: rename `FFIWorkspaceInput`/`FFIWorkspaceSummary` typealiases. Update field names in mappers to match the new contract (`remoteURL`, `commitbookLocalId`, `docCount`, `conflictCount` etc.).
 - [ ] Add mappers for `DiscoveredCommitBook`, `RepoInfo`, `SyncMode`, the callback request/response, and nullable conflict sides.
 - [ ] `FFIErrorAdapter.swift`: rename `databaseError` to `storageError`; current variants are (`storageError`, `transportError`, `mergeError`, `authError`, `notFound`, `invalidInput`), but each variant now has an associated `message: String`. Update extraction to use `message`.
 
@@ -91,7 +92,7 @@ The engine now exposes a `SyncMode { aiResolve, manual }` flag per sync. Decide 
 ## 9. PAT entry flow
 
 - [ ] `PATEntryView.swift`: after the user submits, call `validatePAT(token)` and store the token in Keychain via `KeychainHelper`. On success, transition to `RepoPickerView`.
-- [ ] `RepoPickerView.swift`: call `discoverCommitBooks(token)`. Group results: existing CommitBooks (`hasDotCommitBook == true`) at the top with an "Add" or "Already added" affordance per `alreadyLocal`; non-CommitBook repos below with a "Create CommitBook" action that calls `initCommitBook(input, token)`.
+- [ ] `RepoPickerView.swift`: call `discoverCommitBooks(token)`. Group results: existing CommitBooks (`hasDotCommitBook == true`) at the top with an "Add" or "Already added" affordance per `alreadyLocal`; non-CommitBook repos below with a "Create CommitBook" action that calls `initCommitBook(input)`.
 
 ## 10. CI updates
 
@@ -116,11 +117,11 @@ These are owned by the engine repo, but the Apple repo waits on them:
 
 ## Local clone identity contract
 
-`CommitBookSummary.commitbookId` is an eight-character local clone identifier,
+`CommitBookSummary.commitbookLocalId` is an eight-character local clone identifier,
 not `owner/repo`. Persist the value returned by the engine; never reconstruct
 it from a path or remote. Resolve the current app-private `workspacesRoot` at
 startup, then list clones. Identity is stored in the ignored
-`.CommitBook/local/CommitBook-ID.toml` with the key `CommitBook-Id`. Moving the
+`.CommitBook/local/commitbook_local_id.toml` with the key `commitbook_local_id`. Moving the
 app storage root or renaming a clone does not change its identity.
 
 For an imported direct-child clone, call `registerLocalCommitbook(relativePath)`
@@ -131,9 +132,11 @@ file, register that copy again and replace its saved UI selection.
 
 ## Provider and storage contract
 
-The constructor takes only `workspacesRoot` and the optional resolver callback;
+The constructor takes `workspacesRoot`, the optional conflict resolver, and the
+optional Git credential callback;
 there is no database path. Map `StorageError` / `storageError` instead of
-`DatabaseError` / `databaseError`. Native remote discovery and cloning support
-GitHub only; non-GitHub provider input fails before cloning or publication.
-Existing non-GitHub clones can use local registration. Display names and sync
+`DatabaseError` / `databaseError`. GitHub discovery returns HTTPS clone URLs.
+Direct onboarding accepts HTTPS, SSH, and local Git URLs; the host supplies
+HTTPS/SSH credentials through `GitCredentialCallback`. Existing clones can use
+local registration. Display names and sync
 remote/branch settings remain configurable and separate from local identity.

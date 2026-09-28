@@ -12,8 +12,11 @@ use sha2::{Digest, Sha256};
 use crate::errors::{CommitBookError, Result};
 use crate::types::{DocumentContent, DocumentSummary};
 
-pub fn list_documents(workspaces_root: &Path, commitbook_id: &str) -> Result<Vec<DocumentSummary>> {
-    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
+pub fn list_documents(
+    workspaces_root: &Path,
+    commitbook_local_id: &str,
+) -> Result<Vec<DocumentSummary>> {
+    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_local_id)?;
     let repo = GitRepo::open(&commitbook.local_path)
         .map_err(|error| CommitBookError::storage(format!("Open repo: {error}")))?;
     let changes = repo
@@ -63,10 +66,10 @@ pub fn list_documents(workspaces_root: &Path, commitbook_id: &str) -> Result<Vec
 
 pub fn read_document(
     workspaces_root: &Path,
-    commitbook_id: &str,
+    commitbook_local_id: &str,
     path: &str,
 ) -> Result<DocumentContent> {
-    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
+    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_local_id)?;
     let abs = crate::paths::safe_document_path(&commitbook.local_path, path, false)?;
     if !abs.exists() {
         return Err(CommitBookError::not_found(format!(
@@ -93,12 +96,12 @@ pub fn read_document(
 /// pulled another device's edit, so that edit is not silently overwritten.
 pub fn save_document(
     workspaces_root: &Path,
-    commitbook_id: &str,
+    commitbook_local_id: &str,
     path: &str,
     content: &str,
     expected_revision: Option<&str>,
 ) -> Result<()> {
-    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
+    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_local_id)?;
     let _lock = RepoLock::acquire(&commitbook.local_path)
         .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
     let repo = GitRepo::open(&commitbook.local_path)
