@@ -1,0 +1,21 @@
+docs/workflows.md
+  s_f4434f139eefd8::t_ae6672db3018b8 66-69
+.github/workflows/S3-Publish-Homebrew.yml
+  s_f4434f139eefd8::t_ae6672db3018b8 97-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "720ac0f7910dcea5354a1117cd39bbabe0aa740a",
+  "prompts": {},
+  "sessions": {
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
