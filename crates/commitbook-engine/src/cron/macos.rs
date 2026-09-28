@@ -7,7 +7,6 @@ use std::process::Command;
 use super::{cron_to_interval_seconds, validate_cron_expression};
 
 const PLIST_LABEL_PREFIX: &str = "com.zaai.commitbook";
-const LEGACY_PLIST_LABEL_PREFIX: &str = "com.commitbook";
 
 fn repository_hash(repo_path: &Path) -> String {
     let canonical = repo_path
@@ -24,34 +23,16 @@ pub fn plist_label(repo_path: &Path) -> String {
     format!("{PLIST_LABEL_PREFIX}.{}", repository_hash(repo_path))
 }
 
-/// Generate the label used before the com.zaai.commitbook rename.
-pub fn legacy_plist_label(repo_path: &Path) -> String {
-    format!("{LEGACY_PLIST_LABEL_PREFIX}.{}", repository_hash(repo_path))
-}
-
 /// Get the path where the plist file should be written.
 pub fn plist_path(repo_path: &Path) -> PathBuf {
     let home = dirs::home_dir().expect("Could not determine home directory");
     plist_path_for_label(&home, &plist_label(repo_path))
 }
 
-/// Get the path used by releases before the launchd label rename.
-pub fn legacy_plist_path(repo_path: &Path) -> PathBuf {
-    let home = dirs::home_dir().expect("Could not determine home directory");
-    plist_path_for_label(&home, &legacy_plist_label(repo_path))
-}
-
 fn plist_path_for_label(home: &Path, label: &str) -> PathBuf {
     home.join("Library")
         .join("LaunchAgents")
         .join(format!("{}.plist", label))
-}
-
-/// Return an installed current or legacy plist, preferring the current one.
-pub fn existing_plist_path(repo_path: &Path) -> Option<PathBuf> {
-    [plist_path(repo_path), legacy_plist_path(repo_path)]
-        .into_iter()
-        .find(|path| path.exists())
 }
 
 /// Binaries commitbook's scheduled runs invoke. Their parent directories
@@ -276,7 +257,6 @@ fn unload_and_remove(path: &Path, label: &str) -> Result<()> {
 /// Install a launchd job for the repo.
 pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<()> {
     let path = plist_path(repo_path);
-    let legacy_path = legacy_plist_path(repo_path);
     // Render first so a bad schedule cannot remove a currently working job.
     let content = generate_plist(repo_path, schedule, commitbook_bin)?;
 
@@ -286,9 +266,7 @@ pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Resul
             .with_context(|| format!("Failed to create LaunchAgents dir: {}", parent.display()))?;
     }
 
-    // Leave exactly one current job, migrating the previous label if needed.
     unload_and_remove(&path, &plist_label(repo_path))?;
-    unload_and_remove(&legacy_path, &legacy_plist_label(repo_path))?;
 
     // Write the plist
     fs::write(&path, content)
@@ -310,11 +288,7 @@ pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Resul
 
 /// Uninstall a launchd job for the repo.
 pub fn uninstall(repo_path: &Path) -> Result<()> {
-    unload_and_remove(&plist_path(repo_path), &plist_label(repo_path))?;
-    unload_and_remove(
-        &legacy_plist_path(repo_path),
-        &legacy_plist_label(repo_path),
-    )
+    unload_and_remove(&plist_path(repo_path), &plist_label(repo_path))
 }
 
 /// Check if launchd is accessible.
@@ -328,19 +302,12 @@ pub fn is_accessible() -> bool {
 
 /// Check if a launchd job is currently loaded for the given repo.
 pub fn is_loaded(repo_path: &Path) -> bool {
-    [plist_label(repo_path), legacy_plist_label(repo_path)]
-        .iter()
-        .any(|label| label_is_loaded(label))
+    label_is_loaded(&plist_label(repo_path))
 }
 
-/// Check specifically for a loaded job using the pre-rename label.
-pub fn is_legacy_loaded(repo_path: &Path) -> bool {
-    label_is_loaded(&legacy_plist_label(repo_path))
-}
-
-/// Binary path the installed plist (current or legacy label) launches.
+/// Binary path the installed plist launches.
 pub fn scheduled_binary(repo_path: &Path) -> Option<PathBuf> {
-    let content = fs::read_to_string(existing_plist_path(repo_path)?).ok()?;
+    let content = fs::read_to_string(plist_path(repo_path)).ok()?;
     plist_program(&content)
 }
 
