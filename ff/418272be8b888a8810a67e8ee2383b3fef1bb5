@@ -1,0 +1,21 @@
+Cargo.toml
+  s_e2c963817c13ee::t_98ae7c90b5c6b2 13
+Cargo.lock
+  s_e2c963817c13ee::t_fbb633b0714186 543,563,585,610,625
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ff418272be8b888a8810a67e8ee2383b3fef1bb5",
+  "prompts": {},
+  "sessions": {
+    "s_e2c963817c13ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f2cc925-c6d7-4616-921b-ac693e90bfcb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
