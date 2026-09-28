@@ -23,8 +23,11 @@ fn rendered_text(buffer: &Buffer, width: u16, height: u16) -> String {
 fn draw_renders_panels_content_and_footer() {
     let mut app = App::blank(&PathBuf::from("/tmp/commitbook-tui-render-test"));
     app.running = true;
-    app.schedule = "0 * * * *".into();
-    app.schedule_desc = "hourly".into();
+    app.schedule = "1h".into();
+    app.schedule_desc = "Every hour".into();
+    app.commit = "ai (claude)".into();
+    app.conflicts = "both".into();
+    app.log_keep = "30d".into();
     app.last_commit = Some("2026-08-09 12:00 UTC".into());
     app.log_lines = vec![LogEntry {
         timestamp: "12:00:00".into(),
@@ -58,7 +61,10 @@ fn draw_renders_panels_content_and_footer() {
         "feature/security",
         "2 pending (1 new, 1 modified)",
         "Sync complete",
-        "schedule:      0 * * * *",
+        "schedule:      1h",
+        "commit:        ai (claude)",
+        "conflicts:     both",
+        "keep logs:     30d",
         "Codex",
         "Tab:panel",
         "q:quit",

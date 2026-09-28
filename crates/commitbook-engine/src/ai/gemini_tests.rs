@@ -17,6 +17,11 @@ fn test_gemini_command_keeps_conflict_off_argv() {
 #[test]
 fn test_gemini_resolver_key_and_name() {
     let provider = GeminiProvider;
-    assert_eq!(provider.key(), "gemini");
-    assert_eq!(provider.name(), "Gemini CLI");
+    assert_eq!(ConflictResolver::key(&provider), "gemini");
+    assert_eq!(ConflictResolver::name(&provider), "Gemini CLI");
+    assert_eq!(
+        CommitMessageProvider::key(&provider),
+        crate::config::Agent::Gemini.commit_provider_key()
+    );
+    assert_eq!(CommitMessageProvider::name(&provider), "Gemini CLI");
 }

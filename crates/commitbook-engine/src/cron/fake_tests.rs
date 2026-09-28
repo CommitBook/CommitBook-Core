@@ -6,7 +6,7 @@ fn running_fake_reports_loaded_and_records_calls() {
     let repo = Path::new("/tmp/repo");
     assert!(fake.is_loaded(repo));
     assert_eq!(fake.installed_schedule().as_deref(), Some("0 * * * *"));
-    fake.uninstall(repo, None).unwrap();
+    fake.uninstall(repo).unwrap();
     assert!(!fake.is_loaded(repo));
     assert_eq!(
         fake.calls(),

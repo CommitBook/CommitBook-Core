@@ -1,0 +1,10 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+run_mode = "concurrent"
+
+[scripts.run.web]
+available_in = [ "local" ]
+command = 'cargo run -p commitbook-web -- --repo "${COMMITBOOK_REPO:?Set COMMITBOOK_REPO to a CommitBook-initialized repo, e.g. in ~/.zprofile}" --port "$CONDUCTOR_PORT"'
+default = true
+icon = "globe"

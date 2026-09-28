@@ -88,7 +88,7 @@ fn test_handle_key_scroll() {
 #[test]
 fn refresh_clears_provider_status_when_disabled_or_config_invalid() {
     let tmp = tempfile::tempdir().unwrap();
-    LocalConfig::init(tmp.path(), "hourly").unwrap();
+    LocalConfig::init(tmp.path(), &LocalConfig::new("notes", "main", "origin")).unwrap();
     let mut app = App::new(tmp.path());
     assert!(app.providers.is_empty());
     for invalid_config in [false, true] {
@@ -102,6 +102,28 @@ fn refresh_clears_provider_status_when_disabled_or_config_invalid() {
 }
 
 #[test]
+fn background_refresh_keeps_navigation_and_action_feedback() {
+    let tmp = tempfile::tempdir().unwrap();
+    LocalConfig::init(tmp.path(), &LocalConfig::new("notes", "main", "origin")).unwrap();
+    let mut app = App::blank(tmp.path());
+    let refresh = start_refresh(tmp.path(), false);
+    app.handle_key(KeyCode::Tab, KeyModifiers::NONE);
+    app.log_scroll = 4;
+    app.status_scroll = 2;
+    app.action_error = Some("scheduler failed".into());
+    app.refreshing = true;
+
+    app.apply_refresh(refresh.join().unwrap());
+
+    assert_eq!(app.branch, "main");
+    assert_eq!(app.active_panel, Panel::Logs);
+    assert_eq!(app.log_scroll, 4);
+    assert_eq!(app.status_scroll, 2);
+    assert_eq!(app.action_error.as_deref(), Some("scheduler failed"));
+    assert!(!app.refreshing);
+}
+
+#[test]
 fn preview_navigation_refreshes_and_returns_to_dashboard() {
     let tmp = tempfile::tempdir().unwrap();
     std::process::Command::new("git")
@@ -109,7 +131,7 @@ fn preview_navigation_refreshes_and_returns_to_dashboard() {
         .current_dir(tmp.path())
         .output()
         .unwrap();
-    LocalConfig::init(tmp.path(), "hourly").unwrap();
+    LocalConfig::init(tmp.path(), &LocalConfig::new("notes", "main", "origin")).unwrap();
     let mut app = App::new(tmp.path());
     app.handle_key(KeyCode::Char('p'), KeyModifiers::NONE);
     assert!(app.preview.is_some());
@@ -132,12 +154,13 @@ fn preview_navigation_refreshes_and_returns_to_dashboard() {
     assert_eq!(app.status_scroll, 1);
     app.handle_key(KeyCode::Up, KeyModifiers::NONE);
     assert_eq!(app.status_scroll, 0);
-    app.auto_push = true;
-    app.enabled = true;
+    assert_eq!(app.commit, "timestamp");
+    assert_eq!(app.conflicts, "both");
+    assert_eq!(app.log_keep, "30d");
     std::fs::write(LocalConfig::config_path(tmp.path()), "broken = [").unwrap();
     app.refresh();
     assert!(app.schedule.is_empty());
     assert_eq!(app.branch, "unknown");
-    assert!(!app.auto_push);
-    assert!(!app.enabled);
+    assert_eq!(app.commit, "unknown");
+    assert_eq!(app.conflicts, "unknown");
 }

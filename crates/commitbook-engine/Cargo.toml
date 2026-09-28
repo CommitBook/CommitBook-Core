@@ -9,8 +9,11 @@ authors.workspace = true
 
 [features]
 default = []
-# Bundle libgit2 and OpenSSL for self-contained mobile/static-library builds.
-# Desktop binaries omit this and use the system libraries.
+# Bundle libgit2 and OpenSSL, statically linked. The mobile SDK always uses
+# it. Desktop release binaries use it too (see .github/workflows/release.yml),
+# so they run on any glibc Linux without a matching system OpenSSL; the cost
+# is that an OpenSSL security fix needs a new CommitBook release. Local
+# `cargo build` of the desktop crates alone links the system libraries.
 vendored-tls = ["git2/vendored-libgit2", "git2/vendored-openssl"]
 
 [dependencies]
@@ -26,8 +29,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
 tokio = { version = "1.53.1", features = ["full"] }
-toml = "1.1.5"
+toml = "1.1.6"
 tempfile = "3.27.0"
+toml_edit = "0.25.15"
 
 # Desktop-only deps. iOS/Android builds skip these; their consumers
 # (cron/*, ai/{claude,copilot,codex,gemini,cursor}.rs, git/signing.rs) are

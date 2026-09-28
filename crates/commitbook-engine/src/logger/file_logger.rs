@@ -4,6 +4,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::config::LogKeep;
 use crate::platform::{LogLevel, Logger};
 use crate::utils::datetime;
 
@@ -15,24 +16,25 @@ use crate::utils::datetime;
 /// ```
 pub struct FileLogger {
     logs_dir: PathBuf,
-    max_log_days: u32,
+    /// Days of daily logs to keep; `None` keeps them forever.
+    keep_days: Option<u32>,
 }
 
 impl FileLogger {
     /// Inspect existing logs without creating directories.
-    pub fn read_only(repo_path: &Path, max_log_days: u32) -> Self {
+    pub fn read_only(repo_path: &Path) -> Self {
         Self {
             logs_dir: repo_path.join(".CommitBook/local/logs"),
-            max_log_days,
+            keep_days: None,
         }
     }
-    pub fn new(repo_path: &Path, max_log_days: u32) -> Result<Self> {
+    pub fn new(repo_path: &Path, keep: LogKeep) -> Result<Self> {
         let logs_dir = repo_path.join(".CommitBook").join("local").join("logs");
         fs::create_dir_all(&logs_dir)
             .with_context(|| format!("Failed to create logs directory: {}", logs_dir.display()))?;
         Ok(Self {
             logs_dir,
-            max_log_days,
+            keep_days: keep.days(),
         })
     }
 
@@ -98,15 +100,16 @@ impl FileLogger {
         self.log("DEBUG", message)
     }
 
-    /// Remove log files older than max_log_days, using date-based filename parsing
-    /// instead of mtime (more reliable, immune to `touch` and file sync tools).
+    /// Remove log files older than the retention, using date-based filename
+    /// parsing instead of mtime (more reliable, immune to `touch` and file
+    /// sync tools). Keeps everything when retention is `forever`.
     pub fn cleanup_old_logs(&self) -> Result<()> {
-        if self.max_log_days == 0 {
+        let Some(keep_days) = self.keep_days else {
             return Ok(());
-        }
+        };
 
         let cutoff =
-            chrono::Local::now().date_naive() - chrono::Duration::days(self.max_log_days as i64);
+            chrono::Local::now().date_naive() - chrono::Duration::days(i64::from(keep_days));
 
         let entries =
             fs::read_dir(&self.logs_dir).with_context(|| "Failed to read logs directory")?;

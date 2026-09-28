@@ -4,6 +4,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table};
 use ratatui::Frame;
 
+use commitbook_engine::cron;
+
 use crate::app::{App, Panel};
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -13,13 +15,9 @@ pub fn draw(f: &mut Frame, app: &App) {
             Line::raw(preview.policy.clone()),
             Line::raw(format!("Repository: {}", preview.repository)),
             Line::raw(format!(
-                "Branch: {}  Remote: {}  Auto push: {}",
+                "Branch: {}  Remote: {}",
                 preview.branch.as_deref().unwrap_or("unknown"),
                 preview.remote.as_deref().unwrap_or("unknown"),
-                preview
-                    .auto_push
-                    .map(|v| if v { "yes" } else { "no" })
-                    .unwrap_or("unknown")
             )),
         ];
         lines.extend(
@@ -103,8 +101,6 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("○ Stopped", Style::default().fg(Color::Red))
     };
 
-    let enabled_text = if app.enabled { "yes" } else { "no" };
-
     let changes_text = if app.changes.is_empty() {
         "No pending changes".to_string()
     } else {
@@ -119,7 +115,6 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 
     let mut lines = vec![
         Line::from(vec![Span::raw("  State:    "), state_indicator]),
-        Line::from(format!("  Enabled:  {}", enabled_text)),
         Line::from(format!("  Schedule: {}", app.schedule_desc)),
         Line::from(format!("  Branch:   {}", app.current_branch)),
         Line::from(format!("  Last:     {}", last_commit_text)),
@@ -135,11 +130,21 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     }
 
     if let Some(status) = &app.repository_status {
+        let label = match app.scheduler {
+            cron::SchedulerHealth::Broken(_) => "broken",
+            _ if app.running => "running",
+            _ => "stopped",
+        };
         lines = vec![Line::raw(format!(
-            "Scheduler: {} • {}",
-            if app.running { "running" } else { "stopped" },
+            "Scheduler: {label} • {}",
             app.schedule_desc
         ))];
+        if let Some(warning) = &app.scheduler_warning {
+            lines.push(Line::from(Span::styled(
+                warning.clone(),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
         lines.extend(status.lines().into_iter().map(Line::raw));
         if let Some(error) = &app.action_error {
             lines.push(Line::raw(format!("Action failed: {error}")));
@@ -218,9 +223,10 @@ fn draw_config(f: &mut Frame, app: &App, area: Rect) {
     }
     let lines = vec![
         Line::from(format!("  schedule:      {}", app.schedule)),
-        Line::from(format!("  auto_push:     {}", app.auto_push)),
         Line::from(format!("  branch:        {}", app.branch)),
-        Line::from(format!("  log_level:     {}", app.log_level)),
+        Line::from(format!("  commit:        {}", app.commit)),
+        Line::from(format!("  conflicts:     {}", app.conflicts)),
+        Line::from(format!("  keep logs:     {}", app.log_keep)),
     ];
 
     let paragraph = Paragraph::new(lines).block(block);
@@ -232,7 +238,7 @@ fn draw_providers(f: &mut Frame, app: &App, area: Rect) {
     let block = panel_block(" Providers ", active);
 
     if app.providers.is_empty() {
-        let paragraph = Paragraph::new("  AI commit messages disabled")
+        let paragraph = Paragraph::new("  Commit messages use timestamp text")
             .style(Style::default().fg(Color::DarkGray))
             .block(block);
         f.render_widget(paragraph, area);
@@ -263,8 +269,8 @@ fn draw_providers(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(table, area);
 }
 
-fn draw_footer(f: &mut Frame, _app: &App, area: Rect) {
-    let keys = Line::from(vec![
+fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
+    let mut keys = vec![
         Span::styled(
             " Tab",
             Style::default()
@@ -300,9 +306,12 @@ fn draw_footer(f: &mut Frame, _app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(":scroll status/logs  p:preview"),
-    ]);
+    ];
+    if app.refreshing {
+        keys.push(Span::raw("  Refreshing…"));
+    }
 
-    let paragraph = Paragraph::new(keys).style(Style::default().fg(Color::White));
+    let paragraph = Paragraph::new(Line::from(keys)).style(Style::default().fg(Color::White));
     f.render_widget(paragraph, area);
 }
 

@@ -28,11 +28,12 @@ All UI crates depend on `commitbook-engine`. No database: all state is file-base
 
 ## Architecture
 
-- **No database.** State lives in `.CommitBook/` (`config.toml` committed; `local/` gitignored).
+- **No database.** State lives in `.CommitBook/` (`config.toml` and `devices/` committed; `local/` gitignored).
 - **No global config.** Each repo is self-contained. No `~/.commitbook/`.
 - **Explicit init.** `commitbook init` is a separate command. Other commands hard-fail with "CommitBook is not initialized" if `.CommitBook/` is missing.
 - **Exactly one remote required.** `init` blocks if the repo has 0 or >1 remotes; the remote's name is persisted in `config.git.remote` (need not be `origin`).
-- **libgit2 merge-based sync.** Sync commits every dirty, non-ignored change first, then fetches, runs an in-process libgit2 3-way merge (fast-forward, true merge, or surfaced conflicts), then pushes, retrying once on a non-fast-forward push race. Same single code path on desktop and mobile. Conflicts surface at the merge step and are resolved by the configured AI CLI (or left as `<<<<<<<` markers in `manual` mode).
+- **libgit2 merge-based sync.** Sync commits every dirty, non-ignored change first, then fetches, runs an in-process libgit2 3-way merge (fast-forward, true merge, or surfaced conflicts), then pushes, retrying once on a non-fast-forward push race. Same single code path on desktop and mobile. Conflicts surface at the merge step and are handled per `[conflicts] mode` (see below). Sync always pushes; there is no local-only mode. Sync refuses to run while a user-started git operation is in progress (any repository state other than clean or a merge of the configured remote branch, or index conflicts outside a merge); see `ensure_no_user_operation`. Sync and `init` also refuse a repository whose attributes set any `filter=<driver>` (git-crypt, LFS), because libgit2 cannot run filter drivers; see `git::attributes`.
+- **One sync command.** The scheduler (launchd/cron) runs `commitbook sync`, the same command users run. Failures and a contended lock exit non-zero.
 - `.CommitBook/` folder always uses capital C and B.
 
 ### Key Modules (commitbook-engine)
@@ -41,7 +42,8 @@ All UI crates depend on `commitbook-engine`. No database: all state is file-base
 |---|---|
 | `sync/` | `sync_repository` orchestrator: commit dirty changes → fetch → libgit2 3-way merge → push |
 | `state/` | File-based state: `SyncState` (`last_sync_at`, `last_error`), `AuthConfig` |
-| `config/` | `LocalConfig` reads/writes `.CommitBook/config.toml` (incl. `[conflict]` and `[commit]`) |
+| `config/` | `LocalConfig` reads/writes `.CommitBook/config.toml` (comment-preserving via `toml_edit`); `values.rs` holds the enumerated values |
+| `devices/` | Committed per-device files `.CommitBook/devices/<id>.toml` (`name`, `platform`, `auth`) |
 | `ai/` | Commit-message providers + conflict resolvers: Claude, Codex, Copilot, Gemini, Cursor, fallback |
 | `git/` | Git operations via git2 (libgit2): fetch, merge, commit, push |
 | `cron/` | Scheduler: launchd (macOS), crontab (Linux) |
@@ -51,74 +53,99 @@ All UI crates depend on `commitbook-engine`. No database: all state is file-base
 ## CLI Commands
 
 ```
-commitbook init        # Initialize .CommitBook/ (required before any other command)
+commitbook init        # Initialize .CommitBook/ (required first; asks before commit + push, --yes skips)
 commitbook sync        # Commit dirty changes + libgit2 merge + push
 commitbook start       # Install scheduler
 commitbook stop        # Stop scheduler
-commitbook status      # Show local commit, remote, scheduler, and last sync state
+commitbook status      # Show local commit, remote, scheduler, devices, and last sync state
+commitbook devices     # List devices; `rename <name>` renames this one, `remove <id>` another
 commitbook preview     # List what the next sync would commit (read-only, --json)
 commitbook schedule    # Change schedule
-commitbook doctor      # Health check
+commitbook doctor      # Health check (--json for structured output, --fix for locked repairs)
 commitbook log         # Activity log
-commitbook login       # Store auth token
 commitbook completions # Generate shell completion scripts
+```
+
+## Config file
+
+`.CommitBook/config.toml` is committed and shared by every device. `init` writes it from a commented template; `LocalConfig::save` edits values in place so user comments survive. Unknown keys and invalid values are rejected. There is no legacy migration: a file without `[config] schema = 1` fails with "delete it and run `commitbook init`".
+
+```toml
+[config]
+schema = 1              # file format; bumped only for incompatible layout changes
+
+[commitbook]
+name = "notes"
+
+[git]
+branch = "main"
+remote = "origin"       # provider/owner/repo are parsed from this remote's URL (git::remote::remote_identity)
+
+[sync]
+schedule = "1h"         # stored as picked (1h, 15m, daily) or cron; cron::to_cron converts at install
+
+[commit]
+mode = "timestamp"      # timestamp | ai
+agent = "any"           # any | claude | codex | copilot | gemini | cursor
+
+[conflicts]
+mode = "both"           # both | manual | ai | review
+agent = "claude"        # claude | codex | copilot | gemini | cursor
+
+[logs]
+keep = "30d"            # <N>d | forever
 ```
 
 ## Conflict resolution
 
-`.CommitBook/config.toml` `[conflict]` section selects the AI CLI invoked when
-the libgit2 3-way merge leaves conflict markers:
+`[conflicts] mode` decides what happens when the libgit2 3-way merge leaves conflicts:
 
-```toml
-[conflict]
-resolver = "manual"            # manual | claude | codex | copilot | gemini | cursor
-review_ai_resolutions = false  # true: store AI proposals for review instead of applying them
-```
-
-`manual` (the default) leaves the markers in place; the user resolves with `git status` and re-runs `commitbook sync`, or uses the web dashboard `/conflicts` editor (use local, use remote, keep both, delete, save edited text). Any other value spawns the corresponding CLI to rewrite each conflicted file; the orchestrator stages the resolved files and finishes the merge commit.
-
-With `review_ai_resolutions = true`, sync stores each AI proposal in `.CommitBook/local/conflict-proposals.toml` and stops without applying it or pushing. Pending and rejected proposals are not regenerated by later cycles; the web editor accepts, edits, rejects, or regenerates them. Turning review off does not approve stored proposals. Resolving the last conflict creates a local merge commit only; publication follows the normal `auto_push` policy.
+- `both` (default): conflicted Markdown/text notes (`.md`, `.markdown`, `.txt`) are resolved with a union merge that keeps both versions without markers, local first (`GitRepo::try_resolve_both`). The files are listed in `SyncOutcome.kept_both` and `state.toml` (`kept_both_paths`, `kept_both_at`). Other files, binary files, and delete/modify conflicts are handled like `manual`.
+- `manual`: markers stay in place; the user resolves with `git status` and re-runs `commitbook sync`, or uses the web dashboard `/conflicts` editor (use local, use remote, keep both, delete, save edited text).
+- `ai`: `[conflicts] agent` rewrites each conflicted file; the orchestrator stages the resolved files and finishes the merge commit.
+- `review`: sync stores each AI proposal in `.CommitBook/local/conflict-proposals.toml` and stops without applying it or pushing, recording the waiting conflicts as `last_error` with `last_error_stage = "review"`. Pending and rejected proposals are not regenerated by later cycles; the web editor accepts, edits, rejects, or regenerates them. Switching mode does not approve stored proposals. Resolving the last conflict creates a local merge commit; the next sync publishes it.
 
 ## Commit messages
 
-`.CommitBook/config.toml` `[commit]` section toggles AI-generated commit messages:
-
-```toml
-[commit]
-ai_messages = false  # false (default): always use the timestamp message, never spawn an AI CLI
-                     # true: try Copilot, Claude, Codex, then timestamp fallback
-```
-
-When `false`, `commitbook sync` uses only the deterministic `FallbackProvider`
-(a `Writing <timestamp> (...)` message) and never spawns an AI CLI. Key
-selection lives in `commit_provider_keys` (`commitbook-cli/src/commands/sync_cmd.rs`).
+`[commit] mode = "timestamp"` (default) uses only the deterministic `FallbackProvider` (`Writing <timestamp>`) and never spawns an AI CLI. `mode = "ai"` asks `[commit] agent` (or, for `any`, Copilot, Claude, Codex, Gemini, Cursor in order), then falls back to the timestamp. Key selection lives in `commitbook_engine::ai::commit_provider_keys`.
 
 ## Status, preview, and settings
 
+- Scheduler state comes from `cron::health`: `stopped`, `running`, or `broken` when the job's binary no longer exists. `SchedulerHealth::warning` also flags a job with no sync attempt for three schedule intervals. `start` and `doctor --fix` warn when installing a `target/debug` or `target/release` binary. `cron::install` refuses any binary that is not an existing absolute path named `commitbook` (`cron::ensure_scheduler_binary`), so the TUI or web dashboard can never schedule themselves.
 - `commitbook status`, the web `/api/status` endpoint, and the TUI all read the shared engine status service. It reports the real HEAD commit, dirty files, cached ahead/behind counts, merge/conflict state, pending AI reviews, and the `state.toml` timestamps. It never fetches, invokes AI, takes the lock, or rewrites config.
+- Status also lists the devices from `.CommitBook/devices/` and the notes where `both` mode last kept two versions.
+- A `state.toml` that does not parse is moved to `state.toml.corrupt` (never overwritten) and sync continues with fresh state (`SyncState::load_or_quarantine`).
 - `last_sync_at` marks a successful cycle, not a push. `last_attempt_at`, `last_fetch_at`, `last_push_at`, and `last_error_stage` distinguish attempts, remote checks, publication, and the failing stage.
 - `commitbook preview`, web `/changes`, and the TUI `p` screen show what normal staging would commit: every non-ignored Git file of any type, not only Markdown. Preview writes nothing.
-- Settings changes from CLI, web, and TUI go through `commitbook-engine/src/settings/` under the repository lock; config writes are atomic and an active scheduler is reinstalled (or rolled back) when the schedule changes.
+- The web dashboard (127.0.0.1 only, no login) rejects any request whose `Host` is not a local name (DNS rebinding) and any state-changing request whose `Origin`/`Sec-Fetch-Site` is not its own origin (CSRF); see `guard_local_requests` in `commitbook-web/src/routes.rs`.
+- Settings changes from CLI and web go through `commitbook-engine/src/settings/` under the repository lock; the TUI displays settings and can start or stop the scheduler. Config writes are atomic and an active scheduler is reinstalled (or rolled back) when the schedule changes. A branch change is accepted only when that branch is checked out; `[git] remote` is not editable after `init`.
 
 ## Code Conventions
 
 - **Tests are colocated** in separate `*_tests.rs` files, referenced via `#[cfg(test)] #[path = "..._tests.rs"] mod tests;`. Never write tests inline in source files.
 - **No database or ORM.** State is TOML files + directory structure.
-- **Rust edition 2021.** `set_var` requires `unsafe` blocks.
+- **Rust edition 2021.** `std::env::set_var` does not require an `unsafe` block in this workspace.
 - Async traits use `#[async_trait]`.
-- Desktop git operations shell out to `git` CLI; mobile builds skip these via `#[cfg(not(any(target_os = "ios", target_os = "android")))]` and reach git through the `CredentialProvider`-based git2 path.
+- Every subprocess spawned during sync (AI CLIs, `gh` probes, `gpg`/`ssh-keygen` signing) goes through `process::run_bounded`, which enforces one deadline covering exit and output draining and kills the process group on timeout. Never call `.output()` or `wait_with_output()` there.
+- Desktop and mobile Git operations use git2/libgit2 through the shared engine and `CredentialProvider` abstraction. Desktop uses system Git credentials and may spawn `gpg` or `ssh-keygen` for commit signing; mobile does not spawn signing subprocesses.
 
 ## .CommitBook/ Directory
 
-`config.toml` is the only committed file. Everything else lives under `local/`, which is gitignored as a single entry (`.CommitBook/local/`). Initialization auto-adds this entry to `.gitignore`.
+`config.toml`, `.gitignore`, and `devices/` are committed. Everything else lives under `local/`, which is gitignored as a single entry: initialization writes `/local/` into the committed `.CommitBook/.gitignore` (the repository-root `.gitignore` is never changed). Every sync restores that entry if a merge removed it, and `GitRepo::stage_all`/`stage_paths` never stage `.CommitBook/local/` regardless of ignore rules.
+
+Each device writes only its own `devices/<id>.toml`, and only when it registers (`commitbook init`, or the first sync on a clone that never ran init) or is renamed, so device files never conflict or cause commits on their own.
 
 ```
 .CommitBook/
   config.toml        # Human-editable settings (COMMITTED to git)
+  .gitignore         # Contains /local/ (COMMITTED to git)
+  devices/           # One file per device: name, platform, auth (COMMITTED to git)
   local/             # All local state (GITIGNORED via single entry)
+    device-id        # This device's id (names its devices/<id>.toml)
     auth.toml        # Credentials (0o600 permissions)
-    state.toml       # Sync state (last_sync_at, last_attempt_at, last_fetch_at, last_push_at, last_error, last_error_stage)
-    conflict-proposals.toml  # Stored AI conflict proposals awaiting review (when enabled)
+    state.toml       # Sync state (last_sync_at, last_attempt_at, last_fetch_at, last_push_at, last_error, last_error_stage, kept_both_paths, kept_both_at)
+    preferences.toml # Mobile per-device preferences (auto_sync)
+    conflict-proposals.toml  # Stored AI conflict proposals awaiting review (review mode)
     logs/            # Activity logs
       YYYY-MM-DD.log       # Daily JSON-lines log files
       launchd-stdout.log   # macOS scheduler stdout (when scheduled)

@@ -8,7 +8,13 @@ fn input(branch: &str) -> CommitBookInput {
         owner: "owner".to_string(),
         repo: "notes".to_string(),
         branch: branch.to_string(),
+        device_name: Some("Phone".to_string()),
     }
+}
+
+/// Bare remote path whose URL identifies `owner/notes`, matching `input`.
+fn remote_path(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    dir.path().join("owner").join("notes.git")
 }
 
 fn initialize_repo(path: &Path) -> (GitRepo, String) {
@@ -30,11 +36,11 @@ fn initialize_repo(path: &Path) -> (GitRepo, String) {
 fn initialization_repairs_metadata_pushes_and_preserves_unrelated_index() {
     let local = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let (repo, branch) = initialize_repo(local.path());
     let repository = git2::Repository::open(local.path()).unwrap();
     repository
-        .remote("origin", remote.path().to_str().unwrap())
+        .remote("origin", remote_path(&remote).to_str().unwrap())
         .unwrap();
     repo.push_with("origin", &branch, &TokenCredentials::new("unused"))
         .unwrap();
@@ -51,7 +57,12 @@ fn initialization_repairs_metadata_pushes_and_preserves_unrelated_index() {
     .unwrap();
 
     let config = LocalConfig::load(local.path()).unwrap();
-    assert_eq!(config.commitbook.unwrap().owner, "owner");
+    assert_eq!(config.commitbook.name, "Notes");
+    let (id, device) = commitbook_engine::devices::this_device(local.path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(device.name, "Phone");
+    assert_eq!(device.auth, commitbook_engine::config::Auth::Pat);
     assert_eq!(
         std::fs::read_to_string(local.path().join(".CommitBook/.gitignore")).unwrap(),
         "/local/\n"
@@ -69,13 +80,20 @@ fn initialization_repairs_metadata_pushes_and_preserves_unrelated_index() {
         .unwrap()
         .get_path(Path::new("staged.md"), 0)
         .is_some());
-    let remote_repository = git2::Repository::open_bare(remote.path()).unwrap();
+    let remote_repository = git2::Repository::open_bare(remote_path(&remote)).unwrap();
     assert_eq!(
         remote_repository
             .refname_to_id(&format!("refs/heads/{branch}"))
             .unwrap(),
         head.id()
     );
+    assert!(head
+        .tree()
+        .unwrap()
+        .get_path(Path::new(&commitbook_engine::devices::device_repo_path(
+            &id
+        )))
+        .is_ok());
 
     let first_head = head.id();
     drop(head);
@@ -97,17 +115,17 @@ fn initialization_repairs_metadata_pushes_and_preserves_unrelated_index() {
 }
 
 #[test]
-fn existing_committed_config_without_commitbook_is_repaired_and_pushed() {
+fn existing_committed_config_is_kept_and_this_device_is_published() {
     let local = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let (repo, branch) = initialize_repo(local.path());
     git2::Repository::open(local.path())
         .unwrap()
-        .remote("origin", remote.path().to_str().unwrap())
+        .remote("origin", remote_path(&remote).to_str().unwrap())
         .unwrap();
 
-    let mut legacy = LocalConfig::new("0 * * * *");
+    let mut legacy = LocalConfig::new("notes", "main", "origin");
     legacy.git.branch = branch.clone();
     legacy.git.remote = "origin".to_string();
     legacy.save(local.path()).unwrap();
@@ -119,10 +137,6 @@ fn existing_committed_config_without_commitbook_is_repaired_and_pushed() {
     .unwrap();
     repo.push_with("origin", &branch, &TokenCredentials::new("unused"))
         .unwrap();
-    assert!(LocalConfig::load(local.path())
-        .unwrap()
-        .commitbook
-        .is_none());
     let legacy_head = git2::Repository::open(local.path())
         .unwrap()
         .head()
@@ -130,10 +144,10 @@ fn existing_committed_config_without_commitbook_is_repaired_and_pushed() {
         .target()
         .unwrap();
 
-    // Deliberately pass another valid branch. Existing config remains the
-    // authority for both publication and the repaired metadata.
+    // Deliberately pass another valid branch and name. The existing config
+    // remains the authority; only this device's file is added.
     let mut request = input("different-branch");
-    request.name = "Repaired".to_string();
+    request.name = "Ignored".to_string();
     ensure_commitbook_initialized(
         local.path(),
         &request,
@@ -144,7 +158,7 @@ fn existing_committed_config_without_commitbook_is_repaired_and_pushed() {
 
     let repaired = LocalConfig::load(local.path()).unwrap();
     assert_eq!(repaired.git.branch, branch);
-    assert_eq!(repaired.commitbook.unwrap().name, "Repaired");
+    assert_eq!(repaired.commitbook.name, "notes");
     let repaired_head = git2::Repository::open(local.path())
         .unwrap()
         .head()
@@ -153,7 +167,7 @@ fn existing_committed_config_without_commitbook_is_repaired_and_pushed() {
         .unwrap();
     assert_ne!(repaired_head, legacy_head);
     assert_eq!(
-        git2::Repository::open_bare(remote.path())
+        git2::Repository::open_bare(remote_path(&remote))
             .unwrap()
             .refname_to_id(&format!("refs/heads/{branch}"))
             .unwrap(),
@@ -165,13 +179,13 @@ fn existing_committed_config_without_commitbook_is_repaired_and_pushed() {
 fn existing_clone_without_config_infers_and_persists_sole_remote() {
     let root = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let clone = root.path().join("owner__notes");
     std::fs::create_dir(&clone).unwrap();
     let (repo, branch) = initialize_repo(&clone);
     git2::Repository::open(&clone)
         .unwrap()
-        .remote("upstream", remote.path().to_str().unwrap())
+        .remote("upstream", remote_path(&remote).to_str().unwrap())
         .unwrap();
     repo.push_with("upstream", &branch, &TokenCredentials::new("unused"))
         .unwrap();
@@ -185,14 +199,14 @@ fn existing_clone_without_config_infers_and_persists_sole_remote() {
 fn fresh_clone_preserves_explicit_configured_remote_name() {
     let seed = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let (seed_repo, branch) = initialize_repo(seed.path());
     git2::Repository::open(seed.path())
         .unwrap()
-        .remote("upstream", remote.path().to_str().unwrap())
+        .remote("upstream", remote_path(&remote).to_str().unwrap())
         .unwrap();
 
-    let mut committed_config = LocalConfig::new("0 * * * *");
+    let mut committed_config = LocalConfig::new("notes", "main", "origin");
     committed_config.git.branch = branch.clone();
     committed_config.git.remote = "upstream".to_string();
     committed_config.save(seed.path()).unwrap();
@@ -206,7 +220,7 @@ fn fresh_clone_preserves_explicit_configured_remote_name() {
     seed_repo
         .push_with("upstream", &branch, &TokenCredentials::new("unused"))
         .unwrap();
-    let remote_before = git2::Repository::open_bare(remote.path())
+    let remote_before = git2::Repository::open_bare(remote_path(&remote))
         .unwrap()
         .refname_to_id(&format!("refs/heads/{branch}"))
         .unwrap();
@@ -219,7 +233,7 @@ fn fresh_clone_preserves_explicit_configured_remote_name() {
     let mut builder = git2::build::RepoBuilder::new();
     builder.branch(&branch);
     builder
-        .clone(remote.path().to_str().unwrap(), &clone_path)
+        .clone(remote_path(&remote).to_str().unwrap(), &clone_path)
         .unwrap();
     let repository = git2::Repository::open(&clone_path).unwrap();
     assert!(repository.find_remote("origin").is_ok());
@@ -258,7 +272,7 @@ fn fresh_clone_preserves_explicit_configured_remote_name() {
     let local_head = repository.head().unwrap().target().unwrap();
     assert_ne!(local_head, remote_before);
     assert_eq!(
-        git2::Repository::open_bare(remote.path())
+        git2::Repository::open_bare(remote_path(&remote))
             .unwrap()
             .refname_to_id(&format!("refs/heads/{branch}"))
             .unwrap(),
@@ -270,15 +284,15 @@ fn fresh_clone_preserves_explicit_configured_remote_name() {
 fn fresh_clone_checks_out_configured_branch_and_tracks_renamed_remote() {
     let seed = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let (seed_repo, clone_branch) = initialize_repo(seed.path());
     let seed_repository = git2::Repository::open(seed.path()).unwrap();
     seed_repository
-        .remote("upstream", remote.path().to_str().unwrap())
+        .remote("upstream", remote_path(&remote).to_str().unwrap())
         .unwrap();
 
     let configured_branch = "sync-notes";
-    let mut committed_config = LocalConfig::new("0 * * * *");
+    let mut committed_config = LocalConfig::new("notes", "main", "origin");
     committed_config.git.branch = configured_branch.to_string();
     committed_config.git.remote = "upstream".to_string();
     committed_config.save(seed.path()).unwrap();
@@ -304,7 +318,7 @@ fn fresh_clone_checks_out_configured_branch_and_tracks_renamed_remote() {
             &TokenCredentials::new("unused"),
         )
         .unwrap();
-    let bare_repository = git2::Repository::open_bare(remote.path()).unwrap();
+    let bare_repository = git2::Repository::open_bare(remote_path(&remote)).unwrap();
     let clone_branch_before = bare_repository
         .refname_to_id(&format!("refs/heads/{clone_branch}"))
         .unwrap();
@@ -321,7 +335,7 @@ fn fresh_clone_checks_out_configured_branch_and_tracks_renamed_remote() {
     let mut builder = git2::build::RepoBuilder::new();
     builder.branch(&clone_branch);
     builder
-        .clone(remote.path().to_str().unwrap(), &clone_path)
+        .clone(remote_path(&remote).to_str().unwrap(), &clone_path)
         .unwrap();
     assert_eq!(
         GitRepo::open(&clone_path)
@@ -371,7 +385,7 @@ fn fresh_clone_checks_out_configured_branch_and_tracks_renamed_remote() {
     assert!(repository.find_remote("origin").is_err());
     assert!(repository.find_remote("upstream").is_ok());
     let local_head = repository.head().unwrap().target().unwrap();
-    let bare_repository = git2::Repository::open_bare(remote.path()).unwrap();
+    let bare_repository = git2::Repository::open_bare(remote_path(&remote)).unwrap();
     assert_eq!(
         bare_repository
             .refname_to_id(&format!("refs/heads/{clone_branch}"))
@@ -391,15 +405,15 @@ fn fresh_clone_checks_out_configured_branch_and_tracks_renamed_remote() {
 fn fresh_clone_missing_configured_branch_fails_without_partial_reconfiguration() {
     let seed = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let (seed_repo, clone_branch) = initialize_repo(seed.path());
     git2::Repository::open(seed.path())
         .unwrap()
-        .remote("upstream", remote.path().to_str().unwrap())
+        .remote("upstream", remote_path(&remote).to_str().unwrap())
         .unwrap();
 
     let configured_branch = "not-pushed";
-    let mut committed_config = LocalConfig::new("0 * * * *");
+    let mut committed_config = LocalConfig::new("notes", "main", "origin");
     committed_config.git.branch = configured_branch.to_string();
     committed_config.git.remote = "upstream".to_string();
     committed_config.save(seed.path()).unwrap();
@@ -419,7 +433,7 @@ fn fresh_clone_missing_configured_branch_fails_without_partial_reconfiguration()
     let mut builder = git2::build::RepoBuilder::new();
     builder.branch(&clone_branch);
     builder
-        .clone(remote.path().to_str().unwrap(), &clone_path)
+        .clone(remote_path(&remote).to_str().unwrap(), &clone_path)
         .unwrap();
     let head_before = git2::Repository::open(&clone_path)
         .unwrap()
@@ -453,7 +467,7 @@ fn fresh_clone_missing_configured_branch_fails_without_partial_reconfiguration()
 fn fresh_clone_rejects_unsafe_committed_branch_before_ref_construction() {
     let clone = tempfile::tempdir().unwrap();
     initialize_repo(clone.path());
-    let mut config = LocalConfig::new("0 * * * *");
+    let mut config = LocalConfig::new("notes", "main", "origin");
     config.git.remote = "origin".to_string();
     config.git.branch = "../escape".to_string();
     config.save(clone.path()).unwrap();
@@ -467,13 +481,13 @@ fn fresh_clone_rejects_unsafe_committed_branch_before_ref_construction() {
 fn existing_clone_bootstraps_metadata_to_empty_bare_remote() {
     let root = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let clone = root.path().join("owner__notes");
     std::fs::create_dir(&clone).unwrap();
     let (_repo, branch) = initialize_repo(&clone);
     git2::Repository::open(&clone)
         .unwrap()
-        .remote("upstream", remote.path().to_str().unwrap())
+        .remote("upstream", remote_path(&remote).to_str().unwrap())
         .unwrap();
 
     let summary = init_local_commitbook(root.path(), &input(&branch), "unused").unwrap();
@@ -485,7 +499,7 @@ fn existing_clone_bootstraps_metadata_to_empty_bare_remote() {
         .target()
         .unwrap();
     assert_eq!(
-        git2::Repository::open_bare(remote.path())
+        git2::Repository::open_bare(remote_path(&remote))
             .unwrap()
             .refname_to_id(&format!("refs/heads/{}", summary.branch))
             .unwrap(),
@@ -564,7 +578,7 @@ fn initialization_rejects_symlinked_metadata_files_without_touching_targets() {
         let (_repo, branch) = initialize_repo(local.path());
         std::fs::create_dir_all(local.path().join(".CommitBook")).unwrap();
         if filename == ".gitignore" {
-            let mut config = LocalConfig::new("0 * * * *");
+            let mut config = LocalConfig::new("notes", "main", "origin");
             config.git.branch = branch.clone();
             config.save(local.path()).unwrap();
         }
@@ -648,25 +662,25 @@ fn initialization_refuses_branch_mismatch_before_metadata_write() {
 }
 
 #[test]
-fn existing_clone_summary_uses_preserved_config_metadata() {
+fn existing_clone_summary_uses_config_name_remote_identity_and_device_auth() {
     let root = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    std::fs::create_dir_all(remote_path(&remote)).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let clone = root.path().join("owner__notes");
     std::fs::create_dir(&clone).unwrap();
     let (repo, branch) = initialize_repo(&clone);
     git2::Repository::open(&clone)
         .unwrap()
-        .remote("origin", remote.path().to_str().unwrap())
+        .remote("origin", remote_path(&remote).to_str().unwrap())
         .unwrap();
     commitbook_engine::commitbooks::init_dot_commitbook(
         &clone,
         "Preserved name",
-        "owner",
-        "notes",
         &branch,
-        "generic_git",
-        "existing_local_repo",
+        "origin",
+        Some("Laptop"),
+        commitbook_engine::config::Auth::ExistingLocalRepo,
     )
     .unwrap();
     repo.commit_selected_paths(
@@ -679,7 +693,6 @@ fn existing_clone_summary_uses_preserved_config_metadata() {
 
     let mut request = input(&branch);
     request.name = "Ignored input name".to_string();
-    request.provider = "github".to_string();
     request.mode = "pat".to_string();
     let summary = init_local_commitbook(root.path(), &request, "unused").unwrap();
     assert_eq!(summary.id, "owner/notes");
@@ -692,7 +705,7 @@ fn existing_clone_summary_uses_preserved_config_metadata() {
 }
 
 #[test]
-fn existing_slug_collision_rejects_mismatched_config_identity_before_fetch() {
+fn existing_slug_collision_rejects_a_clone_of_another_repository() {
     let root = tempfile::tempdir().unwrap();
     let request = CommitBookInput {
         name: "Requested".to_string(),
@@ -701,24 +714,32 @@ fn existing_slug_collision_rejects_mismatched_config_identity_before_fetch() {
         owner: "a__b".to_string(),
         repo: "c".to_string(),
         branch: "main".to_string(),
+        device_name: None,
     };
     let clone = root.path().join(slug_for(&request.owner, &request.repo));
     std::fs::create_dir(&clone).unwrap();
     let (_repo, branch) = initialize_repo(&clone);
+    git2::Repository::open(&clone)
+        .unwrap()
+        .remote("origin", "https://github.com/a/b__c.git")
+        .unwrap();
     commitbook_engine::commitbooks::init_dot_commitbook(
         &clone,
         "Different repository",
-        "a",
-        "b__c",
         &branch,
-        "github",
-        "pat",
+        "origin",
+        None,
+        commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
     let before = std::fs::read(clone.join(".CommitBook/config.toml")).unwrap();
 
     let error = init_local_commitbook(root.path(), &request, "unused").unwrap_err();
-    assert!(matches!(error, CommitBookError::InvalidInput { .. }));
+    assert!(
+        matches!(error, CommitBookError::InvalidInput { .. }),
+        "{error}"
+    );
+    assert!(error.to_string().contains("a/b__c"), "{error}");
     assert_eq!(
         std::fs::read(clone.join(".CommitBook/config.toml")).unwrap(),
         before
@@ -726,195 +747,22 @@ fn existing_slug_collision_rejects_mismatched_config_identity_before_fetch() {
 }
 
 #[test]
-fn fresh_clone_rejects_identity_mismatch_on_configured_branch_after_switch() {
-    let seed = tempfile::tempdir().unwrap();
-    let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
-    let (seed_repo, clone_branch) = initialize_repo(seed.path());
-    let seed_repository = git2::Repository::open(seed.path()).unwrap();
-    seed_repository
-        .remote("upstream", remote.path().to_str().unwrap())
-        .unwrap();
+fn invalid_auth_mode_is_rejected() {
+    let local = tempfile::tempdir().unwrap();
+    let (_repo, branch) = initialize_repo(local.path());
+    let mut request = input(&branch);
+    request.mode = "password".to_string();
 
-    // The requested branch carries a matching identity but points sync at
-    // another branch, which carries a different identity.
-    let configured_branch = "sync-notes";
-    commitbook_engine::commitbooks::init_dot_commitbook(
-        seed.path(),
-        "Notes",
-        "owner",
-        "notes",
-        &clone_branch,
-        "github",
-        "pat",
+    let error = ensure_commitbook_initialized(
+        local.path(),
+        &request,
+        "origin",
+        &TokenCredentials::new("unused"),
     )
-    .unwrap();
-    let mut committed_config = LocalConfig::load(seed.path()).unwrap();
-    committed_config.git.branch = configured_branch.to_string();
-    committed_config.git.remote = "upstream".to_string();
-    committed_config.save(seed.path()).unwrap();
-    LocalConfig::ensure_gitignore(seed.path()).unwrap();
-    seed_repo
-        .commit_selected_paths(
-            &[".CommitBook/config.toml", ".CommitBook/.gitignore"],
-            "seed matching identity",
-        )
-        .unwrap();
-    let matching_commit = seed_repository.head().unwrap().peel_to_commit().unwrap();
-    seed_repository
-        .branch(configured_branch, &matching_commit, false)
-        .unwrap();
-    drop(matching_commit);
-    seed_repository
-        .set_head(&format!("refs/heads/{configured_branch}"))
-        .unwrap();
-    let mut foreign_config = LocalConfig::load(seed.path()).unwrap();
-    let metadata = foreign_config.commitbook.as_mut().unwrap();
-    metadata.owner = "someone-else".to_string();
-    metadata.repo = "elsewhere".to_string();
-    foreign_config.save(seed.path()).unwrap();
-    seed_repo
-        .commit_selected_paths(&[".CommitBook/config.toml"], "seed foreign identity")
-        .unwrap();
-    seed_repo
-        .push_with("upstream", &clone_branch, &TokenCredentials::new("unused"))
-        .unwrap();
-    seed_repo
-        .push_with(
-            "upstream",
-            configured_branch,
-            &TokenCredentials::new("unused"),
-        )
-        .unwrap();
-    let bare_repository = git2::Repository::open_bare(remote.path()).unwrap();
-    let clone_branch_before = bare_repository
-        .refname_to_id(&format!("refs/heads/{clone_branch}"))
-        .unwrap();
-    let configured_branch_before = bare_repository
-        .refname_to_id(&format!("refs/heads/{configured_branch}"))
-        .unwrap();
-    drop(bare_repository);
-
-    let root = tempfile::tempdir().unwrap();
-    let clone_path = root.path().join("owner__notes");
-    let mut builder = git2::build::RepoBuilder::new();
-    builder.branch(&clone_branch);
-    builder
-        .clone(remote.path().to_str().unwrap(), &clone_path)
-        .unwrap();
-
-    let _lock = RepoLock::acquire(&clone_path).unwrap();
-    let error = prepare_fresh_clone(&clone_path, &input(&clone_branch)).unwrap_err();
-
+    .unwrap_err();
     assert!(
         matches!(error, CommitBookError::InvalidInput { .. }),
         "{error}"
     );
-    let message = error.to_string();
-    assert!(message.contains("someone-else/elsewhere"), "{message}");
-    assert!(message.contains("owner/notes"), "{message}");
-    let repository = git2::Repository::open(&clone_path).unwrap();
-    assert_eq!(
-        repository.head().unwrap().target().unwrap(),
-        configured_branch_before
-    );
-    assert!(
-        commitbook_engine::state::sync_state::SyncState::load(&LocalConfig::commitbook_dir(
-            &clone_path
-        ))
-        .unwrap()
-        .pending_init_push
-        .is_none()
-    );
-    let bare_repository = git2::Repository::open_bare(remote.path()).unwrap();
-    assert_eq!(
-        bare_repository
-            .refname_to_id(&format!("refs/heads/{clone_branch}"))
-            .unwrap(),
-        clone_branch_before
-    );
-    assert_eq!(
-        bare_repository
-            .refname_to_id(&format!("refs/heads/{configured_branch}"))
-            .unwrap(),
-        configured_branch_before
-    );
-}
-
-#[test]
-fn init_with_auto_push_disabled_records_pending_without_pushing() {
-    let local = tempfile::tempdir().unwrap();
-    let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
-    let (_repo, branch) = initialize_repo(local.path());
-    git2::Repository::open(local.path())
-        .unwrap()
-        .remote("origin", remote.path().to_str().unwrap())
-        .unwrap();
-    commitbook_engine::commitbooks::init_dot_commitbook(
-        local.path(),
-        "Notes",
-        "owner",
-        "notes",
-        &branch,
-        "github",
-        "pat",
-    )
-    .unwrap();
-    let mut config = LocalConfig::load(local.path()).unwrap();
-    config.git.auto_push = false;
-    config.save(local.path()).unwrap();
-
-    ensure_commitbook_initialized(
-        local.path(),
-        &input(&branch),
-        "origin",
-        &TokenCredentials::new("unused"),
-    )
-    .unwrap();
-
-    let cb_dir = LocalConfig::commitbook_dir(local.path());
-    let head = GitRepo::open(local.path())
-        .unwrap()
-        .rev_parse("HEAD")
-        .unwrap();
-    let pending = commitbook_engine::state::sync_state::SyncState::load(&cb_dir)
-        .unwrap()
-        .pending_init_push
-        .expect("pending publication recorded");
-    assert_eq!(pending.commit_oid, head);
-    assert!(git2::Repository::open_bare(remote.path())
-        .unwrap()
-        .refname_to_id(&format!("refs/heads/{branch}"))
-        .is_err());
-
-    let mut config = LocalConfig::load(local.path()).unwrap();
-    config.git.auto_push = true;
-    config.save(local.path()).unwrap();
-    ensure_commitbook_initialized(
-        local.path(),
-        &input(&branch),
-        "origin",
-        &TokenCredentials::new("unused"),
-    )
-    .unwrap();
-
-    let head = GitRepo::open(local.path())
-        .unwrap()
-        .rev_parse("HEAD")
-        .unwrap();
-    assert!(
-        commitbook_engine::state::sync_state::SyncState::load(&cb_dir)
-            .unwrap()
-            .pending_init_push
-            .is_none()
-    );
-    assert_eq!(
-        git2::Repository::open_bare(remote.path())
-            .unwrap()
-            .refname_to_id(&format!("refs/heads/{branch}"))
-            .unwrap()
-            .to_string(),
-        head
-    );
+    assert!(error.to_string().contains("github_app"), "{error}");
 }

@@ -1,26 +1,5 @@
 use super::*;
 
-#[cfg(unix)]
-#[test]
-fn wait_with_timeout_drains_large_output_without_deadlock() {
-    use std::process::{Command, Stdio};
-    use std::time::Duration;
-
-    // Emit ~200 KB, far past the ~64 KB pipe buffer that would deadlock a
-    // waiter that reads the pipe only after the child exits.
-    let child = Command::new("sh")
-        .arg("-c")
-        .arg("yes 0123456789ABCDEF | head -c 200000")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-
-    let output = wait_with_timeout(child, Duration::from_secs(30)).unwrap();
-    assert!(output.status.success());
-    assert_eq!(output.stdout.len(), 200000);
-}
-
 #[test]
 fn test_clean_message_passthrough() {
     assert_eq!(clean_message("Fix login bug"), "Fix login bug");
@@ -298,6 +277,30 @@ mod run_with_prompt_tests {
     }
 
     #[test]
+    fn run_with_full_prompt_rejects_a_cli_that_stopped_reading() {
+        // A resolver that answers after reading only part of a large
+        // conflict must not have its answer applied.
+        let prompt = "x".repeat(1024 * 1024);
+        let error = super::super::run_with_full_prompt(
+            &mut sh("echo partial merge; exit 0"),
+            &prompt,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("before reading the whole conflict"),
+            "{error:#}"
+        );
+
+        let output =
+            super::super::run_with_full_prompt(&mut sh("cat"), "small", Duration::from_secs(60))
+                .unwrap();
+        assert_eq!(output.stdout, b"small");
+    }
+
+    #[test]
     fn run_with_prompt_kills_process_group_on_timeout() {
         let started = Instant::now();
         let error = run_with_prompt(
@@ -320,5 +323,57 @@ mod run_with_prompt_tests {
         .unwrap();
         assert_eq!(output.status.code(), Some(3));
         assert_eq!(output.stderr, b"boom\n");
+    }
+}
+
+#[test]
+fn ai_with_any_agent_tries_every_agent_then_fallback() {
+    assert_eq!(
+        commit_provider_keys(CommitMode::Ai, CommitAgent::Any),
+        [
+            "gh-copilot",
+            "claude-cli",
+            "codex-cli",
+            "gemini-cli",
+            "cursor-agent",
+            "fallback"
+        ]
+    );
+}
+
+#[test]
+fn ai_with_one_agent_tries_only_that_agent_then_fallback() {
+    assert_eq!(
+        commit_provider_keys(CommitMode::Ai, CommitAgent::Claude),
+        ["claude-cli", "fallback"]
+    );
+    assert_eq!(
+        commit_provider_keys(CommitMode::Ai, CommitAgent::Gemini),
+        ["gemini-cli", "fallback"]
+    );
+    assert_eq!(
+        commit_provider_keys(CommitMode::Ai, CommitAgent::Cursor),
+        ["cursor-agent", "fallback"]
+    );
+}
+
+#[test]
+fn timestamp_mode_uses_fallback_only_whatever_the_agent() {
+    for agent in CommitAgent::ALL {
+        assert_eq!(
+            commit_provider_keys(CommitMode::Timestamp, *agent),
+            ["fallback"]
+        );
+    }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[test]
+fn every_commit_agent_has_a_registered_provider() {
+    let chain = ProviderChain::new();
+    for agent in ANY_AGENT_ORDER {
+        let key = agent.commit_provider_key().to_string();
+        let availability = chain.check_availability(std::slice::from_ref(&key));
+        assert_ne!(availability[0].1, key, "{key} has no provider in the chain");
     }
 }

@@ -4,6 +4,17 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::platform::{CredentialProvider, SystemCredentials};
 
+/// Device-local state (token, sync state, logs, lock). Never staged.
+const LOCAL_STATE_DIR: &str = ".CommitBook/local";
+
+/// True for `.CommitBook/local` and anything under it.
+pub fn is_local_state_path(path: &str) -> bool {
+    path == LOCAL_STATE_DIR
+        || path
+            .strip_prefix(LOCAL_STATE_DIR)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct HeadExpectation {
     symbolic_target: Option<String>,
@@ -349,10 +360,14 @@ impl GitRepo {
         Ok(summary)
     }
 
-    /// Stage specific paths (equivalent to `git add <paths...>`).
+    /// Stage specific paths (equivalent to `git add <paths...>`). Paths under
+    /// `.CommitBook/local/` are refused: that directory holds the token.
     pub fn stage_paths(&self, paths: &[String]) -> Result<()> {
         let mut index = self.repo.index().context("Failed to get index")?;
         for p in paths {
+            if is_local_state_path(p) {
+                bail!("Refusing to stage device-local state: {p}");
+            }
             index
                 .add_path(Path::new(p))
                 .with_context(|| format!("Failed to stage {p}"))?;
@@ -361,7 +376,10 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Stage all changes (equivalent to `git add -A`).
+    /// Stage all changes (equivalent to `git add -A`), except
+    /// `.CommitBook/local/`. The committed `.CommitBook/.gitignore` normally
+    /// excludes it, but that file can be changed by a merge, so staging never
+    /// relies on it: the token in `auth.toml` must not reach the remote.
     pub fn stage_all(&self) -> Result<()> {
         let mut index = self.repo.index().context("Failed to get index")?;
         index
@@ -370,6 +388,9 @@ impl GitRepo {
         index
             .update_all(["*"].iter(), None)
             .context("Failed to update index for deletions")?;
+        index
+            .remove_dir(Path::new(LOCAL_STATE_DIR), 0)
+            .context("Failed to unstage device-local state")?;
         index.write().context("Failed to write index")?;
         Ok(())
     }
@@ -559,7 +580,7 @@ impl GitRepo {
                     &branch_ref,
                     oid,
                     Some(&sig),
-                    "commitbook: publish selected paths",
+                    "CommitBook: publish selected paths",
                 )
                 .with_context(|| format!("Failed to prepare metadata commit on {branch_ref}"))?;
             transaction
@@ -801,7 +822,7 @@ impl GitRepo {
                 target_ref,
                 oid,
                 Some(reflog_signature),
-                "commitbook: publish commit",
+                "CommitBook: publish commit",
             )
             .with_context(|| format!("Failed to prepare commit publication on {target_ref}"))?;
         transaction
@@ -1242,7 +1263,7 @@ impl GitRepo {
                     head_name,
                     target_oid,
                     Some(&reflog_signature),
-                    "commitbook: fast-forward",
+                    "CommitBook: fast-forward",
                 )
                 .context("Failed to prepare fast-forward branch ref")?;
             fail_fast_forward_at(FastForwardFailpoint::BeforeRefPublication)?;
@@ -1459,9 +1480,9 @@ impl GitRepo {
             .repo
             .statuses(Some(&mut opts))
             .context("Failed to get repository status")?;
-        Ok(statuses
-            .iter()
-            .any(|entry| entry.status() != git2::Status::CURRENT))
+        Ok(statuses.iter().any(|entry| {
+            entry.status() != git2::Status::CURRENT && !entry.path().is_ok_and(is_local_state_path)
+        }))
     }
 
     /// List paths with unmerged conflict entries in the index.
@@ -1609,6 +1630,47 @@ impl GitRepo {
     /// the scheduler recovers from it before touching the working tree.
     pub fn merge_in_progress(&self) -> bool {
         self.repo.state() == git2::RepositoryState::Merge
+    }
+
+    /// Operation the repository is in the middle of (merge, cherry-pick,
+    /// revert, rebase, am, bisect), or `Clean`.
+    pub fn repository_state(&self) -> git2::RepositoryState {
+        self.repo.state()
+    }
+
+    /// True when every `MERGE_HEAD` commit is `refs/remotes/<remote>/<branch>`
+    /// or one of its ancestors, i.e. the merge is one sync itself started from
+    /// the remote branch rather than a merge the user started.
+    pub fn merge_head_is_from_remote(&self, remote: &str, branch: &str) -> Result<bool> {
+        let upstream = match self
+            .repo
+            .refname_to_id(&format!("refs/remotes/{remote}/{branch}"))
+        {
+            Ok(oid) => oid,
+            Err(_) => return Ok(false),
+        };
+        let path = self.repo.path().join("MERGE_HEAD");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error).context("Failed to read MERGE_HEAD"),
+        };
+        let heads = content
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(git2::Oid::from_str)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("MERGE_HEAD does not contain commit ids")?;
+        if heads.is_empty() {
+            return Ok(false);
+        }
+        for head in heads {
+            if head != upstream && !self.repo.graph_descendant_of(upstream, head)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Abort an in-flight merge: clear MERGE_HEAD and reset working tree

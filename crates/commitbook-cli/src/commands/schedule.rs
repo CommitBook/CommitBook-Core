@@ -12,7 +12,7 @@ pub fn run(_cb_dir: &Path, repo_root: &Path, expression: &str) -> Result<()> {
     println!(
         "  {} Schedule updated: {}",
         "OK".green().bold(),
-        cron::describe_schedule(&outcome.config.schedule).cyan()
+        cron::describe_schedule(&outcome.config.sync.schedule).cyan()
     );
     if outcome.scheduler_reinstalled {
         println!("  Scheduler reinstalled with the new schedule.");

@@ -8,9 +8,7 @@ use super::conflict::{
     build_resolve_prompt, finalize_resolved_text, strip_outer_code_fence, ConflictResolution,
     ConflictResolver,
 };
-use super::{
-    clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
-};
+use super::{clean_message, looks_like_diff_narration, truncate, CommitMessageProvider};
 use crate::git::{ChangesSummary, GitConflict};
 
 const COPILOT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -93,14 +91,7 @@ impl CommitMessageProvider for CopilotProvider {
     }
 
     fn is_available(&self) -> bool {
-        if which::which("gh").is_err() {
-            return false;
-        }
-        Command::new("gh")
-            .args(["copilot", "--", "-v"])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        copilot_available()
     }
 
     async fn generate(&self, summary: &ChangesSummary, repo_path: &Path) -> Result<String> {
@@ -113,11 +104,9 @@ impl CommitMessageProvider for CopilotProvider {
             truncate(&diff_text, 500)
         );
 
-        let child = command(repo_path, &prompt)
-            .spawn()
-            .context("Failed to run gh copilot")?;
-
-        let output = wait_with_timeout(child, COPILOT_TIMEOUT).context("gh copilot timed out")?;
+        let output =
+            crate::process::run_bounded(&mut command(repo_path, &prompt), None, COPILOT_TIMEOUT)
+                .context("gh copilot failed to finish")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -149,14 +138,7 @@ impl ConflictResolver for CopilotProvider {
     }
 
     fn is_available(&self) -> bool {
-        if which::which("gh").is_err() {
-            return false;
-        }
-        Command::new("gh")
-            .args(["copilot", "--", "-v"])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        copilot_available()
     }
 
     async fn resolve(
@@ -167,7 +149,7 @@ impl ConflictResolver for CopilotProvider {
         let prompt = build_resolve_prompt(conflict)?;
         let repo_path = repo_path.to_path_buf();
         let output = tokio::task::spawn_blocking(move || {
-            super::run_with_prompt(
+            super::run_with_full_prompt(
                 &mut resolve_command(&repo_path),
                 &prompt,
                 COPILOT_RESOLVE_TIMEOUT,
@@ -182,17 +164,30 @@ impl ConflictResolver for CopilotProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout);
-        finalize_resolved_text(&raw, "GitHub Copilot")
+        finalize_resolved_text(&raw, conflict, "GitHub Copilot")
     }
+}
+
+/// How long a `gh` availability or auth probe may take. `gh` can contact
+/// GitHub, and a network that silently drops packets must not stall sync.
+const GH_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Run a short `gh` probe; false when it fails, is missing, or times out.
+fn gh_probe(args: &[&str]) -> bool {
+    crate::process::run_bounded(Command::new("gh").args(args), None, GH_PROBE_TIMEOUT)
+        .is_ok_and(|output| output.status.success())
+}
+
+/// Whether `gh copilot` is installed. Probed once per process: the TUI and
+/// web dashboard ask repeatedly, and each probe spawns `gh`.
+fn copilot_available() -> bool {
+    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVAILABLE.get_or_init(|| which::which("gh").is_ok() && gh_probe(&["copilot", "--", "-v"]))
 }
 
 /// Check if gh CLI is authenticated.
 pub fn is_authenticated() -> bool {
-    Command::new("gh")
-        .args(["auth", "status"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    gh_probe(&["auth", "status"])
 }
 
 #[cfg(test)]

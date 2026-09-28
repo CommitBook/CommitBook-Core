@@ -1,3 +1,4 @@
+pub mod attributes;
 pub mod conflicts;
 pub mod operations;
 pub mod remote;

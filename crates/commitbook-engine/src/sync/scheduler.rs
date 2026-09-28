@@ -9,7 +9,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::ai::{ConflictResolution, ConflictResolver, ResolverRegistry};
-use crate::config::{local::GitSettings, LocalConfig};
+use crate::config::{local::GitSettings, ConflictMode, LocalConfig};
 use crate::git::operations::MergeOutcome;
 use crate::git::GitRepo;
 use crate::platform::{CredentialProvider, Logger, SystemCredentials};
@@ -25,6 +25,8 @@ pub struct SyncOptions {
     pub branch: String,
     pub auto_push: bool,
     pub review_ai_resolutions: bool,
+    /// `both` conflict mode: keep both versions of conflicting notes.
+    pub keep_both: bool,
 }
 
 impl SyncOptions {
@@ -34,6 +36,7 @@ impl SyncOptions {
             branch: branch.into(),
             auto_push,
             review_ai_resolutions: false,
+            keep_both: false,
         }
     }
 }
@@ -43,8 +46,11 @@ impl From<&GitSettings> for SyncOptions {
         Self {
             remote: settings.remote.clone(),
             branch: settings.branch.clone(),
-            auto_push: settings.auto_push,
+            // Sync always publishes; `auto_push` remains for tests and a
+            // possible future per-device setting.
+            auto_push: true,
             review_ai_resolutions: false,
+            keep_both: false,
         }
     }
 }
@@ -56,6 +62,9 @@ pub struct SyncOutcome {
     pub pushed: u32,
     pub pulled: u32,
     pub conflicts_resolved: u32,
+    /// Notes whose conflicts were resolved by keeping both versions
+    /// (`both` mode); the user deletes the version they don't want.
+    pub kept_both: Vec<String>,
     pub manual_conflicts: u32,
     pub errors: Vec<String>,
 }
@@ -66,6 +75,7 @@ impl SyncOutcome {
             && self.pushed == 0
             && self.pulled == 0
             && self.conflicts_resolved == 0
+            && self.kept_both.is_empty()
             && self.manual_conflicts == 0
             && self.errors.is_empty()
     }
@@ -96,10 +106,20 @@ pub async fn sync_repository_locked(
     lock: &RepoLock,
 ) -> Result<SyncOutcome> {
     lock.ensure_matches(repo_root)?;
+    // Safety net for clones that never ran `init` on this device: register
+    // it with the default name so other devices can see it.
+    if crate::devices::this_device_id(repo_root)?.is_none() {
+        let auth = crate::devices::desktop_auth(repo_root, &config.git.remote);
+        crate::devices::register(repo_root, None, auth)?;
+    }
     let registry = ResolverRegistry::new();
-    let resolver = registry.get(&config.conflict.resolver);
+    let resolver = match config.conflicts.mode {
+        ConflictMode::Both | ConflictMode::Manual => None,
+        ConflictMode::Ai | ConflictMode::Review => registry.get(config.conflicts.agent.as_str()),
+    };
     let mut options = SyncOptions::from(&config.git);
-    options.review_ai_resolutions = config.conflict.review_ai_resolutions;
+    options.review_ai_resolutions = config.conflicts.mode == ConflictMode::Review;
+    options.keep_both = config.conflicts.mode == ConflictMode::Both;
     sync_with_resolver_locked(
         repo_root,
         &options,
@@ -146,9 +166,19 @@ pub async fn sync_with_resolver_locked(
     lock: &RepoLock,
 ) -> Result<SyncOutcome> {
     lock.ensure_matches(repo_root)?;
+    // A merge can drop `/local/` from the committed `.CommitBook/.gitignore`;
+    // restore it every cycle. `stage_all` also refuses `.CommitBook/local/`.
+    LocalConfig::ensure_gitignore(repo_root)?;
     let cb_dir = LocalConfig::commitbook_dir(repo_root);
-    // Never replace malformed state with defaults; validate before mutations.
-    let mut state = SyncState::load(&cb_dir)?;
+    // A state.toml that does not parse is moved aside, never overwritten,
+    // so its content survives and sync keeps running.
+    let (mut state, quarantined) = SyncState::load_or_quarantine(&cb_dir)?;
+    if let Some(moved) = &quarantined {
+        let _ = logger.warn(&format!(
+            "state.toml could not be read; moved it to {} and started fresh sync state",
+            moved.display()
+        ));
+    }
     state.last_attempt_at = Some(crate::utils::datetime::now_iso());
     state.save(&cb_dir)?;
     let mut stage = "inspection";
@@ -176,6 +206,12 @@ pub async fn sync_with_resolver_locked(
             _ => None,
         };
         current.last_error_stage = failure.as_ref().map(|_| stage.to_string());
+        if let Ok(outcome) = &result {
+            if !outcome.kept_both.is_empty() {
+                current.kept_both_paths = outcome.kept_both.clone();
+                current.kept_both_at = Some(crate::utils::datetime::now_iso());
+            }
+        }
         current.last_error = failure;
         if let Ok(outcome) = &result {
             if outcome.errors.is_empty() && outcome.manual_conflicts == 0 {
@@ -218,6 +254,8 @@ async fn sync_cycle(
             options.branch
         );
     }
+    ensure_no_user_operation(&repo, options)?;
+    crate::git::attributes::ensure_filters_supported(repo_root)?;
     crate::review::cleanup_locked(repo_root, lock)?;
     let mut outcome = SyncOutcome::default();
 
@@ -228,19 +266,25 @@ async fn sync_cycle(
         *stage = "merge";
         if repo.merge_in_progress() {
             let unresolved = repo.list_conflicted_paths()?;
+            // Stored proposals must block every automatic resolution mode,
+            // including keep-both after a configuration change.
+            *stage = "ai_resolution";
+            if crate::review::prepare_locked(
+                repo_root,
+                options.review_ai_resolutions,
+                resolver,
+                lock,
+            )
+            .await?
+            {
+                record_review_pause(&unresolved, &mut outcome, stage, logger);
+                return Ok(outcome);
+            }
+            *stage = "merge";
+            let unresolved =
+                keep_both_notes(&repo, unresolved, options.keep_both, &mut outcome, logger);
             if !unresolved.is_empty() {
                 *stage = "ai_resolution";
-                if crate::review::prepare_locked(
-                    repo_root,
-                    options.review_ai_resolutions,
-                    resolver,
-                    lock,
-                )
-                .await?
-                {
-                    outcome.manual_conflicts = unresolved.len() as u32;
-                    return Ok(outcome);
-                }
                 match resolver {
                     Some(resolver) => {
                         if let Err(error) =
@@ -273,7 +317,8 @@ async fn sync_cycle(
                     }
                 }
             } else {
-                // Markers already resolved by the user: complete the merge.
+                // Markers already resolved by the user or the keep-both
+                // pass: complete the merge.
                 repo.finalize_merge_commit_on_branch(None, &options.branch)?;
             }
         }
@@ -358,42 +403,52 @@ async fn sync_cycle(
                 )
                 .await?
                 {
-                    outcome.manual_conflicts = conflicted.len() as u32;
+                    record_review_pause(&conflicted, &mut outcome, stage, logger);
                     return Ok(outcome);
                 }
-                match resolver {
-                    Some(r) => {
-                        match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger)
-                            .await
-                        {
-                            Ok(()) => {
-                                outcome.conflicts_resolved += conflicted.len() as u32;
-                                *stage = "merge";
-                                repo.finalize_merge_commit_on_branch(None, &options.branch)?;
-                                outcome.pulled += behind;
-                            }
-                            Err(e) => {
-                                record_resolver_failure(
-                                    &repo,
-                                    &conflicted,
-                                    &mut outcome,
-                                    &e,
-                                    logger,
-                                )?;
-                                return Ok(outcome);
+                *stage = "merge";
+                let conflicted =
+                    keep_both_notes(&repo, conflicted, options.keep_both, &mut outcome, logger);
+                if conflicted.is_empty() {
+                    repo.finalize_merge_commit_on_branch(None, &options.branch)?;
+                    outcome.pulled += behind;
+                    // Fall through to push below.
+                } else {
+                    *stage = "ai_resolution";
+                    match resolver {
+                        Some(r) => {
+                            match resolve_conflicts_inner(&repo, repo_root, &conflicted, r, logger)
+                                .await
+                            {
+                                Ok(()) => {
+                                    outcome.conflicts_resolved += conflicted.len() as u32;
+                                    *stage = "merge";
+                                    repo.finalize_merge_commit_on_branch(None, &options.branch)?;
+                                    outcome.pulled += behind;
+                                }
+                                Err(e) => {
+                                    record_resolver_failure(
+                                        &repo,
+                                        &conflicted,
+                                        &mut outcome,
+                                        &e,
+                                        logger,
+                                    )?;
+                                    return Ok(outcome);
+                                }
                             }
                         }
-                    }
-                    None => {
-                        outcome.manual_conflicts += conflicted.len() as u32;
-                        let msg = format!(
-                            "{} conflict(s) need manual resolution: {}",
-                            conflicted.len(),
-                            conflicted.join(", ")
-                        );
-                        let _ = logger.warn(&msg);
-                        outcome.errors.push(msg);
-                        return Ok(outcome);
+                        None => {
+                            outcome.manual_conflicts += conflicted.len() as u32;
+                            let msg = format!(
+                                "{} conflict(s) need manual resolution: {}",
+                                conflicted.len(),
+                                conflicted.join(", ")
+                            );
+                            let _ = logger.warn(&msg);
+                            outcome.errors.push(msg);
+                            return Ok(outcome);
+                        }
                     }
                 }
             }
@@ -443,12 +498,120 @@ async fn sync_cycle(
     Ok(outcome)
 }
 
+/// Refuse to touch a repository in the middle of a git operation the user
+/// started. Staging would commit its conflict markers, and step 0 would
+/// finish (and in `both` mode, auto-resolve) a merge that is not ours.
+/// Only a merge of the configured remote branch, which sync itself starts,
+/// is recovered.
+fn ensure_no_user_operation(repo: &GitRepo, options: &SyncOptions) -> Result<()> {
+    use git2::RepositoryState;
+    let operation = match repo.repository_state() {
+        RepositoryState::Clean => {
+            let conflicted = repo.list_conflicted_paths()?;
+            if conflicted.is_empty() {
+                return Ok(());
+            }
+            anyhow::bail!(
+                "Cannot sync: the index has unresolved conflicts left by a git command ({}). Resolve them (see `git status`) or undo that command, then retry.",
+                conflicted.join(", ")
+            );
+        }
+        RepositoryState::Merge => {
+            if repo.merge_head_is_from_remote(&options.remote, &options.branch)? {
+                return Ok(());
+            }
+            anyhow::bail!(
+                "Cannot sync: a merge you started is in progress. Finish it with `git commit` or cancel it with `git merge --abort`, then retry."
+            );
+        }
+        RepositoryState::Revert | RepositoryState::RevertSequence => "revert",
+        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => "cherry-pick",
+        RepositoryState::Bisect => "bisect",
+        RepositoryState::Rebase
+        | RepositoryState::RebaseInteractive
+        | RepositoryState::RebaseMerge => "rebase",
+        RepositoryState::ApplyMailbox => "am",
+        RepositoryState::ApplyMailboxOrRebase => "am or rebase",
+    };
+    anyhow::bail!(
+        "Cannot sync: a git {operation} is in progress. Finish it or abort it (for example `git {operation} --abort`), then retry."
+    )
+}
+
 fn is_non_fast_forward_push(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
             .downcast_ref::<git2::Error>()
             .is_some_and(|error| error.code() == git2::ErrorCode::NotFastForward)
     })
+}
+
+/// Notes eligible for `both` mode. Structured files such as JSON or YAML
+/// would be corrupted by keeping two versions, so they fall back to manual.
+fn is_note_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    [".md", ".markdown", ".txt"]
+        .iter()
+        .any(|extension| lower.ends_with(extension))
+}
+
+/// In `both` mode, resolve conflicting notes by keeping both versions
+/// without markers (see `GitRepo::try_resolve_both`). Returns the paths that
+/// still need the configured resolver or the user. A failure on one path
+/// leaves it for those later steps instead of failing the cycle.
+fn keep_both_notes(
+    repo: &GitRepo,
+    paths: Vec<String>,
+    enabled: bool,
+    outcome: &mut SyncOutcome,
+    logger: &dyn Logger,
+) -> Vec<String> {
+    if !enabled {
+        return paths;
+    }
+    let mut remaining = Vec::new();
+    for path in paths {
+        if !is_note_path(&path) {
+            remaining.push(path);
+            continue;
+        }
+        match repo.try_resolve_both(&path) {
+            Ok(true) => {
+                let _ = logger.warn(&format!(
+                    "Kept both versions in {path}; delete the one you don't want"
+                ));
+                outcome.kept_both.push(path);
+            }
+            Ok(false) => remaining.push(path),
+            Err(error) => {
+                let _ = logger.warn(&format!(
+                    "Keeping both versions of {path} failed ({error:#}); leaving it for manual resolution"
+                ));
+                remaining.push(path);
+            }
+        }
+    }
+    remaining
+}
+
+/// Sync stopped because conflicts wait for a stored AI proposal to be
+/// reviewed. Record it as the cycle's error (stage `review`) so `state.toml`,
+/// `status`, and the exit code say why nothing was merged or pushed.
+fn record_review_pause(
+    conflicted: &[String],
+    outcome: &mut SyncOutcome,
+    stage: &mut &'static str,
+    logger: &dyn Logger,
+) {
+    *stage = "review";
+    outcome.manual_conflicts = conflicted.len() as u32;
+    let msg = format!(
+        "{} conflict(s) await review of an AI proposal: {}. Accept, edit, or reject them on the web dashboard's Conflicts page; sync resumes after that.",
+        conflicted.len(),
+        conflicted.join(", ")
+    );
+    let _ = logger.warn(&msg);
+    outcome.errors.push(msg);
 }
 
 fn record_resolver_failure(

@@ -17,7 +17,27 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::path::Path;
 
+use crate::config::values::ANY_AGENT_ORDER;
+use crate::config::{Agent, CommitAgent, CommitMode};
 use crate::git::ChangesSummary;
+
+/// Provider keys to try, in order, for a commit message.
+///
+/// `timestamp` skips the AI CLIs entirely and uses only the deterministic
+/// `fallback` provider. `ai` tries the configured agent (or, for `any`,
+/// every agent in `ANY_AGENT_ORDER`), then the fallback.
+pub fn commit_provider_keys(mode: CommitMode, agent: CommitAgent) -> Vec<String> {
+    let agents: Vec<Agent> = match (mode, agent.agent()) {
+        (CommitMode::Timestamp, _) => Vec::new(),
+        (CommitMode::Ai, Some(agent)) => vec![agent],
+        (CommitMode::Ai, None) => ANY_AGENT_ORDER.to_vec(),
+    };
+    agents
+        .into_iter()
+        .map(|agent| agent.commit_provider_key().to_string())
+        .chain(std::iter::once("fallback".to_string()))
+        .collect()
+}
 
 /// Trait for AI-powered commit message generation.
 #[async_trait]
@@ -42,6 +62,9 @@ pub struct ProviderChain {
 
 impl ProviderChain {
     /// Build the default provider chain.
+    // On mobile only the fallback is pushed, which clippy would rather see as
+    // a `vec![]` literal; desktop pushes the AI providers first.
+    #[allow(clippy::vec_init_then_push)]
     pub fn new() -> Self {
         #[allow(unused_mut)]
         let mut providers: Vec<Box<dyn CommitMessageProvider>> = Vec::new();
@@ -50,6 +73,8 @@ impl ProviderChain {
             providers.push(Box::new(copilot::CopilotProvider));
             providers.push(Box::new(claude::ClaudeProvider));
             providers.push(Box::new(codex::CodexProvider));
+            providers.push(Box::new(gemini::GeminiProvider));
+            providers.push(Box::new(cursor::CursorProvider));
         }
         providers.push(Box::new(fallback::FallbackProvider));
         Self { providers }
@@ -105,6 +130,37 @@ impl Default for ProviderChain {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Prompt asking an AI CLI for a one-line commit message.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) fn commit_message_prompt(summary: &ChangesSummary, repo_path: &Path) -> String {
+    let diff_summary = crate::git::GitRepo::open(repo_path)
+        .and_then(|r| r.diff_summary())
+        .unwrap_or_default();
+    format!(
+        "Write a single-line git commit message in imperative mood (max 72 chars, no quotes, no markdown, no prefix) describing what changed. Do not describe the diff itself or mention 'staged'/'unstaged'. Files: {}. Changes:\n{}",
+        summary.to_summary_text(),
+        truncate(&diff_summary, 500)
+    )
+}
+
+/// Clean an AI CLI's commit-message output, rejecting empty replies and
+/// narration of the diff so the chain falls through to the next provider.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) fn finish_commit_message(output: &std::process::Output, cli: &str) -> Result<String> {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("{cli} failed: {}", stderr.trim());
+    }
+    let msg = clean_message(&String::from_utf8_lossy(&output.stdout));
+    if msg.is_empty() {
+        anyhow::bail!("Empty response from {cli}");
+    }
+    if looks_like_diff_narration(&msg) {
+        anyhow::bail!("{cli} returned diff narration, not a commit message");
+    }
+    Ok(msg)
 }
 
 /// Truncate a string to max_len, appending "..." if truncated.
@@ -178,150 +234,37 @@ pub(crate) fn clean_message(raw: &str) -> String {
     msg
 }
 
-/// Wait for a child process with a timeout, draining stdout and stderr on
-/// separate threads so a child that fills the pipe buffer cannot deadlock the
-/// parent (the previous per-provider version read the pipes only after the
-/// child exited, which hung on output larger than the ~64 KB pipe buffer).
-///
-/// All resolver/provider callers run inside `spawn_blocking`, so the blocking
-/// reader threads are fine.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub(crate) fn wait_with_timeout(
-    mut child: std::process::Child,
-    timeout: std::time::Duration,
-) -> Result<std::process::Output> {
-    use std::io::Read;
-
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
-    let out_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(s) = stdout.as_mut() {
-            let _ = s.read_to_end(&mut buf);
-        }
-        buf
-    });
-    let err_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(s) = stderr.as_mut() {
-            let _ = s.read_to_end(&mut buf);
-        }
-        buf
-    });
-
-    let start = std::time::Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    anyhow::bail!("Process timed out after {:?}", timeout);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            Err(e) => anyhow::bail!("Error waiting for process: {}", e),
-        }
-    };
-
-    let stdout = out_handle.join().unwrap_or_default();
-    let stderr = err_handle.join().unwrap_or_default();
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
-}
-
-/// Run a CLI with bounded, concurrent stdin/stdout/stderr transport. Blocks
-/// the calling thread for up to `timeout`; async callers wrap it in
-/// `spawn_blocking`.
+/// Run a CLI with `prompt` on stdin, bounded by `timeout`. Blocks the
+/// calling thread; async callers wrap it in `spawn_blocking`.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn run_with_prompt(
     command: &mut std::process::Command,
     prompt: &str,
     timeout: std::time::Duration,
 ) -> Result<std::process::Output> {
-    use std::io::{Read, Write};
-    use std::process::Stdio;
-    let start = std::time::Instant::now();
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
+    crate::process::run_bounded(command, Some(prompt.as_bytes()), timeout)
+}
+
+/// `run_with_prompt` for conflict resolvers: fails when the CLI exits before
+/// reading the whole prompt. A CLI that saw only the start of a large
+/// conflict would answer with a merge of that part, which would replace the
+/// whole note.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) fn run_with_full_prompt(
+    command: &mut std::process::Command,
+    prompt: &str,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output> {
+    let program = command.get_program().to_string_lossy().into_owned();
+    let finished =
+        crate::process::run_bounded_tracking_input(command, Some(prompt.as_bytes()), timeout)?;
+    if !finished.input_complete {
+        anyhow::bail!(
+            "{program} exited before reading the whole conflict ({} bytes); its answer could cover only part of the file",
+            prompt.len()
+        );
     }
-    let mut child = command.spawn()?;
-    let mut stdin = child.stdin.take().expect("piped stdin");
-    let mut stdout = child.stdout.take().expect("piped stdout");
-    let mut stderr = child.stderr.take().expect("piped stderr");
-    let bytes = prompt.as_bytes().to_vec();
-    let writer = std::thread::spawn(move || stdin.write_all(&bytes));
-    let out = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stdout.read_to_end(&mut bytes).map(|_| bytes)
-    });
-    let err = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stderr.read_to_end(&mut bytes).map(|_| bytes)
-    });
-    let result = (|| -> Result<std::process::ExitStatus> {
-        let mut status = None;
-        loop {
-            if status.is_none() {
-                status = child.try_wait()?;
-            }
-            if let Some(status) = status {
-                if writer.is_finished() && out.is_finished() && err.is_finished() {
-                    return Ok(status);
-                }
-            }
-            if start.elapsed() >= timeout {
-                anyhow::bail!("Process timed out after {timeout:?}");
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-    })();
-    let status = match result {
-        Ok(status) => status,
-        Err(error) => {
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
-    };
-    let stdout = out
-        .join()
-        .map_err(|_| anyhow::anyhow!("stdout reader panicked"))??;
-    let stderr = err
-        .join()
-        .map_err(|_| anyhow::anyhow!("stderr reader panicked"))??;
-    // The child has exited by now, so a broken pipe only means it stopped
-    // reading before the whole prompt was delivered. Its exit status and
-    // output decide success; any other write failure is still an error.
-    match writer
-        .join()
-        .map_err(|_| anyhow::anyhow!("stdin writer panicked"))?
-    {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
-        Err(error) => {
-            return Err(anyhow::Error::new(error).context("Failed to write prompt to CLI stdin"))
-        }
-    }
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
+    Ok(finished.output)
 }
 
 #[cfg(test)]

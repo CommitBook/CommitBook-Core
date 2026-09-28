@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use commitbook_engine::config::local::LocalConfig;
+use commitbook_engine::config::{CommitMode, ConflictMode};
 use commitbook_engine::cron::{self, SystemScheduler};
 use commitbook_engine::git::{ChangesSummary, GitRepo};
 use commitbook_engine::logger::FileLogger;
@@ -50,20 +51,25 @@ pub struct App {
     pub repo_path: PathBuf,
     pub active_panel: Panel,
     pub running: bool,
+    pub scheduler: cron::SchedulerHealth,
+    pub scheduler_warning: Option<String>,
     pub schedule: String,
     pub schedule_desc: String,
-    pub auto_push: bool,
     pub branch: String,
+    /// `[commit]` and `[conflicts]` as shown in the config panel, e.g.
+    /// `timestamp` or `ai (claude)`.
+    pub commit: String,
+    pub conflicts: String,
+    pub log_keep: String,
     pub last_commit: Option<String>,
     pub log_lines: Vec<LogEntry>,
     pub log_scroll: usize,
     pub providers: Vec<(String, String, bool)>,
     pub changes: ChangesSummary,
     pub current_branch: String,
-    pub enabled: bool,
-    pub log_level: String,
     /// Outcome of the most recent start/stop action, cleared on success.
     pub action_error: Option<String>,
+    pub refreshing: bool,
     pub quit: bool,
 }
 
@@ -86,6 +92,7 @@ impl LogEntry {
 }
 
 impl App {
+    #[cfg(test)]
     pub fn new(repo_path: &Path) -> Self {
         let mut app = Self::blank(repo_path);
         app.refresh();
@@ -102,43 +109,56 @@ impl App {
             repo_path: repo_path.to_path_buf(),
             active_panel: Panel::Status,
             running: false,
+            scheduler: cron::SchedulerHealth::Stopped,
+            scheduler_warning: None,
             schedule: String::new(),
             schedule_desc: String::new(),
-            auto_push: true,
             branch: "main".to_string(),
+            commit: String::new(),
+            conflicts: String::new(),
+            log_keep: String::new(),
             last_commit: None,
             log_lines: Vec::new(),
             log_scroll: 0,
             providers: Vec::new(),
             changes: ChangesSummary::default(),
             current_branch: String::new(),
-            enabled: true,
-            log_level: "info".to_string(),
             action_error: None,
+            refreshing: false,
             quit: false,
         }
     }
 
     pub fn refresh(&mut self) {
         // Fail closed on config errors, including after AI was previously enabled.
-        let mut ai_messages = false;
-        // Load local config
+        let mut provider_keys = Vec::new();
         if let Ok(config) = LocalConfig::load_read_only(&self.repo_path) {
-            ai_messages = config.commit.ai_messages;
-            self.schedule = config.schedule.clone();
-            self.schedule_desc = cron::describe_schedule(&config.schedule);
-            self.auto_push = config.git.auto_push;
+            provider_keys = commitbook_engine::ai::commit_provider_keys(
+                config.commit.mode,
+                config.commit.agent,
+            );
+            provider_keys.retain(|key| key != "fallback");
+            self.schedule = config.sync.schedule.clone();
+            self.schedule_desc = cron::describe_schedule(&config.sync.schedule);
             self.branch = config.git.branch.clone();
-
-            self.enabled = config.enabled;
-            self.log_level = config.logging.level.clone();
+            self.commit = match config.commit.mode {
+                CommitMode::Timestamp => "timestamp".into(),
+                CommitMode::Ai => format!("ai ({})", config.commit.agent),
+            };
+            self.conflicts = match config.conflicts.mode {
+                ConflictMode::Ai | ConflictMode::Review => {
+                    format!("{} ({})", config.conflicts.mode, config.conflicts.agent)
+                }
+                mode => mode.to_string(),
+            };
+            self.log_keep = config.logs.keep.to_string();
         } else {
             self.schedule.clear();
             self.schedule_desc = "Unknown (configuration error)".into();
-            self.auto_push = false;
             self.branch = "unknown".into();
-            self.enabled = false;
-            self.log_level = "unknown".into();
+            self.commit = "unknown".into();
+            self.conflicts = "unknown".into();
+            self.log_keep = "unknown".into();
         }
 
         self.repository_status = Some(commitbook_engine::inspection::RepositoryStatus::read(
@@ -153,7 +173,17 @@ impl App {
         }
 
         // Check scheduler state
-        self.running = cron::is_loaded(&self.repo_path);
+        self.scheduler = cron::health(&self.repo_path);
+        self.running = self.scheduler.is_loaded();
+        self.scheduler_warning = self.scheduler.warning(
+            self.repository_status
+                .as_ref()
+                .and_then(|s| s.schedule.as_deref()),
+            self.repository_status
+                .as_ref()
+                .and_then(|s| s.last_attempt_at.as_deref()),
+            chrono::Utc::now(),
+        );
 
         // Load git info
         if let Ok(repo) = GitRepo::open(&self.repo_path) {
@@ -163,24 +193,46 @@ impl App {
 
         // Load log entries
         {
-            let logger = FileLogger::read_only(&self.repo_path, 30);
+            let logger = FileLogger::read_only(&self.repo_path);
             if let Ok(lines) = logger.read_entries(100, 0) {
                 self.log_lines = lines.iter().filter_map(|l| LogEntry::parse(l)).collect();
             }
         }
 
         self.providers.clear();
-        if !ai_messages {
+        if provider_keys.is_empty() {
             return;
         }
-        // Check provider availability only after opt-in.
+        // Check agent availability only when commit messages use AI.
         let chain = commitbook_engine::ai::ProviderChain::new();
-        let default_keys = vec![
-            "gh-copilot".to_string(),
-            "claude-cli".to_string(),
-            "codex-cli".to_string(),
-        ];
-        self.providers = chain.check_availability(&default_keys);
+        self.providers = chain.check_availability(&provider_keys);
+    }
+
+    /// Apply only repository-derived state from a background refresh. Keep
+    /// panel selection, scroll positions, errors, and quit state on the UI
+    /// thread so a late result cannot undo a key press.
+    fn apply_refresh(&mut self, refreshed: Self) {
+        self.repository_status = refreshed.repository_status;
+        self.last_commit = refreshed.last_commit;
+        self.scheduler = refreshed.scheduler;
+        self.running = refreshed.running;
+        self.scheduler_warning = refreshed.scheduler_warning;
+        self.schedule = refreshed.schedule;
+        self.schedule_desc = refreshed.schedule_desc;
+        self.branch = refreshed.branch;
+        self.commit = refreshed.commit;
+        self.conflicts = refreshed.conflicts;
+        self.log_keep = refreshed.log_keep;
+        self.log_lines = refreshed.log_lines;
+        self.providers = refreshed.providers;
+        self.changes = refreshed.changes;
+        self.current_branch = refreshed.current_branch;
+        if self.preview.is_some() {
+            if let Some(preview) = refreshed.preview {
+                self.preview = Some(preview);
+            }
+        }
+        self.refreshing = false;
     }
 
     pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
@@ -243,26 +295,77 @@ impl App {
         let result = if self.running {
             settings::stop_scheduler(&self.repo_path, &context)
         } else {
-            settings::start_scheduler(&self.repo_path, &context).map(|_| ())
+            settings::start_scheduler(&self.repo_path, &context)
         };
         self.action_error = result.err().map(|error| format!("{error:#}"));
-        self.refresh();
     }
+}
+
+fn start_refresh(repo_path: &Path, include_preview: bool) -> std::thread::JoinHandle<App> {
+    let repo_path = repo_path.to_path_buf();
+    std::thread::spawn(move || {
+        let mut snapshot = App::blank(&repo_path);
+        snapshot.refresh();
+        if include_preview {
+            snapshot.preview = Some(commitbook_engine::inspection::preview(&repo_path));
+        }
+        snapshot
+    })
 }
 
 pub fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     repo_path: &Path,
 ) -> Result<()> {
-    let mut app = App::new(repo_path);
+    let mut app = App::blank(repo_path);
+    let mut refresh_job = Some(start_refresh(repo_path, false));
+    let mut refresh_again = false;
+    app.refreshing = true;
     let mut last_tick = Instant::now();
 
     loop {
+        if refresh_job
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
+            match refresh_job.take().expect("finished refresh job").join() {
+                Ok(refreshed) => app.apply_refresh(refreshed),
+                Err(_) => {
+                    app.refreshing = false;
+                    app.action_error = Some("Background refresh failed".into());
+                }
+            }
+            if refresh_again {
+                refresh_job = Some(start_refresh(repo_path, app.preview.is_some()));
+                app.refreshing = true;
+                refresh_again = false;
+            }
+        }
         terminal.draw(|f| crate::ui::draw(f, &app))?;
 
         if event::poll(POLL_RATE)? {
             if let Event::Key(key) = event::read()? {
-                app.handle_key(key.code, key.modifiers);
+                if key.code == KeyCode::Char('r') {
+                    if refresh_job.is_none() {
+                        refresh_job = Some(start_refresh(repo_path, app.preview.is_some()));
+                        app.refreshing = true;
+                    } else {
+                        refresh_again = true;
+                    }
+                    last_tick = Instant::now();
+                } else {
+                    let toggling_scheduler =
+                        key.code == KeyCode::Char('s') && app.preview.is_none();
+                    app.handle_key(key.code, key.modifiers);
+                    if toggling_scheduler {
+                        if refresh_job.is_none() {
+                            refresh_job = Some(start_refresh(repo_path, false));
+                            app.refreshing = true;
+                        } else {
+                            refresh_again = true;
+                        }
+                    }
+                }
             }
         }
 
@@ -271,7 +374,10 @@ pub fn run(
         }
 
         if last_tick.elapsed() >= TICK_RATE {
-            app.refresh();
+            if refresh_job.is_none() {
+                refresh_job = Some(start_refresh(repo_path, app.preview.is_some()));
+                app.refreshing = true;
+            }
             last_tick = Instant::now();
         }
     }

@@ -173,3 +173,134 @@ fn test_list_presets_content() {
     assert!(presets.contains("daily"));
     assert!(presets.contains("every-2h"));
 }
+
+fn at(ts: &str) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339(ts)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+}
+
+#[test]
+fn test_health_warning_stopped_is_silent() {
+    let warning = SchedulerHealth::Stopped.warning(
+        Some("0 * * * *"),
+        Some("2026-09-09T11:02:31Z"),
+        at("2026-09-24T19:00:00Z"),
+    );
+    assert_eq!(warning, None);
+}
+
+#[test]
+fn test_health_warning_broken_names_reason_and_fix() {
+    let warning = SchedulerHealth::Broken("binary missing: /gone/commitbook".into())
+        .warning(None, None, at("2026-09-24T19:00:00Z"))
+        .unwrap();
+    assert!(warning.contains("binary missing: /gone/commitbook"));
+    assert!(warning.contains("commitbook doctor --fix"));
+}
+
+#[test]
+fn test_health_warning_running_but_stale() {
+    let warning = SchedulerHealth::Running
+        .warning(
+            Some("0 * * * *"),
+            Some("2026-09-09T11:02:31Z"),
+            at("2026-09-24T19:00:00Z"),
+        )
+        .unwrap();
+    assert!(warning.contains("has not run since 2026-09-09T11:02:31Z"));
+    assert!(warning.contains("every hour"));
+}
+
+#[test]
+fn test_health_warning_running_recently_is_silent() {
+    // Hourly: three intervals is the threshold.
+    let now = at("2026-09-24T19:00:00Z");
+    let fresh =
+        SchedulerHealth::Running.warning(Some("0 * * * *"), Some("2026-09-24T16:30:00Z"), now);
+    assert_eq!(fresh, None);
+    let stale =
+        SchedulerHealth::Running.warning(Some("0 * * * *"), Some("2026-09-24T15:30:00Z"), now);
+    assert!(stale.is_some());
+}
+
+#[test]
+fn test_health_warning_short_interval_uses_minimum_threshold() {
+    // Every 5 minutes would be 15 minutes; the floor is 30 minutes.
+    let now = at("2026-09-24T19:00:00Z");
+    let within =
+        SchedulerHealth::Running.warning(Some("*/5 * * * *"), Some("2026-09-24T18:40:00Z"), now);
+    assert_eq!(within, None);
+}
+
+#[test]
+fn test_health_warning_needs_schedule_and_attempt() {
+    let now = at("2026-09-24T19:00:00Z");
+    assert_eq!(
+        SchedulerHealth::Running.warning(None, Some("2026-09-01T00:00:00Z"), now),
+        None
+    );
+    assert_eq!(
+        SchedulerHealth::Running.warning(Some("0 * * * *"), None, now),
+        None
+    );
+    assert_eq!(
+        SchedulerHealth::Running.warning(Some("0 * * * *"), Some("garbage"), now),
+        None
+    );
+}
+
+#[test]
+fn test_health_serializes_with_state_and_reason() {
+    let broken = serde_json::to_value(SchedulerHealth::Broken("x".into())).unwrap();
+    assert_eq!(
+        broken,
+        serde_json::json!({"state": "broken", "reason": "x"})
+    );
+    let running = serde_json::to_value(SchedulerHealth::Running).unwrap();
+    assert_eq!(running, serde_json::json!({"state": "running"}));
+}
+
+#[test]
+fn test_is_transient_binary() {
+    assert!(is_transient_binary(Path::new(
+        "/Users/m/workspaces/rome/target/debug/commitbook"
+    )));
+    assert!(is_transient_binary(Path::new(
+        "/src/cb/target/release/commitbook"
+    )));
+    assert!(!is_transient_binary(Path::new(
+        "/Users/m/.cargo/bin/commitbook"
+    )));
+    assert!(!is_transient_binary(Path::new(
+        "/Users/m/.local/bin/commitbook"
+    )));
+    assert!(!is_transient_binary(Path::new("/opt/target/commitbook")));
+}
+
+#[test]
+fn only_an_existing_absolute_commitbook_binary_can_be_scheduled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cli = tmp.path().join("commitbook");
+    let tui = tmp.path().join("commitbook-tui");
+    std::fs::write(&cli, "").unwrap();
+    std::fs::write(&tui, "").unwrap();
+
+    ensure_scheduler_binary(&cli).unwrap();
+    let error = ensure_scheduler_binary(&tui).unwrap_err();
+    assert!(error.to_string().contains("commitbook-tui"), "{error:#}");
+    assert!(ensure_scheduler_binary(Path::new("commitbook")).is_err());
+    assert!(ensure_scheduler_binary(&tmp.path().join("missing/commitbook")).is_err());
+}
+
+#[test]
+fn install_refuses_a_non_cli_binary_before_touching_the_scheduler() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tui = tmp.path().join("commitbook-tui");
+    std::fs::write(&tui, "").unwrap();
+    let error = install(tmp.path(), "1h", &tui).unwrap_err();
+    assert!(
+        error.to_string().contains("must run the `commitbook` CLI"),
+        "{error:#}"
+    );
+}

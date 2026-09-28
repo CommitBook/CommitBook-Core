@@ -100,7 +100,20 @@ fn setup_with_state() -> (RepoFixture, FileLogger) {
         ".CommitBook/local/\n",
     )
     .unwrap();
-    let logger = FileLogger::new(fx.repo_dir.path(), 30).unwrap();
+    // Commit and publish the ignore file `init` writes, since sync restores it
+    // when it is missing.
+    LocalConfig::ensure_gitignore(fx.repo_dir.path()).unwrap();
+    fx.repo
+        .stage_paths(&[".CommitBook/.gitignore".to_string()])
+        .unwrap();
+    fx.repo.commit("add .CommitBook/.gitignore").unwrap();
+    let pushed = std::process::Command::new("git")
+        .args(["push", "-q", "origin", &fx.branch])
+        .current_dir(fx.repo_dir.path())
+        .output()
+        .unwrap();
+    assert!(pushed.status.success());
+    let logger = FileLogger::new(fx.repo_dir.path(), crate::config::LogKeep::Days(30)).unwrap();
     (fx, logger)
 }
 
@@ -914,7 +927,7 @@ async fn first_sync_against_empty_remote_bootstraps_branch() {
         ".CommitBook/local/\n",
     )
     .unwrap();
-    let logger = FileLogger::new(repo_dir.path(), 30).unwrap();
+    let logger = FileLogger::new(repo_dir.path(), crate::config::LogKeep::Days(30)).unwrap();
 
     let outcome = sync_with_resolver(
         repo_dir.path(),
@@ -978,10 +991,9 @@ async fn default_commit_message_uses_writing_timestamp() {
 }
 
 fn record_pending_metadata(fx: &RepoFixture) -> String {
-    let mut config = crate::config::LocalConfig::new("0 * * * *");
-    config.git.branch = fx.branch.clone();
-    config.git.remote = "origin".to_string();
-    config.save(fx.repo_dir.path()).unwrap();
+    crate::config::LocalConfig::new("notes", &fx.branch, "origin")
+        .save(fx.repo_dir.path())
+        .unwrap();
     crate::config::LocalConfig::ensure_gitignore(fx.repo_dir.path()).unwrap();
     fx.repo
         .commit_selected_paths_on_branch(
@@ -1213,26 +1225,33 @@ async fn ai_resolution_then_finalize_failure_is_still_labeled_merge() {
 }
 
 #[tokio::test]
-async fn malformed_state_is_preserved_before_mutation_and_commit_failure_is_recorded() {
+async fn malformed_state_is_quarantined_and_commit_failure_is_recorded() {
     let (fx, logger) = setup_with_state();
     let root = fx.repo_dir.path();
     let path = cb_dir_of(&fx).join("local/state.toml");
     std::fs::write(&path, "broken = [").unwrap();
     let head = fx.repo.rev_parse("HEAD").unwrap();
     std::fs::write(root.join("note.md"), "new text").unwrap();
-    assert!(sync_with_resolver(
+    // A corrupt state file no longer stops sync; its content is kept aside.
+    let outcome = sync_with_resolver(
         root,
         &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
         &logger,
-        None
+        None,
     )
     .await
-    .is_err());
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "broken = [");
-    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
-    std::fs::remove_file(&path).unwrap();
+    .unwrap();
+    assert!(outcome.committed, "{outcome:?}");
+    assert_ne!(fx.repo.rev_parse("HEAD").unwrap(), head);
+    assert_eq!(
+        std::fs::read_to_string(cb_dir_of(&fx).join("local/state.toml.corrupt")).unwrap(),
+        "broken = ["
+    );
+    let fresh = SyncState::load(&cb_dir_of(&fx)).unwrap();
+    assert!(fresh.last_sync_at.is_some());
+    std::fs::write(root.join("note.md"), "newer text").unwrap();
     // Unsupported signing format fails before invoking any external signing program.
     let raw = git2::Repository::open(root).unwrap();
     let mut config = raw.config().unwrap();
@@ -1253,4 +1272,489 @@ async fn malformed_state_is_preserved_before_mutation_and_commit_failure_is_reco
     let saved = SyncState::load(&cb_dir_of(&fx)).unwrap();
     assert_eq!(saved.last_error_stage.as_deref(), Some("commit"));
     assert!(saved.last_error.is_some());
+}
+
+/// Commit and push `base` for each file, then leave `local` edits
+/// uncommitted and push `remote` edits from a second clone.
+fn diverge_files(fx: &RepoFixture, files: &[(&str, &str, &str, &str)]) {
+    for (path, base, _, _) in files {
+        std::fs::write(fx.repo_dir.path().join(path), base).unwrap();
+    }
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("add shared").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    for (path, _, local, remote) in files {
+        std::fs::write(fx.repo_dir.path().join(path), local).unwrap();
+        std::fs::write(other.path().join(path), remote).unwrap();
+    }
+    let other_repo = GitRepo::open(other.path()).unwrap();
+    other_repo.stage_all().unwrap();
+    other_repo.commit("remote edits").unwrap();
+    other_repo.push("origin", &fx.branch).unwrap();
+}
+
+const APPEND_BASE: &str = "# Notes\n\n- first\n";
+const APPEND_LOCAL: &str = "# Notes\n\n- first\n- local idea\n";
+const APPEND_REMOTE: &str = "# Notes\n\n- first\n- remote idea\n";
+
+fn options_with_keep_both(fx: &RepoFixture, enabled: bool) -> SyncOptions {
+    let mut options = SyncOptions::new("origin", &fx.branch, true);
+    options.keep_both = enabled;
+    options
+}
+
+fn remote_tip(fx: &RepoFixture) -> String {
+    fx.repo.fetch("origin", &fx.branch).unwrap();
+    fx.repo.rev_parse(&format!("origin/{}", fx.branch)).unwrap()
+}
+
+async fn sync_keep_both(fx: &RepoFixture, logger: &FileLogger, enabled: bool) -> SyncOutcome {
+    sync_with_resolver(
+        fx.repo_dir.path(),
+        &options_with_keep_both(fx, enabled),
+        None,
+        &SystemCredentials,
+        logger,
+        None,
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn both_mode_keeps_both_versions_of_an_edited_line_and_pushes() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[(
+            "notes.md",
+            "intro\nMeeting at 3pm\n",
+            "intro\nMeeting at 4pm\n",
+            "intro\nMeeting at 5pm\n",
+        )],
+    );
+
+    let outcome = sync_keep_both(&fx, &logger, true).await;
+
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert_eq!(outcome.kept_both, vec!["notes.md"]);
+    assert_eq!(outcome.manual_conflicts, 0);
+    assert!(!fx.repo.merge_in_progress());
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_dir.path().join("notes.md")).unwrap(),
+        "intro\nMeeting at 4pm\nMeeting at 5pm\n"
+    );
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), remote_tip(&fx));
+    let state = SyncState::load(&cb_dir_of(&fx)).unwrap();
+    assert!(state.last_error.is_none());
+    assert!(state.last_sync_at.is_some());
+    assert_eq!(state.kept_both_paths, vec!["notes.md"]);
+    assert!(state.kept_both_at.is_some());
+}
+
+#[tokio::test]
+async fn both_mode_keeps_both_additions() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
+    );
+
+    let outcome = sync_keep_both(&fx, &logger, true).await;
+
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert_eq!(outcome.kept_both, vec!["notes.md"]);
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_dir.path().join("notes.md")).unwrap(),
+        "# Notes\n\n- first\n- local idea\n- remote idea\n"
+    );
+}
+
+#[tokio::test]
+async fn manual_mode_leaves_markers_even_for_additions() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
+    );
+
+    let outcome = sync_keep_both(&fx, &logger, false).await;
+
+    assert!(outcome.kept_both.is_empty());
+    assert_eq!(outcome.manual_conflicts, 1);
+    assert!(fx.repo.merge_in_progress());
+}
+
+#[tokio::test]
+async fn both_mode_leaves_structured_files_for_manual_resolution() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[
+            ("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE),
+            (
+                "settings.json",
+                "{\"a\": 1}\n",
+                "{\"a\": 2}\n",
+                "{\"a\": 3}\n",
+            ),
+        ],
+    );
+
+    let outcome = sync_keep_both(&fx, &logger, true).await;
+
+    assert_eq!(outcome.kept_both, vec!["notes.md"]);
+    assert_eq!(outcome.manual_conflicts, 1);
+    assert!(outcome.errors[0].contains("settings.json"), "{outcome:?}");
+    assert!(fx.repo.merge_in_progress());
+    assert_eq!(
+        fx.repo.list_conflicted_paths().unwrap(),
+        vec!["settings.json"]
+    );
+}
+
+#[tokio::test]
+async fn preserved_merge_is_completed_by_both_mode_on_next_cycle() {
+    let (fx, logger) = setup_with_state();
+    diverge_files(
+        &fx,
+        &[("notes.md", APPEND_BASE, APPEND_LOCAL, APPEND_REMOTE)],
+    );
+    let first = sync_keep_both(&fx, &logger, false).await;
+    assert_eq!(first.manual_conflicts, 1);
+
+    let second = sync_keep_both(&fx, &logger, true).await;
+
+    assert!(second.errors.is_empty(), "{second:?}");
+    assert_eq!(second.kept_both, vec!["notes.md"]);
+    assert!(!fx.repo.merge_in_progress());
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), remote_tip(&fx));
+}
+
+#[tokio::test]
+async fn config_driven_sync_registers_devices_that_every_clone_can_see() {
+    let (fx, _) = setup_with_state();
+    let config = crate::config::LocalConfig::new("notes", &fx.branch, "origin");
+    config.save(fx.repo_dir.path()).unwrap();
+    crate::config::LocalConfig::ensure_gitignore(fx.repo_dir.path()).unwrap();
+    fx.repo.stage_all().unwrap();
+    fx.repo.commit("config").unwrap();
+    fx.repo.push("origin", &fx.branch).unwrap();
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    std::fs::create_dir_all(other.path().join(".CommitBook/local/logs")).unwrap();
+
+    for root in [fx.repo_dir.path(), other.path(), fx.repo_dir.path()] {
+        let logger = FileLogger::new(root, crate::config::LogKeep::Days(30)).unwrap();
+        let outcome = sync_repository(root, &config, &logger, None).await.unwrap();
+        assert!(outcome.errors.is_empty(), "{outcome:?}");
+    }
+
+    for root in [fx.repo_dir.path(), other.path()] {
+        let (devices, warnings) = crate::devices::list(root).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(devices.len(), 2, "{devices:?}");
+        assert_eq!(devices.iter().filter(|d| d.this_device).count(), 1);
+    }
+}
+
+/// Run git in `dir` with a fixed identity; returns whether it succeeded so
+/// commands expected to stop on a conflict can be run too.
+fn git_in(dir: &Path, args: &[&str]) -> bool {
+    std::process::Command::new("git")
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap()
+        .status
+        .success()
+}
+
+/// Commit `content` to `notes.md` on the checked-out branch.
+fn commit_notes(fx: &RepoFixture, content: &str, message: &str) {
+    std::fs::write(fx.repo_dir.path().join("notes.md"), content).unwrap();
+    assert!(git_in(fx.repo_dir.path(), &["add", "notes.md"]));
+    assert!(git_in(fx.repo_dir.path(), &["commit", "-q", "-m", message]));
+}
+
+/// Sync with `both` mode on, as the default config does.
+async fn try_sync_keep_both(fx: &RepoFixture, logger: &FileLogger) -> Result<SyncOutcome> {
+    let mut options = SyncOptions::new("origin", &fx.branch, true);
+    options.keep_both = true;
+    sync_with_resolver(
+        fx.repo_dir.path(),
+        &options,
+        None,
+        &SystemCredentials,
+        logger,
+        None,
+    )
+    .await
+}
+
+fn remote_branch_oid(fx: &RepoFixture) -> git2::Oid {
+    git2::Repository::open_bare(fx.remote_dir.path())
+        .unwrap()
+        .refname_to_id(&format!("refs/heads/{}", fx.branch))
+        .unwrap()
+}
+
+/// Assert sync refused with `expected` in the error and changed nothing:
+/// HEAD, the remote, and the conflicted file's markers are untouched.
+async fn assert_refused(fx: &RepoFixture, logger: &FileLogger, expected: &str) {
+    let head = fx.repo.rev_parse("HEAD").unwrap();
+    let remote = remote_branch_oid(fx);
+    let before = std::fs::read_to_string(fx.repo_dir.path().join("notes.md")).unwrap();
+    let error = try_sync_keep_both(fx, logger).await.unwrap_err();
+    assert!(format!("{error:#}").contains(expected), "{error:#}");
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
+    assert_eq!(remote_branch_oid(fx), remote);
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_dir.path().join("notes.md")).unwrap(),
+        before
+    );
+}
+
+#[tokio::test]
+async fn conflicted_stash_pop_is_not_committed() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "base\n", "base");
+    std::fs::write(fx.repo_dir.path().join("notes.md"), "stashed\n").unwrap();
+    assert!(git_in(fx.repo_dir.path(), &["stash", "-q"]));
+    commit_notes(&fx, "committed\n", "diverge");
+    assert!(!git_in(fx.repo_dir.path(), &["stash", "pop", "-q"]));
+    assert_eq!(fx.repo.repository_state(), git2::RepositoryState::Clean);
+
+    assert_refused(&fx, &logger, "unresolved conflicts left by a git command").await;
+    assert!(std::fs::read_to_string(fx.repo_dir.path().join("notes.md"))
+        .unwrap()
+        .contains("<<<<<<<"));
+}
+
+#[tokio::test]
+async fn conflicted_cherry_pick_is_not_committed() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "base\n", "base");
+    assert!(git_in(
+        fx.repo_dir.path(),
+        &["checkout", "-q", "-b", "side"]
+    ));
+    commit_notes(&fx, "side\n", "side edit");
+    let side = fx.repo.rev_parse("HEAD").unwrap();
+    assert!(git_in(fx.repo_dir.path(), &["checkout", "-q", &fx.branch]));
+    commit_notes(&fx, "main\n", "main edit");
+    assert!(!git_in(fx.repo_dir.path(), &["cherry-pick", &side]));
+
+    assert_refused(&fx, &logger, "git cherry-pick is in progress").await;
+}
+
+#[tokio::test]
+async fn conflicted_revert_is_not_committed() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "one\n", "one");
+    let first = fx.repo.rev_parse("HEAD").unwrap();
+    commit_notes(&fx, "two\n", "two");
+    assert!(!git_in(
+        fx.repo_dir.path(),
+        &["revert", "--no-edit", &first]
+    ));
+
+    assert_refused(&fx, &logger, "git revert is in progress").await;
+}
+
+#[tokio::test]
+async fn a_merge_the_user_started_is_left_alone() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "base\n", "base");
+    assert!(git_in(
+        fx.repo_dir.path(),
+        &["checkout", "-q", "-b", "drafts"]
+    ));
+    std::fs::write(fx.repo_dir.path().join("draft.md"), "draft\n").unwrap();
+    assert!(git_in(fx.repo_dir.path(), &["add", "draft.md"]));
+    assert!(git_in(fx.repo_dir.path(), &["commit", "-q", "-m", "draft"]));
+    assert!(git_in(fx.repo_dir.path(), &["checkout", "-q", &fx.branch]));
+    assert!(git_in(
+        fx.repo_dir.path(),
+        &["merge", "--no-commit", "--no-ff", "drafts"]
+    ));
+    assert!(fx.repo.merge_in_progress());
+
+    assert_refused(&fx, &logger, "a merge you started is in progress").await;
+    assert!(fx.repo.merge_in_progress());
+}
+
+#[tokio::test]
+async fn a_conflicted_user_merge_is_not_kept_both_in_both_mode() {
+    let (fx, logger) = setup_with_state();
+    commit_notes(&fx, "base\n", "base");
+    assert!(git_in(
+        fx.repo_dir.path(),
+        &["checkout", "-q", "-b", "drafts"]
+    ));
+    commit_notes(&fx, "draft version\n", "draft");
+    assert!(git_in(fx.repo_dir.path(), &["checkout", "-q", &fx.branch]));
+    commit_notes(&fx, "main version\n", "main");
+    assert!(!git_in(fx.repo_dir.path(), &["merge", "drafts"]));
+
+    assert_refused(&fx, &logger, "a merge you started is in progress").await;
+    assert!(std::fs::read_to_string(fx.repo_dir.path().join("notes.md"))
+        .unwrap()
+        .contains("<<<<<<<"));
+}
+
+#[tokio::test]
+async fn sync_never_pushes_local_state_when_its_ignore_rule_is_gone() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    // Drop every rule that ignores .CommitBook/local/, as a merge could.
+    std::fs::write(root.join(".git/info/exclude"), "").unwrap();
+    std::fs::write(
+        root.join(".CommitBook/.gitignore"),
+        "# emptied by a merge\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".CommitBook/local/auth.toml"),
+        "[auth]\ntoken = \"ghp_secret\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("note.md"), "hello\n").unwrap();
+
+    let outcome = sync_with_resolver(
+        root,
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+
+    let remote = git2::Repository::open_bare(fx.remote_dir.path()).unwrap();
+    let tree = remote
+        .find_reference(&format!("refs/heads/{}", fx.branch))
+        .unwrap()
+        .peel_to_tree()
+        .unwrap();
+    assert!(tree.get_path(Path::new("note.md")).is_ok());
+    assert!(tree.get_path(Path::new(".CommitBook/local")).is_err());
+    // The ignore rule is restored and published for the other devices.
+    let ignore = tree.get_path(Path::new(".CommitBook/.gitignore")).unwrap();
+    let text = remote.find_blob(ignore.id()).unwrap().content().to_vec();
+    assert!(String::from_utf8(text).unwrap().contains("/local/"));
+}
+
+#[tokio::test]
+async fn sync_refuses_a_repository_with_a_git_crypt_filter() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    std::fs::write(root.join(".gitattributes"), "secret.md filter=git-crypt\n").unwrap();
+    std::fs::write(root.join("secret.md"), "plaintext api key\n").unwrap();
+    let head = fx.repo.rev_parse("HEAD").unwrap();
+    let remote = remote_branch_oid(&fx);
+
+    let error = sync_with_resolver(
+        root,
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("filter=git-crypt"),
+        "{error:#}"
+    );
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
+    assert_eq!(remote_branch_oid(&fx), remote);
+}
+
+#[tokio::test]
+async fn both_mode_preserves_pending_rejected_and_stale_reviews() {
+    for proposal_state in ["pending", "rejected", "stale"] {
+        let (fx, logger) = setup_with_state();
+        let root = fx.repo_dir.path();
+        let mut config = LocalConfig::new("notes", &fx.branch, "origin");
+        config.conflicts.mode = ConflictMode::Review;
+        config.save(root).unwrap();
+        diverge_files(&fx, &[("notes.md", "base\n", "local\n", "remote\n")]);
+        let mut options = SyncOptions::new("origin", &fx.branch, true);
+        options.review_ai_resolutions = true;
+        // Review must win even if a caller enables both options, including
+        // when the merge has just created the conflicts.
+        options.keep_both = true;
+        let resolver = MockResolver::ok("proposal\n");
+        let first = sync_with_resolver(
+            root,
+            &options,
+            Some(&resolver),
+            &SystemCredentials,
+            &logger,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.manual_conflicts, 1);
+        assert!(first.kept_both.is_empty());
+        assert_eq!(first.pushed, 0);
+        let view = crate::review::list(root).unwrap().remove(0);
+        assert!(view.proposal.is_some());
+        match proposal_state {
+            "rejected" => {
+                crate::review::proposal_action(
+                    root,
+                    &crate::review::ResolutionInput {
+                        path: view.path,
+                        revision: view.revision,
+                        proposal_version: view.proposal_version,
+                        action: "reject".into(),
+                        content: None,
+                    },
+                )
+                .await
+                .unwrap();
+                assert!(
+                    crate::review::list(root).unwrap()[0]
+                        .proposal
+                        .as_ref()
+                        .unwrap()
+                        .rejected
+                );
+            }
+            "stale" => {
+                std::fs::write(root.join("notes.md"), "user's in-progress resolution\n").unwrap();
+                assert!(crate::review::list(root).unwrap()[0].proposal_stale);
+            }
+            _ => {}
+        }
+        config.conflicts.mode = ConflictMode::Both;
+        config.save(root).unwrap();
+        let before = std::fs::read(root.join("notes.md")).unwrap();
+        let head = fx.repo.rev_parse("HEAD").unwrap();
+        let remote = remote_branch_oid(&fx);
+        let proposals_path = LocalConfig::local_dir(root).join("conflict-proposals.toml");
+        let proposals = std::fs::read(&proposals_path).unwrap();
+        let second = sync_repository(root, &config, &logger, None).await.unwrap();
+        assert_eq!(second.manual_conflicts, 1, "{proposal_state}: {second:?}");
+        assert!(!second.committed);
+        assert_eq!(second.pushed, 0);
+        assert!(second.kept_both.is_empty());
+        assert_eq!(std::fs::read(root.join("notes.md")).unwrap(), before);
+        assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
+        assert_eq!(remote_branch_oid(&fx), remote);
+        assert_eq!(std::fs::read(proposals_path).unwrap(), proposals);
+        assert_eq!(fx.repo.list_conflicted_paths().unwrap(), ["notes.md"]);
+        assert!(fx.repo.merge_in_progress());
+        let state = SyncState::load(&cb_dir_of(&fx)).unwrap();
+        assert_eq!(state.last_error_stage.as_deref(), Some("review"));
+        assert!(state.last_error.unwrap().contains("await review"));
+    }
 }

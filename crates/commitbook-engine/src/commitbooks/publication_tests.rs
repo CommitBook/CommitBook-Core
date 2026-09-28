@@ -8,10 +8,9 @@ const MESSAGE: &str = "Initialize CommitBook";
 /// Working repo with a bare remote and uncommitted `.CommitBook` metadata.
 fn seeded() -> RepoFixture {
     let fx = setup_repo_with_bare_remote();
-    let mut config = LocalConfig::new("0 * * * *");
-    config.git.branch = fx.branch.clone();
-    config.git.remote = "origin".to_string();
-    config.save(fx.repo_dir.path()).unwrap();
+    LocalConfig::new("notes", &fx.branch, "origin")
+        .save(fx.repo_dir.path())
+        .unwrap();
     LocalConfig::ensure_gitignore(fx.repo_dir.path()).unwrap();
     fx
 }
@@ -27,15 +26,8 @@ fn state_of(fx: &RepoFixture) -> SyncState {
     SyncState::load(&LocalConfig::commitbook_dir(fx.repo_dir.path())).unwrap()
 }
 
-fn publish(fx: &RepoFixture, auto_push: bool) -> Result<Publication, PublicationError> {
-    publish_metadata(
-        &fx.repo,
-        "origin",
-        &fx.branch,
-        MESSAGE,
-        auto_push,
-        &SystemCredentials,
-    )
+fn publish(fx: &RepoFixture) -> Result<Publication, PublicationError> {
+    publish_metadata(&fx.repo, "origin", &fx.branch, MESSAGE, &SystemCredentials)
 }
 
 #[test]
@@ -43,7 +35,7 @@ fn first_publish_commits_pushes_and_clears_pending() {
     let fx = seeded();
     let before = fx.repo.rev_parse("HEAD").unwrap();
 
-    assert_eq!(publish(&fx, true).unwrap(), Publication::Pushed);
+    assert_eq!(publish(&fx).unwrap(), Publication::Pushed);
 
     let head = fx.repo.rev_parse("HEAD").unwrap();
     assert_ne!(head, before);
@@ -63,7 +55,7 @@ fn first_publish_commits_pushes_and_clears_pending() {
 #[test]
 fn no_op_when_nothing_to_commit_and_nothing_pending_does_not_touch_remote() {
     let fx = seeded();
-    publish(&fx, true).unwrap();
+    publish(&fx).unwrap();
     let head = fx.repo.rev_parse("HEAD").unwrap();
     git2::Repository::open(fx.repo_dir.path())
         .unwrap()
@@ -71,7 +63,7 @@ fn no_op_when_nothing_to_commit_and_nothing_pending_does_not_touch_remote() {
         .unwrap();
     let attempts = push_attempts();
 
-    assert_eq!(publish(&fx, true).unwrap(), Publication::Unchanged);
+    assert_eq!(publish(&fx).unwrap(), Publication::Unchanged);
 
     assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
     assert_eq!(push_attempts(), attempts);
@@ -84,7 +76,7 @@ fn failed_push_preserves_pending_and_retry_succeeds() {
     let remote_before = remote_tip(&fx);
     set_push_failpoint(PushFailpoint::Auth);
 
-    let error = publish(&fx, true).unwrap_err();
+    let error = publish(&fx).unwrap_err();
     assert!(matches!(error, PublicationError::Push(_)), "{error}");
     assert!(error.to_string().contains("local commit remains intact"));
 
@@ -95,7 +87,7 @@ fn failed_push_preserves_pending_and_retry_succeeds() {
     assert_eq!(pending.branch, fx.branch);
     assert_eq!(remote_tip(&fx), remote_before);
 
-    assert_eq!(publish(&fx, true).unwrap(), Publication::Pushed);
+    assert_eq!(publish(&fx).unwrap(), Publication::Pushed);
     assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
     assert_eq!(remote_tip(&fx).unwrap().to_string(), head);
     assert!(state_of(&fx).pending_init_push.is_none());
@@ -105,14 +97,14 @@ fn failed_push_preserves_pending_and_retry_succeeds() {
 fn pending_with_advanced_head_is_rejected() {
     let fx = seeded();
     set_push_failpoint(PushFailpoint::Auth);
-    publish(&fx, true).unwrap_err();
+    publish(&fx).unwrap_err();
     let pending_before = state_of(&fx).pending_init_push.clone().unwrap();
     std::fs::write(fx.repo_dir.path().join("later.md"), "later\n").unwrap();
     fx.repo.stage_paths(&["later.md".to_string()]).unwrap();
     fx.repo.commit("user edit").unwrap();
     let attempts = push_attempts();
 
-    let error = publish(&fx, true).unwrap_err();
+    let error = publish(&fx).unwrap_err();
 
     assert!(matches!(error, PublicationError::Commit(_)), "{error}");
     assert!(error.to_string().contains("run sync to reconcile"));
@@ -124,7 +116,7 @@ fn pending_with_advanced_head_is_rejected() {
 fn pending_with_different_target_is_rejected() {
     let fx = seeded();
     set_push_failpoint(PushFailpoint::Auth);
-    publish(&fx, true).unwrap_err();
+    publish(&fx).unwrap_err();
     let pending_before = state_of(&fx).pending_init_push.clone().unwrap();
     let attempts = push_attempts();
 
@@ -133,7 +125,6 @@ fn pending_with_different_target_is_rejected() {
         "upstream",
         &fx.branch,
         MESSAGE,
-        true,
         &SystemCredentials,
     )
     .unwrap_err();
@@ -144,43 +135,31 @@ fn pending_with_different_target_is_rejected() {
 }
 
 #[test]
-fn auto_push_disabled_records_pending_without_pushing() {
+fn metadata_commit_includes_this_devices_file_only() {
     let fx = seeded();
-    let remote_before = remote_tip(&fx);
-    git2::Repository::open(fx.repo_dir.path())
-        .unwrap()
-        .remote_set_url("origin", "file:///definitely/missing/commitbook.git")
+    let id = crate::devices::register(fx.repo_dir.path(), Some("Laptop"), crate::config::Auth::Ssh)
         .unwrap();
-    let attempts = push_attempts();
+    std::fs::write(
+        crate::devices::devices_dir(fx.repo_dir.path()).join("0123abcd.toml"),
+        "name = \"Other\"\nplatform = \"ios\"\nauth = \"pat\"\n",
+    )
+    .unwrap();
 
-    assert_eq!(publish(&fx, false).unwrap(), Publication::Deferred);
+    assert_eq!(publish(&fx).unwrap(), Publication::Pushed);
 
-    let head = fx.repo.rev_parse("HEAD").unwrap();
-    assert_eq!(state_of(&fx).pending_init_push.unwrap().commit_oid, head);
-    assert_eq!(push_attempts(), attempts);
-    // Still deferred on repeat: no new commit, no push.
-    assert_eq!(publish(&fx, false).unwrap(), Publication::Deferred);
-    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
-    assert_eq!(push_attempts(), attempts);
-
-    git2::Repository::open(fx.repo_dir.path())
-        .unwrap()
-        .remote_set_url(
-            "origin",
-            &format!("file://{}", fx.remote_dir.path().display()),
-        )
-        .unwrap();
-    assert_eq!(publish(&fx, true).unwrap(), Publication::Pushed);
-    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
-    assert_ne!(remote_tip(&fx), remote_before);
-    assert_eq!(remote_tip(&fx).unwrap().to_string(), head);
-    assert!(state_of(&fx).pending_init_push.is_none());
+    let repo = git2::Repository::open(fx.repo_dir.path()).unwrap();
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    let own = crate::devices::device_repo_path(&id);
+    assert!(tree.get_path(std::path::Path::new(&own)).is_ok());
+    assert!(tree
+        .get_path(std::path::Path::new(".CommitBook/devices/0123abcd.toml"))
+        .is_err());
 }
 
 #[test]
 fn clear_published_clears_only_when_pending_is_contained_in_tip() {
     let fx = seeded();
-    publish(&fx, true).unwrap();
+    publish(&fx).unwrap();
     let head = fx.repo.rev_parse("HEAD").unwrap();
     let parent = fx.repo.rev_parse("HEAD~1").unwrap();
     let directory = LocalConfig::commitbook_dir(fx.repo_dir.path());

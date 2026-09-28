@@ -1,11 +1,13 @@
 # CommitBook
 
+<img src="docs/BrandKit/commitbook-product-icon.png" width="96" height="96" alt="CommitBook logo: stacked pages and saved-history timeline">
+
 Automated git commits and sync for your markdown notebooks. Turn any git repository into a self-saving, self-syncing note-taking workspace.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | bash
 ```
 
 This downloads the latest release for your platform (macOS arm64/x86_64, Linux

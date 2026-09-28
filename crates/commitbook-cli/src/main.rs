@@ -7,7 +7,13 @@ use colored::Colorize;
 
 /// CommitBook, Markdown workspace with git sync.
 #[derive(Parser)]
-#[command(name = "commitbook", version, about, long_about = None)]
+#[command(
+    name = "commitbook",
+    version,
+    about,
+    long_about = None,
+    disable_help_subcommand = true
+)]
 struct Cli {
     /// Enable verbose output
     #[arg(short, long, global = true)]
@@ -17,7 +23,7 @@ struct Cli {
     #[arg(short, long, global = true)]
     quiet: bool,
 
-    /// Output as JSON (for status, preview, doctor, log)
+    /// Output as JSON (for status, preview, devices, doctor, log)
     #[arg(long, global = true)]
     json: bool,
 
@@ -26,11 +32,45 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum TokenAction {
+    /// Store a token in .CommitBook/local/auth.toml. The token is read from a
+    /// hidden prompt, or from stdin when piped (`echo "$T" | commitbook token
+    /// set`), never from an argument: arguments end up in shell history and
+    /// `ps` output.
+    Set {
+        /// Provider name for the stored token (github, gitlab, etc.)
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Remove the stored token
+    Clear,
+}
+
+#[derive(Subcommand)]
+enum DevicesAction {
+    /// Rename this device
+    Rename {
+        /// New name, e.g. "Work laptop"
+        name: String,
+    },
+    /// Remove another device, e.g. a retired computer
+    Remove {
+        /// Device id, as shown by `commitbook devices`
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum Commands {
     /// Initialize CommitBook in the current git repo
-    Init,
+    Init {
+        /// Skip the confirmation prompt before committing and pushing
+        #[arg(short, long)]
+        yes: bool,
+    },
 
     /// Commit locally and sync with remote
+    #[command(alias = "run")]
     Sync,
 
     /// Preview the next local snapshot without changing files or contacting the remote
@@ -45,9 +85,15 @@ enum Commands {
     /// Show current sync state
     Status,
 
+    /// List the devices syncing this CommitBook
+    Devices {
+        #[command(subcommand)]
+        action: Option<DevicesAction>,
+    },
+
     /// Change the sync schedule
     Schedule {
-        /// Schedule: "hourly", "daily", "every-4h", or a cron expression
+        /// Schedule: "15m", "1h", "4h", "daily", or a cron expression
         expression: String,
     },
 
@@ -70,15 +116,11 @@ enum Commands {
         tail: bool,
     },
 
-    /// Store an optional token for token-backed transports
-    Login {
-        /// Personal access token for token-backed transports
-        #[arg(long)]
-        token: Option<String>,
-
-        /// Provider name for the stored token (github, gitlab, etc.)
-        #[arg(long)]
-        provider: Option<String>,
+    /// Manage the optional token for token-backed transports
+    #[command(hide = true)]
+    Token {
+        #[command(subcommand)]
+        action: TokenAction,
     },
 
     /// Generate shell completions
@@ -91,10 +133,6 @@ enum Commands {
     /// Generate man page
     #[command(hide = true)]
     Manpage,
-
-    /// Run a single sync cycle (used internally by scheduler)
-    #[command(hide = true)]
-    Run,
 }
 
 #[tokio::main]
@@ -136,8 +174,8 @@ async fn run(cli: Cli) -> Result<()> {
             clap_mangen::Man::new(Cli::command()).render(&mut std::io::stdout())?;
             return Ok(());
         }
-        Commands::Init => {
-            return commands::init_cmd::run_init();
+        Commands::Init { yes } => {
+            return commands::init_cmd::run_init(*yes);
         }
         _ => {}
     }
@@ -152,6 +190,11 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Start => commands::start::run(&cb_dir, &repo_root)?,
         Commands::Stop => commands::stop::run(&cb_dir, &repo_root)?,
         Commands::Status => commands::status::run(&cb_dir, &repo_root, cli.json)?,
+        Commands::Devices { action } => match action {
+            None => commands::devices::list(&repo_root, cli.json)?,
+            Some(DevicesAction::Rename { name }) => commands::devices::rename(&repo_root, &name)?,
+            Some(DevicesAction::Remove { id }) => commands::devices::remove(&repo_root, &id)?,
+        },
         Commands::Schedule { expression } => {
             commands::schedule::run(&cb_dir, &repo_root, &expression)?;
         }
@@ -159,14 +202,18 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Log { lines, tail } => {
             commands::log::run(&cb_dir, &repo_root, lines, cli.json, tail)?;
         }
-        Commands::Login { token, provider } => {
-            commands::login::run(&cb_dir, &repo_root, token, provider).await?;
-        }
-        Commands::Run => {
-            commands::sync_cmd::run_scheduled(&repo_root).await?;
-        }
-        Commands::Init | Commands::Completions { .. } | Commands::Manpage => unreachable!(),
+        Commands::Token { action } => match action {
+            TokenAction::Set { provider } => {
+                commands::token::set(&cb_dir, &repo_root, provider).await?;
+            }
+            TokenAction::Clear => commands::token::clear(&cb_dir)?,
+        },
+        Commands::Init { .. } | Commands::Completions { .. } | Commands::Manpage => unreachable!(),
     }
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;

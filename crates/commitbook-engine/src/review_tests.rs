@@ -25,9 +25,10 @@ impl ConflictResolver for Fake {
 fn fixture() -> RepoFixture {
     let fx = setup_repo_with_bare_remote();
     let root = fx.repo_dir.path();
-    let mut config = LocalConfig::init(root, "hourly").unwrap();
-    config.git.branch = fx.branch.clone();
-    config.save(root).unwrap();
+    // Conflicts must stay conflicts here, so use manual mode, not `both`.
+    let mut config = LocalConfig::new("notes", &fx.branch, "origin");
+    config.conflicts.mode = crate::config::ConflictMode::Manual;
+    LocalConfig::init(root, &config).unwrap();
     std::fs::write(root.join("note.md"), "base\n").unwrap();
     fx.repo.stage_all().unwrap();
     fx.repo.commit("base").unwrap();
@@ -237,7 +238,7 @@ async fn sync_review_pauses_without_writing_resolution_or_pushing() {
     let fake = Fake {
         calls: AtomicUsize::new(0),
     };
-    let logger = crate::logger::FileLogger::new(root, 30).unwrap();
+    let logger = crate::logger::FileLogger::new(root, crate::config::LogKeep::Days(30)).unwrap();
     let mut options = crate::sync::scheduler::SyncOptions::new("origin", &fx.branch, true);
     options.review_ai_resolutions = true;
     let original = std::fs::read(root.join("note.md")).unwrap();
@@ -265,6 +266,10 @@ async fn sync_review_pauses_without_writing_resolution_or_pushing() {
         crate::state::sync_state::SyncState::load(&LocalConfig::commitbook_dir(root)).unwrap();
     assert!(state.last_attempt_at.is_some());
     assert!(state.last_sync_at.is_none());
+    assert_eq!(state.last_error_stage.as_deref(), Some("review"));
+    let error = state.last_error.unwrap();
+    assert!(error.contains("await review"), "{error}");
+    assert!(error.contains("note.md"), "{error}");
 }
 
 struct StateFailure;
@@ -290,7 +295,7 @@ impl ConflictResolver for StateFailure {
 async fn state_persistence_failure_retains_original_operation_error() {
     let fx = fixture();
     let root = fx.repo_dir.path();
-    let logger = crate::logger::FileLogger::new(root, 30).unwrap();
+    let logger = crate::logger::FileLogger::new(root, crate::config::LogKeep::Days(30)).unwrap();
     let result = crate::sync::scheduler::sync_with_resolver(
         root,
         &crate::sync::scheduler::SyncOptions::new("origin", &fx.branch, true),

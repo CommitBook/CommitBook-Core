@@ -1,216 +1,149 @@
 use anyhow::{bail, Context, Result};
-use git2::Repository;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-fn default_remote_name() -> String {
-    "origin".to_string()
+use super::values::{Agent, CommitAgent, CommitMode, ConflictMode, LogKeep};
+
+/// Format version of `config.toml`, bumped only when a release changes the
+/// file layout incompatibly.
+pub const CONFIG_SCHEMA: u32 = 1;
+
+/// Default schedule for new CommitBooks.
+pub const DEFAULT_SCHEDULE: &str = "1h";
+
+/// Commented layout written at init. `save` fills in the real values, and
+/// later saves edit values in place so user comments survive.
+const TEMPLATE: &str = r#"# CommitBook settings. This file is committed and shared by every device.
+
+[config]
+schema = 1                    # file format, managed by CommitBook; do not edit
+
+[commitbook]
+name = ""                     # display name
+
+[git]
+branch = "main"
+remote = "origin"             # provider, owner and repo are read from this remote's URL
+
+[sync]
+schedule = "1h"               # 5m | 15m | 30m | 1h | 2h | 4h | daily | 5-field cron expression
+
+[commit]
+mode = "timestamp"            # timestamp: "Writing <time>" message | ai: ask the agent
+agent = "any"                 # any | claude | codex | copilot | gemini | cursor
+                              # any = first installed of copilot, claude, codex, gemini, cursor
+
+[conflicts]
+mode = "both"                 # both: keep both versions without markers, you delete one
+                              #   (.md, .markdown, .txt; other files fall back to manual)
+                              # manual: leave <<<<<<< markers, sync stops until resolved
+                              # ai: agent resolves | review: agent proposes, you approve
+agent = "claude"              # claude | codex | copilot | gemini | cursor (used by ai and review)
+
+[logs]
+keep = "30d"                  # <N>d (e.g. 7d, 30d, 90d) | forever
+"#;
+
+/// `[config]`: metadata about the file itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigMeta {
+    pub schema: u32,
 }
 
-/// Git-specific settings for the repo.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GitSettings {
-    pub auto_push: bool,
-    pub branch: String,
-    #[serde(default = "default_remote_name")]
-    pub remote: String,
-}
-
-impl Default for GitSettings {
-    fn default() -> Self {
-        Self {
-            auto_push: true,
-            branch: "main".to_string(),
-            remote: default_remote_name(),
-        }
-    }
-}
-
-/// Logging settings for the repo.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoggingSettings {
-    pub level: String,
-    #[serde(alias = "max_log_files")]
-    pub max_log_days: u32,
-}
-
-impl Default for LoggingSettings {
-    fn default() -> Self {
-        Self {
-            level: "info".to_string(),
-            max_log_days: 30,
-        }
-    }
-}
-
-fn default_conflict_resolver() -> String {
-    "manual".to_string()
-}
-
-/// Conflict-resolution settings.
-///
-/// `resolver` selects which AI CLI is invoked when libgit2 reports structured
-/// merge conflicts. Recognized values: `manual`, `claude`, `codex`,
-/// `copilot`, `gemini`, `cursor`. `manual` (the default) preserves the
-/// conflicted index for the user to resolve.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConflictSettings {
-    #[serde(default)]
-    pub review_ai_resolutions: bool,
-    #[serde(default = "default_conflict_resolver")]
-    pub resolver: String,
-}
-
-impl Default for ConflictSettings {
-    fn default() -> Self {
-        Self {
-            resolver: default_conflict_resolver(),
-            review_ai_resolutions: false,
-        }
-    }
-}
-
-fn default_ai_messages() -> bool {
-    false
-}
-
-/// Commit-message settings.
-///
-/// `ai_messages = false` (the default) uses local `Writing <datetime>` text
-/// without invoking AI CLIs. Opting in with `true` tries Copilot, Claude,
-/// then Codex, falling back to the same timestamp message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommitSettings {
-    #[serde(default = "default_ai_messages")]
-    pub ai_messages: bool,
-}
-
-impl Default for CommitSettings {
-    fn default() -> Self {
-        Self {
-            ai_messages: default_ai_messages(),
-        }
-    }
-}
-
-/// Settings identifying this clone as a CommitBook (a GitHub repo with
-/// `.CommitBook/`). Optional in the schema for backwards compat with existing
-/// notebooks that pre-date the FFI; the FFI client populates this when
-/// initializing CommitBooks via `init_commitbook`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// `[commitbook]`: the CommitBook's identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommitBookSettings {
     /// Display name (e.g. "Personal Notes").
     pub name: String,
-    /// GitHub user/org owning the repo.
-    pub owner: String,
-    /// Repository name.
-    pub repo: String,
-    /// Provider: "github" | "gitlab" | "codeberg" | "generic_git".
-    pub provider: String,
-    /// Auth mode: "github_app" | "pat" | "ssh" | "existing_local_repo".
-    pub mode: String,
 }
 
-fn default_config_version() -> String {
-    "1".to_string()
+/// `[git]`: which branch of which remote this CommitBook syncs. Provider,
+/// owner and repository name are read from the remote's URL, not stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GitSettings {
+    pub branch: String,
+    pub remote: String,
 }
 
-fn canonicalize_v1_config_version(config_version: &str) -> Option<String> {
-    if config_version == "1" || config_version.starts_with("1.") {
-        Some("1".to_string())
-    } else {
-        None
-    }
-}
-
-fn default_schedule() -> String {
-    "0 * * * *".to_string()
-}
-
-fn default_created_at() -> String {
-    "unknown".to_string()
-}
-
-fn normalize_legacy_config_table(table: &mut toml::map::Map<String, toml::Value>) -> bool {
-    let mut changed = false;
-
-    if !table.contains_key("config_version") {
-        if let Some(version) = table.get("version").cloned() {
-            table.insert("config_version".to_string(), version);
-        } else {
-            table.insert(
-                "config_version".to_string(),
-                toml::Value::String(default_config_version()),
-            );
-        }
-        changed = true;
-    }
-
-    if table.remove("version").is_some() {
-        changed = true;
-    }
-
-    if !table.contains_key("enabled") {
-        table.insert("enabled".to_string(), toml::Value::Boolean(true));
-        changed = true;
-    }
-
-    if !table.contains_key("schedule") {
-        table.insert(
-            "schedule".to_string(),
-            toml::Value::String(default_schedule()),
-        );
-        changed = true;
-    }
-
-    if !table.contains_key("created_at") {
-        table.insert(
-            "created_at".to_string(),
-            toml::Value::String(default_created_at()),
-        );
-        changed = true;
-    }
-
-    changed
-}
-
-/// Local configuration stored at <repo>/.CommitBook/config.toml
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LocalConfig {
-    #[serde(default = "default_config_version")]
-    pub config_version: String,
-    pub enabled: bool,
+/// `[sync]`: when scheduled syncs run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncSettings {
+    /// What the user picked (`1h`, `daily`, or a cron expression); converted
+    /// to cron only when installing the scheduler (`cron::to_cron`).
     pub schedule: String,
-    pub created_at: String,
+}
+
+/// `[commit]`: how commit messages are written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommitSettings {
+    pub mode: CommitMode,
+    pub agent: CommitAgent,
+}
+
+/// `[conflicts]`: what happens when a merge leaves conflicts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConflictSettings {
+    pub mode: ConflictMode,
+    /// Used by the `ai` and `review` modes.
+    pub agent: Agent,
+}
+
+/// `[logs]`: activity log retention.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogSettings {
     #[serde(default)]
+    pub keep: LogKeep,
+}
+
+/// Shared configuration stored at `<repo>/.CommitBook/config.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalConfig {
+    pub config: ConfigMeta,
+    pub commitbook: CommitBookSettings,
     pub git: GitSettings,
-    #[serde(default)]
-    pub logging: LoggingSettings,
-    #[serde(default)]
-    pub conflict: ConflictSettings,
-    #[serde(default)]
+    pub sync: SyncSettings,
     pub commit: CommitSettings,
+    pub conflicts: ConflictSettings,
     #[serde(default)]
-    pub commitbook: Option<CommitBookSettings>,
-    pub scheduler_id: Option<String>,
+    pub logs: LogSettings,
 }
 
 impl LocalConfig {
-    /// Create a new default local config.
-    pub fn new(schedule: &str) -> Self {
+    /// A new config with default settings.
+    pub fn new(name: &str, branch: &str, remote: &str) -> Self {
         Self {
-            config_version: "1".to_string(),
-            enabled: true,
-            schedule: schedule.to_string(),
-            created_at: crate::utils::datetime::now_iso(),
-            git: GitSettings::default(),
-            logging: LoggingSettings::default(),
-            conflict: ConflictSettings::default(),
-            commit: CommitSettings::default(),
-            commitbook: None,
-            scheduler_id: None,
+            config: ConfigMeta {
+                schema: CONFIG_SCHEMA,
+            },
+            commitbook: CommitBookSettings {
+                name: name.to_string(),
+            },
+            git: GitSettings {
+                branch: branch.to_string(),
+                remote: remote.to_string(),
+            },
+            sync: SyncSettings {
+                schedule: DEFAULT_SCHEDULE.to_string(),
+            },
+            commit: CommitSettings {
+                mode: CommitMode::Timestamp,
+                agent: CommitAgent::Any,
+            },
+            conflicts: ConflictSettings {
+                mode: ConflictMode::Both,
+                agent: Agent::Claude,
+            },
+            logs: LogSettings::default(),
         }
     }
 
@@ -251,106 +184,96 @@ impl LocalConfig {
                 .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
     }
 
-    /// Migrate config to the latest version. Returns true if migration occurred.
-    pub fn migrate(&mut self) -> bool {
-        if let Some(canonical) = canonicalize_v1_config_version(&self.config_version) {
-            if self.config_version != canonical {
-                self.config_version = canonical;
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn validate_config_version(&self, path: &Path) -> Result<()> {
-        if self.config_version == "1" {
-            return Ok(());
-        }
-
-        bail!(
-            "Unsupported local config version `{}` in {}",
-            self.config_version,
-            path.display()
-        );
-    }
-
-    /// Load local config from a repo.
+    /// Load the config from a repo. Never writes.
     pub fn load(repo_path: &Path) -> Result<Self> {
-        Self::load_inner(repo_path, true)
-    }
-
-    /// Load and normalize local config in memory without rewriting it.
-    /// Discovery paths use this so read-only registry scans never race a
-    /// repository mutation that owns the repository lock.
-    pub fn load_read_only(repo_path: &Path) -> Result<Self> {
-        Self::load_inner(repo_path, false)
-    }
-
-    fn load_inner(repo_path: &Path, persist_repairs: bool) -> Result<Self> {
         require_real_directory(&Self::commitbook_dir(repo_path))?;
         let path = Self::config_path(repo_path);
         let content = read_regular_text(&path)
-            .with_context(|| format!("Failed to read local config: {}", path.display()))?;
+            .with_context(|| format!("Failed to read config: {}", path.display()))?;
+        Self::parse(&content).with_context(|| format!("Invalid config: {}", path.display()))
+    }
 
-        let mut value: toml::Value = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse local config: {}", path.display()))?;
-        let table = value.as_table_mut().ok_or_else(|| {
-            anyhow::anyhow!(
-                "Failed to parse local config: {}: top-level TOML value must be a table",
-                path.display()
-            )
-        })?;
-        let remote_missing = table
-            .get("git")
+    /// Alias of `load`, kept for read-only callers such as status and
+    /// registry scans.
+    pub fn load_read_only(repo_path: &Path) -> Result<Self> {
+        Self::load(repo_path)
+    }
+
+    /// Parse config text, rejecting files written in another format.
+    pub fn parse(content: &str) -> Result<Self> {
+        let table: toml::Table = toml::from_str(content).context("Not valid TOML")?;
+        let schema = table
+            .get("config")
             .and_then(toml::Value::as_table)
-            .and_then(|git| git.get("remote"))
-            .is_none();
-        let repaired = normalize_legacy_config_table(table);
-        let normalized = toml::to_string(&value)
-            .with_context(|| format!("Failed to normalize local config: {}", path.display()))?;
-
-        let mut config: Self = toml::from_str(&normalized)
-            .with_context(|| format!("Failed to parse local config: {}", path.display()))?;
-        let migrated = config.migrate();
-        config.validate_config_version(&path)?;
-        let remote_inferred = if remote_missing {
-            config.git.remote = infer_single_remote(repo_path)?;
-            true
-        } else {
-            false
-        };
-
-        if persist_repairs && (repaired || migrated || remote_inferred) {
-            config.save(repo_path)?;
+            .and_then(|config| config.get("schema"))
+            .and_then(toml::Value::as_integer);
+        if schema != Some(i64::from(CONFIG_SCHEMA)) {
+            bail!(
+                "Unsupported config.toml format; delete `.CommitBook/config.toml` and run `commitbook init`"
+            );
         }
-
+        let config: Self = table.try_into()?;
+        if config.commitbook.name.trim().is_empty() {
+            bail!("[commitbook] name must not be empty");
+        }
         Ok(config)
     }
 
-    /// Save local config to the repo.
+    /// Save the config. An existing file is edited in place, so comments and
+    /// key order survive; a missing file starts from the commented template.
     pub fn save(&self, repo_path: &Path) -> Result<()> {
         crate::state::ensure_local_layout(repo_path)?;
 
         let path = Self::config_path(repo_path);
-        let content =
-            toml::to_string_pretty(self).with_context(|| "Failed to serialize local config")?;
+        let existing = match fs::symlink_metadata(&path) {
+            Ok(_) => Some(read_regular_text(&path)?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(error).with_context(|| format!("Failed to inspect {}", path.display()))
+            }
+        };
+        let mut document: toml_edit::DocumentMut = existing
+            .as_deref()
+            .unwrap_or(TEMPLATE)
+            .parse()
+            .with_context(|| format!("Failed to parse {}", path.display()))?;
+        self.write_values(&mut document);
 
-        write_regular_text_atomic(&path, &content)
-            .with_context(|| format!("Failed to write local config: {}", path.display()))?;
+        write_regular_text_atomic(&path, &document.to_string())
+            .with_context(|| format!("Failed to write config: {}", path.display()))?;
 
         Ok(())
     }
 
-    /// Initialize the .CommitBook directory structure.
-    pub fn init(repo_path: &Path, schedule: &str) -> Result<Self> {
-        crate::state::prepare_local_state(repo_path)?;
+    fn write_values(&self, document: &mut toml_edit::DocumentMut) {
+        set_value(document, "config", "schema", i64::from(self.config.schema));
+        set_value(
+            document,
+            "commitbook",
+            "name",
+            self.commitbook.name.as_str(),
+        );
+        set_value(document, "git", "branch", self.git.branch.as_str());
+        set_value(document, "git", "remote", self.git.remote.as_str());
+        set_value(document, "sync", "schedule", self.sync.schedule.as_str());
+        set_value(document, "commit", "mode", self.commit.mode.as_str());
+        set_value(document, "commit", "agent", self.commit.agent.as_str());
+        set_value(document, "conflicts", "mode", self.conflicts.mode.as_str());
+        set_value(
+            document,
+            "conflicts",
+            "agent",
+            self.conflicts.agent.as_str(),
+        );
+        set_value(document, "logs", "keep", self.logs.keep.to_string());
+    }
 
-        let config = Self::new(schedule);
+    /// Initialize the .CommitBook directory structure with `config`.
+    pub fn init(repo_path: &Path, config: &Self) -> Result<()> {
+        crate::state::prepare_local_state(repo_path)?;
         config.save(repo_path)?;
         Self::ensure_gitignore(repo_path)?;
-
-        Ok(config)
+        Ok(())
     }
 
     /// Ensure `.CommitBook/local/` is ignored by the committed nested ignore
@@ -388,6 +311,53 @@ impl LocalConfig {
     }
 }
 
+/// Set `[table] key = value`, keeping the existing entry's comments and
+/// spacing when the key is already present.
+fn set_value(
+    document: &mut toml_edit::DocumentMut,
+    table: &str,
+    key: &str,
+    value: impl Into<toml_edit::Value>,
+) {
+    let mut value = value.into();
+    let table = document
+        .entry(table)
+        .or_insert_with(toml_edit::table)
+        .as_table_like_mut()
+        .expect("config sections are tables");
+    match table.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
+        Some(existing) => {
+            let mut decor = existing.decor().clone();
+            // Keep a trailing comment in its column when the value's width
+            // changes, e.g. `name = ""` becoming `name = "Personal Notes"`.
+            let suffix = decor
+                .suffix()
+                .and_then(|raw| raw.as_str())
+                .map(str::to_owned);
+            if let Some(suffix) = suffix {
+                let comment = suffix.trim_start_matches(' ');
+                if comment.starts_with('#') {
+                    let column = suffix.len() - comment.len() + bare_width(existing);
+                    let padding = column.saturating_sub(bare_width(&value)).max(1);
+                    decor.set_suffix(format!("{}{comment}", " ".repeat(padding)));
+                }
+            }
+            *value.decor_mut() = decor;
+            *existing = value;
+        }
+        None => {
+            table.insert(key, toml_edit::Item::Value(value));
+        }
+    }
+}
+
+/// Width of a value as written, without surrounding whitespace or comments.
+fn bare_width(value: &toml_edit::Value) -> usize {
+    let mut bare = value.clone();
+    bare.decor_mut().clear();
+    bare.to_string().trim().chars().count()
+}
+
 fn is_real_directory(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
@@ -404,7 +374,7 @@ fn require_real_directory(path: &Path) -> Result<()> {
     }
 }
 
-fn read_regular_text(path: &Path) -> Result<String> {
+pub(crate) fn read_regular_text(path: &Path) -> Result<String> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("Failed to inspect {}", path.display()))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -468,7 +438,18 @@ fn write_regular_text(path: &Path, content: &str) -> Result<()> {
 /// it, carry over the existing permissions, then rename it over the
 /// destination. An interrupted write leaves the previous file intact, and a
 /// symlink or other non-regular destination is never followed or replaced.
-fn write_regular_text_atomic(path: &Path, content: &str) -> Result<()> {
+pub(crate) fn write_regular_text_atomic(path: &Path, content: &str) -> Result<()> {
+    write_atomic(path, content, None)
+}
+
+/// `write_regular_text_atomic` for secrets: the file is created with mode
+/// 0600 before it is renamed into place, so it is never readable by others,
+/// even briefly, and an existing wider mode is not kept.
+pub(crate) fn write_private_text_atomic(path: &Path, content: &str) -> Result<()> {
+    write_atomic(path, content, Some(0o600))
+}
+
+fn write_atomic(path: &Path, content: &str, mode: Option<u32>) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Path has no parent directory: {}", path.display()))?;
@@ -505,10 +486,23 @@ fn write_regular_text_atomic(path: &Path, content: &str) -> Result<()> {
     temp.as_file()
         .sync_all()
         .with_context(|| format!("Failed to sync {}", temp.path().display()))?;
-    if let Some(permissions) = existing_permissions {
+    #[cfg(unix)]
+    let permissions = match mode {
+        Some(mode) => {
+            use std::os::unix::fs::PermissionsExt;
+            Some(fs::Permissions::from_mode(mode))
+        }
+        None => existing_permissions,
+    };
+    #[cfg(not(unix))]
+    let permissions = {
+        let _ = mode;
+        existing_permissions
+    };
+    if let Some(permissions) = permissions {
         temp.as_file()
             .set_permissions(permissions)
-            .with_context(|| format!("Failed to preserve permissions of {}", path.display()))?;
+            .with_context(|| format!("Failed to set permissions of {}", path.display()))?;
     }
     // `persist` is a rename, so the destination is replaced as a directory
     // entry rather than written through. On failure the temporary file is
@@ -534,29 +528,6 @@ fn sweep_stale_temp_files(parent: &Path, prefix: &str, suffix: &str) {
         if looks_like_temp && entry.file_type().is_ok_and(|kind| kind.is_file()) {
             let _ = fs::remove_file(entry.path());
         }
-    }
-}
-
-fn infer_single_remote(repo_path: &Path) -> Result<String> {
-    let repo = Repository::open(repo_path).with_context(|| {
-        format!(
-            "Local config is missing git.remote and {} is not a Git repository",
-            repo_path.display()
-        )
-    })?;
-    let remotes = repo.remotes().context("Failed to list Git remotes")?;
-    match remotes.len() {
-        1 => remotes
-            .get(0)
-            .context("The only configured Git remote name is not valid UTF-8")?
-            .map(str::to_string)
-            .ok_or_else(|| anyhow::anyhow!("The only configured Git remote has no name")),
-        0 => bail!(
-            "Local config is missing git.remote and the repository has no remotes; add one and retry"
-        ),
-        count => bail!(
-            "Local config is missing git.remote and the repository has {count} remotes; set git.remote in .CommitBook/config.toml"
-        ),
     }
 }
 

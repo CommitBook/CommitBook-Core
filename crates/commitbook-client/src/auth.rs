@@ -1,12 +1,15 @@
 //! GitHub PAT validation + repo enumeration via the GitHub REST API.
 
 use serde::Deserialize;
+use std::time::Duration;
 
 use crate::errors::{CommitBookError, Result};
 use crate::types::RepoInfo;
 
 const GITHUB_API: &str = "https://api.github.com";
 const USER_AGENT: &str = "commitbook-client/0.5";
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Deserialize)]
 struct GithubRepo {
@@ -26,6 +29,8 @@ struct GithubOwner {
 pub(crate) fn github_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|e| CommitBookError::transport(format!("HTTP client init: {e}")))
 }

@@ -1347,3 +1347,78 @@ fn test_push_commit_with_rejects_non_commit_oid() {
         .is_err());
     assert_eq!(push_attempts(), attempts);
 }
+
+#[test]
+fn local_state_path_matches_only_the_local_directory() {
+    assert!(is_local_state_path(".CommitBook/local"));
+    assert!(is_local_state_path(".CommitBook/local/auth.toml"));
+    assert!(is_local_state_path(".CommitBook/local/logs/2026-09-25.log"));
+    assert!(!is_local_state_path(".CommitBook/localx"));
+    assert!(!is_local_state_path(".CommitBook/config.toml"));
+    assert!(!is_local_state_path("notes/.CommitBook/local/auth.toml"));
+}
+
+#[test]
+fn stage_all_never_stages_local_state_even_when_not_ignored() {
+    let (tmp, _repo) = create_temp_repo();
+    let git_repo = GitRepo::open(tmp.path()).unwrap();
+    // No ignore rule covers .CommitBook/local/.
+    fs::create_dir_all(tmp.path().join(".CommitBook/local")).unwrap();
+    fs::write(
+        tmp.path().join(".CommitBook/local/auth.toml"),
+        "token = \"x\"\n",
+    )
+    .unwrap();
+    fs::write(tmp.path().join("note.md"), "hi\n").unwrap();
+
+    git_repo.stage_all().unwrap();
+    git_repo.commit("snapshot").unwrap();
+
+    let repo = Repository::open(tmp.path()).unwrap();
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    assert!(tree.get_path(Path::new("note.md")).is_ok());
+    assert!(tree
+        .get_path(Path::new(".CommitBook/local/auth.toml"))
+        .is_err());
+    // Local state alone is not a change worth a sync commit.
+    assert!(!git_repo.has_dirty_changes().unwrap());
+}
+
+#[test]
+fn stage_all_untracks_local_state_that_was_committed_before() {
+    let (tmp, repo) = create_temp_repo();
+    fs::create_dir_all(tmp.path().join(".CommitBook/local")).unwrap();
+    fs::write(
+        tmp.path().join(".CommitBook/local/auth.toml"),
+        "token = \"x\"\n",
+    )
+    .unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_path(Path::new(".CommitBook/local/auth.toml"))
+        .unwrap();
+    index.write().unwrap();
+    let git_repo = GitRepo::open(tmp.path()).unwrap();
+    git_repo.commit("leaked").unwrap();
+
+    fs::write(tmp.path().join("note.md"), "hi\n").unwrap();
+    git_repo.stage_all().unwrap();
+    git_repo.commit("snapshot").unwrap();
+
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    assert!(tree
+        .get_path(Path::new(".CommitBook/local/auth.toml"))
+        .is_err());
+    assert!(tmp.path().join(".CommitBook/local/auth.toml").exists());
+}
+
+#[test]
+fn stage_paths_refuses_local_state() {
+    let (tmp, _repo) = create_temp_repo();
+    let git_repo = GitRepo::open(tmp.path()).unwrap();
+    fs::create_dir_all(tmp.path().join(".CommitBook/local")).unwrap();
+    fs::write(tmp.path().join(".CommitBook/local/auth.toml"), "x\n").unwrap();
+    assert!(git_repo
+        .stage_paths(&[".CommitBook/local/auth.toml".to_string()])
+        .is_err());
+}

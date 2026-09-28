@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" role="img" aria-labelledby="title"><title id="title">CommitBook: saved timeline and three stacked pages</title><g stroke-linecap="round" stroke-linejoin="round">
+  <!-- Three rounded sheets ascend from bottom left to top right. -->
+  <rect x="29" y="31" width="46" height="55" rx="6" fill="#cbbbec"/>
+  <rect x="36" y="23" width="46" height="55" rx="6" fill="#a98bdb"/>
+  <path d="M49 15H70L89 34V64Q89 70 83 70H49Q43 70 43 64V21Q43 15 49 15Z" fill="#7952c6"/>
+  <path d="M70 15V28Q70 34 76 34H89Z" fill="#dfd2f5"/>
+  <!-- Text belongs only to the top sheet. -->
+  <path d="M53 43H77M53 51H77M53 59H69" fill="none" stroke="#faf6ff" stroke-width="3.5"/>
+  <!-- Latest saved moment is the top node of the timeline. -->
+  <path d="M16 28V77" fill="none" stroke="#b6a0e5" stroke-width="3.5"/>
+  <circle cx="16" cy="28" r="9" fill="#7952c6"/>
+  <path d="M11.5 28L14.5 31L20.5 24.5" fill="none" stroke="#faf6ff" stroke-width="2.5"/>
+  <circle cx="16" cy="53" r="4.5" fill="#7952c6"/>
+  <circle cx="16" cy="77" r="4.5" fill="#7952c6"/>
+</g></svg>

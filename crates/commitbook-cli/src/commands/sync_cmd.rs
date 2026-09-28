@@ -2,25 +2,71 @@ use anyhow::{anyhow, Result};
 use colored::Colorize;
 use std::path::Path;
 
-use commitbook_engine::config::LocalConfig;
+use commitbook_engine::config::{CommitAgent, CommitMode, LocalConfig};
 use commitbook_engine::git::GitRepo;
 use commitbook_engine::logger::FileLogger;
 use commitbook_engine::state::{RepoLock, RepoLockContended};
 use commitbook_engine::sync::sync_repository_locked;
 
-/// Run a manual sync: commit dirty unignored changes, fetch, merge, then
-/// optionally push (retrying once on a non-fast-forward race).
+/// Run one sync cycle: commit dirty unignored changes, fetch, merge, then
+/// push (retrying once on a non-fast-forward race). The scheduler runs this
+/// same command.
 ///
 /// Returns an error if the sync surfaced any errors or unresolved manual
-/// conflicts so `commitbook sync && next-step` chains correctly.
+/// conflicts, or if another operation holds the repository lock, so
+/// `commitbook sync && next-step` chains correctly and a failed scheduled run
+/// exits non-zero.
 pub async fn run_sync(repo_root: &Path) -> Result<()> {
-    let lock = RepoLock::acquire(repo_root)?;
+    let lock = match RepoLock::acquire(repo_root) {
+        Ok(lock) => lock,
+        Err(error) => {
+            if error.downcast_ref::<RepoLockContended>().is_some() {
+                log_skipped_sync(repo_root);
+            }
+            return Err(error);
+        }
+    };
     run_sync_locked(repo_root, &lock).await
 }
 
+/// Record a sync skipped because the lock was taken, so skipped scheduled
+/// runs show up in `commitbook log`. Best effort: never masks the lock error.
+fn log_skipped_sync(repo_root: &Path) {
+    let keep = LocalConfig::load(repo_root)
+        .map(|config| config.logs.keep)
+        .unwrap_or_default();
+    if let Ok(logger) = FileLogger::new(repo_root, keep) {
+        let _ = logger.warn("Sync skipped: another operation is running");
+    }
+}
+
+/// Record a config that fails to load, before any logger settings are known:
+/// in the daily log (default retention) and as the last error in
+/// `state.toml`, so `commitbook log` and `status` explain a failing
+/// scheduled sync. Best effort: never masks the load error.
+fn record_config_failure(repo_root: &Path, error: &anyhow::Error) {
+    let message = format!("Sync failed: cannot load .CommitBook/config.toml: {error:#}");
+    if let Ok(logger) = FileLogger::new(repo_root, Default::default()) {
+        let _ = logger.error(&message);
+    }
+    let cb_dir = LocalConfig::commitbook_dir(repo_root);
+    if let Ok(mut state) = commitbook_engine::state::sync_state::SyncState::load(&cb_dir) {
+        state.last_attempt_at = Some(commitbook_engine::utils::datetime::now_iso());
+        state.last_error = Some(message);
+        state.last_error_stage = Some("config".to_string());
+        let _ = state.save(&cb_dir);
+    }
+}
+
 async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
-    let config = LocalConfig::load(repo_root)?;
-    let logger = FileLogger::new(repo_root, config.logging.max_log_days)?;
+    let config = match LocalConfig::load(repo_root) {
+        Ok(config) => config,
+        Err(error) => {
+            record_config_failure(repo_root, &error);
+            return Err(error);
+        }
+    };
+    let logger = FileLogger::new(repo_root, config.logs.keep)?;
     let repo = GitRepo::open(repo_root)?;
 
     let _ = logger.info("Sync started");
@@ -31,7 +77,10 @@ async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
     // will not commit.
     let commit_message = if repo.has_dirty_changes().unwrap_or(false) {
         let summary = repo.changes_summary().unwrap_or_default();
-        Some(generate_commit_message(repo_root, &summary, config.commit.ai_messages).await)
+        Some(
+            generate_commit_message(repo_root, &summary, config.commit.mode, config.commit.agent)
+                .await,
+        )
     } else {
         None
     };
@@ -48,6 +97,13 @@ async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
                 if o.pushed > 0 {
                     println!("  {} Pushed {} commit(s).", "OK".green().bold(), o.pushed);
                 }
+            }
+            if !o.kept_both.is_empty() {
+                println!(
+                    "  {} Kept both versions in {}; delete the one you don't want.",
+                    "WARN".yellow().bold(),
+                    o.kept_both.join(", ")
+                );
             }
             if o.conflicts_resolved > 0 {
                 println!(
@@ -91,6 +147,7 @@ async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
         }
     };
 
+    let _ = logger.info("Sync complete");
     let _ = logger.cleanup_old_logs();
     match exit_err {
         Some(e) => Err(e),
@@ -98,63 +155,18 @@ async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
     }
 }
 
-/// Run a scheduled sync cycle (hidden `commitbook run` command).
-pub async fn run_scheduled(repo_root: &Path) -> Result<()> {
-    let lock = match RepoLock::acquire(repo_root) {
-        Ok(lock) => lock,
-        Err(error) if error.downcast_ref::<RepoLockContended>().is_some() => {
-            log::info!("Scheduled sync skipped because another operation is running");
-            return Ok(());
-        }
-        Err(error) => return Err(error),
-    };
-    let config = LocalConfig::load(repo_root)?;
-    if !config.enabled {
-        return Ok(());
-    }
-
-    let logger = FileLogger::new(repo_root, config.logging.max_log_days)?;
-    let _ = logger.info("Scheduled sync cycle started");
-    log::info!("Starting scheduled sync cycle");
-
-    if let Err(e) = run_sync_locked(repo_root, &lock).await {
-        let _ = logger.error(&format!("Scheduled sync failed: {e}"));
-        log::error!("Scheduled sync failed: {e}");
-    }
-
-    let _ = logger.info("Scheduled sync cycle complete");
-    log::info!("Scheduled sync cycle complete");
-
-    Ok(())
-}
-
-/// Provider keys to try, in order, for a commit message.
-///
-/// When `ai_messages` is false the AI CLIs are skipped entirely and only the
-/// deterministic timestamp `fallback` provider is used.
-fn commit_provider_keys(ai_messages: bool) -> Vec<String> {
-    if ai_messages {
-        vec![
-            "gh-copilot".to_string(),
-            "claude-cli".to_string(),
-            "codex-cli".to_string(),
-            "fallback".to_string(),
-        ]
-    } else {
-        vec!["fallback".to_string()]
-    }
-}
-
 /// Generate a commit message using AI or fallback.
 async fn generate_commit_message(
     repo_root: &Path,
     summary: &commitbook_engine::git::ChangesSummary,
-    ai_messages: bool,
+    mode: CommitMode,
+    agent: CommitAgent,
 ) -> String {
     generate_commit_message_with_chain(
         repo_root,
         summary,
-        ai_messages,
+        mode,
+        agent,
         commitbook_engine::ai::ProviderChain::new,
     )
     .await
@@ -163,14 +175,15 @@ async fn generate_commit_message(
 async fn generate_commit_message_with_chain(
     repo_root: &Path,
     summary: &commitbook_engine::git::ChangesSummary,
-    ai_messages: bool,
+    mode: CommitMode,
+    agent: CommitAgent,
     make_chain: impl FnOnce() -> commitbook_engine::ai::ProviderChain,
 ) -> String {
-    if !ai_messages {
+    if mode == CommitMode::Timestamp {
         return commitbook_engine::ai::fallback::generate_timestamp_message(summary);
     }
     let chain = make_chain();
-    let keys = commit_provider_keys(ai_messages);
+    let keys = commitbook_engine::ai::commit_provider_keys(mode, agent);
     let (msg, _provider) = chain.generate(summary, &keys, repo_root).await;
     msg
 }

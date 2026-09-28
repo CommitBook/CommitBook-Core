@@ -21,7 +21,7 @@ fn init_repo() -> tempfile::TempDir {
             .expect("git should run");
         assert!(status.success(), "git {args:?} failed");
     }
-    LocalConfig::init(tmp.path(), "0 * * * *").unwrap();
+    LocalConfig::init(tmp.path(), &LocalConfig::new("notes", "main", "origin")).unwrap();
     tmp
 }
 
@@ -32,22 +32,16 @@ fn schedule_command_normalizes_presets_and_intervals() {
     let context = SchedulerContext::new(&fake, PathBuf::from("commitbook"));
 
     let outcome = run_with(tmp.path(), "every-5m", &context).unwrap();
-    assert_eq!(outcome.config.schedule, "*/5 * * * *");
+    assert_eq!(outcome.config.sync.schedule, "5m");
     assert!(outcome.scheduler_reinstalled);
-    assert_eq!(fake.installed_schedule().as_deref(), Some("*/5 * * * *"));
+    assert_eq!(fake.installed_schedule().as_deref(), Some("5m"));
 
-    let outcome = run_with(tmp.path(), "2h", &context).unwrap();
-    assert_eq!(outcome.config.schedule, "0 */2 * * *");
-    assert_eq!(
-        LocalConfig::load(tmp.path()).unwrap().schedule,
-        "0 */2 * * *"
-    );
+    let outcome = run_with(tmp.path(), "0 */2 * * *", &context).unwrap();
+    assert_eq!(outcome.config.sync.schedule, "2h");
+    assert_eq!(LocalConfig::load(tmp.path()).unwrap().sync.schedule, "2h");
 
     assert!(run_with(tmp.path(), "not a cron", &context).is_err());
-    assert_eq!(
-        LocalConfig::load(tmp.path()).unwrap().schedule,
-        "0 */2 * * *"
-    );
+    assert_eq!(LocalConfig::load(tmp.path()).unwrap().sync.schedule, "2h");
 }
 
 #[test]

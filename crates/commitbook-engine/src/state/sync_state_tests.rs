@@ -81,3 +81,38 @@ last_sync_at = "2026-04-09T10:00:00Z"
     let loaded = SyncState::load(tmp.path()).unwrap();
     assert_eq!(loaded.last_sync_at.as_deref(), Some("2026-04-09T10:00:00Z"));
 }
+
+#[test]
+fn load_or_quarantine_moves_a_corrupt_file_aside_without_overwriting() {
+    let tmp = tempfile::tempdir().unwrap();
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    std::fs::write(local.join("state.toml.corrupt"), "older corrupt").unwrap();
+    std::fs::write(local.join("state.toml"), "last_error = [").unwrap();
+
+    let (state, moved) = SyncState::load_or_quarantine(tmp.path()).unwrap();
+    assert!(state.last_error.is_none());
+    let moved = moved.unwrap();
+    assert_eq!(moved, local.join("state.toml.corrupt-1"));
+    assert_eq!(std::fs::read_to_string(&moved).unwrap(), "last_error = [");
+    assert_eq!(
+        std::fs::read_to_string(local.join("state.toml.corrupt")).unwrap(),
+        "older corrupt"
+    );
+    assert!(!local.join("state.toml").exists());
+}
+
+#[test]
+fn load_or_quarantine_keeps_a_valid_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("local")).unwrap();
+    std::fs::write(
+        tmp.path().join("local/state.toml"),
+        "last_error = \"boom\"\n",
+    )
+    .unwrap();
+    let (state, moved) = SyncState::load_or_quarantine(tmp.path()).unwrap();
+    assert_eq!(state.last_error.as_deref(), Some("boom"));
+    assert!(moved.is_none());
+    assert!(tmp.path().join("local/state.toml").exists());
+}

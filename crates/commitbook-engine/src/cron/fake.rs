@@ -87,7 +87,7 @@ impl FakeScheduler {
 }
 
 impl SchedulerAdapter for FakeScheduler {
-    fn install(&self, _repo_root: &Path, schedule: &str, binary: &Path) -> Result<String> {
+    fn install(&self, _repo_root: &Path, schedule: &str, binary: &Path) -> Result<()> {
         let mut state = self.lock();
         state.calls.push(FakeCall::Install {
             schedule: schedule.to_string(),
@@ -97,10 +97,10 @@ impl SchedulerAdapter for FakeScheduler {
             return Err(anyhow!("{message}"));
         }
         state.installed = Some((schedule.to_string(), binary.to_path_buf()));
-        Ok(format!("fake-scheduler:{schedule}"))
+        Ok(())
     }
 
-    fn uninstall(&self, _repo_root: &Path, _scheduler_id: Option<&str>) -> Result<()> {
+    fn uninstall(&self, _repo_root: &Path) -> Result<()> {
         let mut state = self.lock();
         state.calls.push(FakeCall::Uninstall);
         if let Some(message) = state.uninstall_failures.pop_front() {

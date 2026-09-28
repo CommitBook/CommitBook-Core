@@ -46,8 +46,17 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
     config.set_str("user.email", "test@example.com").unwrap();
     config.set_bool("commit.gpgsign", false).unwrap();
     drop(config);
+    git2::Repository::open(&clone)
+        .unwrap()
+        .remote("origin", "https://github.com/owner/notes.git")
+        .unwrap();
     commitbook_engine::commitbooks::init_dot_commitbook(
-        &clone, "Notes", "owner", "notes", "main", "github", "pat",
+        &clone,
+        "Notes",
+        "main",
+        "origin",
+        None,
+        commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
     std::fs::write(clone.join("base.md"), "base\n").unwrap();
@@ -68,6 +77,8 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
             conflict_id: "base.md".to_string(),
             resolution_type: "delete".to_string(),
             manual_content: None,
+            revision: None,
+            proposal_version: None,
         },
     )
     .unwrap_err();
@@ -90,6 +101,8 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
             conflict_id: "base.md".to_string(),
             resolution_type: "delete".to_string(),
             manual_content: None,
+            revision: None,
+            proposal_version: None,
         },
     )
     .unwrap_err();

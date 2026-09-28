@@ -241,6 +241,11 @@ fn panicking_foreign_callback_becomes_resolver_failure() {
     assert!(error.to_string().contains("foreign callback panic"));
 }
 
+/// Bare remote path whose URL identifies `owner/repo`.
+fn remote_path(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    dir.path().join("owner").join("repo.git")
+}
+
 fn managed_sync_fixture() -> (
     tempfile::TempDir,
     tempfile::TempDir,
@@ -249,7 +254,7 @@ fn managed_sync_fixture() -> (
 ) {
     let root = tempfile::tempdir().unwrap();
     let remote = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(remote.path()).unwrap();
+    git2::Repository::init_bare(remote_path(&remote)).unwrap();
     let clone = root.path().join("owner__repo");
     std::fs::create_dir(&clone).unwrap();
     let repository = git2::Repository::init(&clone).unwrap();
@@ -259,7 +264,12 @@ fn managed_sync_fixture() -> (
     config.set_bool("commit.gpgsign", false).unwrap();
     drop(config);
     commitbook_engine::commitbooks::init_dot_commitbook(
-        &clone, "Repo", "owner", "repo", "main", "github", "pat",
+        &clone,
+        "Repo",
+        "main",
+        "origin",
+        None,
+        commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
     std::fs::write(clone.join("shared.md"), "base\n").unwrap();
@@ -270,11 +280,13 @@ fn managed_sync_fixture() -> (
 
     let repository = git2::Repository::open(&clone).unwrap();
     repository
-        .remote("origin", remote.path().to_str().unwrap())
+        .remote("origin", remote_path(&remote).to_str().unwrap())
         .unwrap();
     let mut local_config = LocalConfig::load(&clone).unwrap();
     local_config.git.branch = branch.clone();
     local_config.git.remote = "origin".to_string();
+    // These tests exercise conflicts, so keep them from being auto-merged.
+    local_config.conflicts.mode = ConflictMode::Manual;
     local_config.save(&clone).unwrap();
     repo.commit_selected_paths(&[".CommitBook/config.toml"], "configure branch")
         .unwrap();
@@ -302,24 +314,11 @@ fn ai_mode_without_callback_allows_conflict_free_sync() {
 }
 
 #[test]
-fn sync_lock_contention_does_not_rewrite_legacy_config_during_lookup() {
-    let (root, _remote, clone, branch) = managed_sync_fixture();
+fn sync_lock_contention_leaves_config_untouched() {
+    let (root, _remote, clone, _branch) = managed_sync_fixture();
     let original = format!(
-        r#"schedule = "hourly"
-created_at = "now"
-
-[git]
-auto_push = true
-branch = "{branch}"
-remote = "origin"
-
-[commitbook]
-name = "Repo"
-owner = "owner"
-repo = "repo"
-provider = "github"
-mode = "pat"
-"#
+        "{}# hand-written comment\n",
+        std::fs::read_to_string(clone.join(".CommitBook/config.toml")).unwrap()
     );
     std::fs::write(clone.join(".CommitBook/config.toml"), &original).unwrap();
     let _lock = commitbook_engine::state::RepoLock::acquire(&clone).unwrap();
@@ -344,7 +343,7 @@ fn ai_mode_can_recover_preserved_merge_after_callback_is_configured() {
     let other = tempfile::tempdir().unwrap();
     let repository = git2::build::RepoBuilder::new()
         .branch(&branch)
-        .clone(remote.path().to_str().unwrap(), other.path())
+        .clone(remote_path(&remote).to_str().unwrap(), other.path())
         .unwrap();
     let mut config = repository.config().unwrap();
     config.set_str("user.name", "Remote").unwrap();
@@ -407,7 +406,7 @@ fn ai_mode_can_recover_preserved_merge_after_callback_is_configured() {
     let verification = tempfile::tempdir().unwrap();
     git2::build::RepoBuilder::new()
         .branch(&branch)
-        .clone(remote.path().to_str().unwrap(), verification.path())
+        .clone(remote_path(&remote).to_str().unwrap(), verification.path())
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(verification.path().join("shared.md")).unwrap(),
@@ -426,7 +425,7 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
     let other = tempfile::tempdir().unwrap();
     let repository = git2::build::RepoBuilder::new()
         .branch(&branch)
-        .clone(remote.path().to_str().unwrap(), other.path())
+        .clone(remote_path(&remote).to_str().unwrap(), other.path())
         .unwrap();
     let mut config = repository.config().unwrap();
     config.set_str("user.name", "Remote").unwrap();
@@ -469,7 +468,7 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
         error_message: None,
     });
     let mut config = LocalConfig::load(&clone).unwrap();
-    config.conflict.review_ai_resolutions = true;
+    config.conflicts.mode = ConflictMode::Review;
     config.save(&clone).unwrap();
     let recovered = sync_one_commitbook(
         root.path(),
@@ -489,4 +488,132 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
         proposals[0].proposal.as_ref().unwrap().content.as_deref(),
         Some("resolved on phone\n")
     );
+
+    // Manual must preserve an existing proposal without accepting or replacing it.
+    let before = std::fs::read(clone.join("shared.md")).unwrap();
+    let proposal_version = proposals[0].proposal_version.clone();
+    let manual =
+        sync_one_commitbook(root.path(), "owner/repo", SyncMode::Manual, "unused", None).unwrap();
+    assert_eq!(manual.manual_conflicts, 1);
+    assert_eq!(manual.pushed, 0);
+    assert!(manual
+        .errors
+        .iter()
+        .any(|error| error.contains("await review")));
+    assert_eq!(std::fs::read(clone.join("shared.md")).unwrap(), before);
+    assert_eq!(
+        commitbook_engine::review::list(&clone).unwrap()[0].proposal_version,
+        proposal_version
+    );
+
+    let listed = crate::conflicts::list_conflicts(root.path(), "owner/repo").unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        listed[0].proposal_content.as_deref(),
+        Some("resolved on phone\n")
+    );
+    assert!(!listed[0].proposal_stale);
+    assert!(!listed[0].proposal_rejected);
+    let input = crate::types::ResolveConflictInput {
+        commitbook_id: "owner/repo".to_string(),
+        conflict_id: listed[0].id.clone(),
+        resolution_type: "accept".to_string(),
+        manual_content: None,
+        revision: listed[0].revision.clone(),
+        proposal_version: listed[0].proposal_version.clone(),
+    };
+    let mut missing = input.clone();
+    missing.proposal_version = None;
+    assert!(matches!(
+        crate::conflicts::resolve_conflict(root.path(), &missing),
+        Err(crate::errors::CommitBookError::InvalidInput { .. })
+    ));
+    let mut stale = input.clone();
+    stale.proposal_version = Some("outdated".to_string());
+    assert!(crate::conflicts::resolve_conflict(root.path(), &stale).is_err());
+    assert!(local_repo.merge_in_progress());
+    crate::conflicts::resolve_conflict(root.path(), &input).unwrap();
+    assert!(!local_repo.merge_in_progress());
+    assert_eq!(
+        std::fs::read_to_string(clone.join("shared.md")).unwrap(),
+        "resolved on phone\n"
+    );
+}
+
+#[test]
+fn manual_mode_overrides_shared_both_and_review_without_invoking_callback() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CountCallback(Arc<AtomicUsize>);
+    impl ConflictResolverCallback for CountCallback {
+        fn resolve(
+            &self,
+            request: AiConflictRequest,
+            continuation: Arc<ConflictResolutionContinuation>,
+        ) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            ContentCallback.resolve(request, continuation);
+        }
+    }
+    for shared_mode in [ConflictMode::Both, ConflictMode::Review] {
+        let (root, remote, clone, branch) = managed_sync_fixture();
+        let local = commitbook_engine::git::GitRepo::open(&clone).unwrap();
+        let mut config = LocalConfig::load(&clone).unwrap();
+        config.conflicts.mode = shared_mode;
+        config.save(&clone).unwrap();
+        std::fs::write(clone.join("shared.md"), "local\n").unwrap();
+        local.stage_all().unwrap();
+        local.commit("local changes").unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let repository = git2::build::RepoBuilder::new()
+            .branch(&branch)
+            .clone(remote_path(&remote).to_str().unwrap(), other.path())
+            .unwrap();
+        let mut git_config = repository.config().unwrap();
+        git_config.set_str("user.name", "Remote").unwrap();
+        git_config
+            .set_str("user.email", "remote@example.com")
+            .unwrap();
+        git_config.set_bool("commit.gpgsign", false).unwrap();
+        std::fs::write(other.path().join("shared.md"), "remote\n").unwrap();
+        let other_repo = commitbook_engine::git::GitRepo::open(other.path()).unwrap();
+        other_repo.stage_all().unwrap();
+        other_repo.commit("remote edit").unwrap();
+        other_repo
+            .push_with("origin", &branch, &TokenCredentials::new("unused"))
+            .unwrap();
+        let remote_repo = git2::Repository::open_bare(remote_path(&remote)).unwrap();
+        let remote_ref = format!("refs/heads/{branch}");
+        let remote_tip = remote_repo.refname_to_id(&remote_ref).unwrap();
+        let head = local.rev_parse("HEAD").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        // Exercise both a newly created conflict and recovery of that merge.
+        for _ in 0..2 {
+            let outcome = sync_one_commitbook(
+                root.path(),
+                "owner/repo",
+                SyncMode::Manual,
+                "unused",
+                Some(Arc::new(CountCallback(Arc::clone(&calls)))),
+            )
+            .unwrap();
+            assert_eq!(outcome.manual_conflicts, 1, "{shared_mode:?}: {outcome:?}");
+            assert_eq!(outcome.conflicts_resolved, 0);
+            assert_eq!(outcome.pushed, 0);
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            assert_eq!(local.rev_parse("HEAD").unwrap(), head);
+            assert_eq!(remote_repo.refname_to_id(&remote_ref).unwrap(), remote_tip);
+            assert!(local.merge_in_progress());
+            let conflicts = crate::conflicts::list_conflicts(root.path(), "owner/repo").unwrap();
+            assert_eq!(conflicts.len(), 1);
+            assert!(conflicts[0].proposal_version.is_none());
+            assert!(std::fs::read_to_string(clone.join("shared.md"))
+                .unwrap()
+                .contains("<<<<<<<"));
+            let state = commitbook_engine::state::sync_state::SyncState::load(
+                &LocalConfig::commitbook_dir(&clone),
+            )
+            .unwrap();
+            assert_ne!(state.last_error_stage.as_deref(), Some("review"));
+        }
+    }
 }

@@ -6,7 +6,8 @@ pub enum SyncMode {
     /// Auto-resolve via the configured AI resolver. Falls back to
     /// `manual_conflicts` only when the resolver fails.
     AiResolve,
-    /// Don't auto-resolve. Leaves conflict markers in working tree
+    /// Don't auto-resolve, even when shared config selects both or review.
+    /// Existing review proposals remain protected. Leaves conflict markers in working tree
     /// and returns `manual_conflicts` count for the caller to handle
     /// via `list_conflicts` + `resolve_conflict`.
     Manual,
@@ -24,6 +25,9 @@ pub struct CommitBookInput {
     pub owner: String,
     pub repo: String,
     pub branch: String,
+    /// Name for this device in `.CommitBook/devices/`; `None` uses a default
+    /// such as "iOS 7f3c".
+    pub device_name: Option<String>,
 }
 
 /// Materialized view of a CommitBook clone on this device.
@@ -39,6 +43,14 @@ pub struct CommitBookSummary {
     pub auto_sync: bool,
     pub doc_count: u32,
     pub conflict_count: u32,
+}
+
+/// A managed clone whose config could not be loaded; see
+/// `list_broken_commitbooks`.
+#[derive(Debug, Clone)]
+pub struct BrokenCommitBook {
+    pub path: String,
+    pub error: String,
 }
 
 /// Result of `discover_commitbooks`, one entry per remote repo.
@@ -160,6 +172,11 @@ pub struct ConflictSummary {
     pub local_content: Option<String>,
     pub remote_content: Option<String>,
     pub opened_at: String,
+    pub revision: Option<String>,
+    pub proposal_content: Option<String>,
+    pub proposal_version: Option<String>,
+    pub proposal_stale: bool,
+    pub proposal_rejected: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +185,8 @@ pub struct ResolveConflictInput {
     pub conflict_id: String,
     pub resolution_type: String,
     pub manual_content: Option<String>,
+    pub revision: Option<String>,
+    pub proposal_version: Option<String>,
 }
 
 #[derive(Debug, Clone)]

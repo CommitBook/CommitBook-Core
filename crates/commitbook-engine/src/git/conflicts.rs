@@ -5,7 +5,7 @@
 //! and file modes that conflict markers cannot represent.
 
 use anyhow::{bail, Context, Result};
-use git2::{IndexEntry, IndexTime, Oid, Repository};
+use git2::{FileFavor, IndexEntry, IndexTime, MergeFileInput, MergeFileOptions, Oid, Repository};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -205,6 +205,21 @@ impl GitRepo {
         let repository = Repository::open(self.path())?;
         let oid = repository.blob(content.as_bytes())?;
         self.apply_resolution(path, Some((content.as_bytes(), mode, oid)), false, false)
+    }
+
+    /// Resolve a text conflict by keeping both versions of every conflicting
+    /// hunk, the local side first, without markers (`both` conflict mode).
+    /// Returns `false` and changes nothing for binary or special files,
+    /// delete/modify conflicts, and text that itself looks like markers.
+    pub fn try_resolve_both(&self, path: &str) -> Result<bool> {
+        let Some(conflict) = self.find_conflict(path)? else {
+            return Ok(false);
+        };
+        let Some(merged) = union_text(&conflict)? else {
+            return Ok(false);
+        };
+        self.resolve_conflict_with_text(path, &merged)?;
+        Ok(true)
     }
 
     fn apply_resolution(
@@ -442,6 +457,44 @@ fn write_symlink(path: &Path, _target: &[u8]) -> Result<()> {
         "Symlink conflict resolution is unsupported on this platform: {}",
         path.display()
     )
+}
+
+/// Union of both sides: each conflicting hunk keeps the local lines, then
+/// the remote lines. `None` for binary, special, or delete/modify conflicts.
+pub(crate) fn union_text(conflict: &GitConflict) -> Result<Option<String>> {
+    if conflict.is_binary_or_special() {
+        return Ok(None);
+    }
+    let (Some(local), Some(remote)) = (conflict.local_text(), conflict.remote_text()) else {
+        return Ok(None);
+    };
+    let ancestor = conflict.ancestor_text().unwrap_or("");
+
+    let mut union = MergeFileOptions::new();
+    union.favor(FileFavor::Union);
+    let merged = merge_text(&conflict.path, ancestor, local, remote, &mut union)?;
+    // Note text that itself looks like markers would be rejected on staging;
+    // leave such files to manual resolution instead.
+    Ok((!has_conflict_markers(&merged)).then_some(merged))
+}
+
+fn merge_text(
+    path: &str,
+    ancestor: &str,
+    local: &str,
+    remote: &str,
+    options: &mut MergeFileOptions,
+) -> Result<String> {
+    let mut base = MergeFileInput::new();
+    base.content(ancestor.as_bytes()).path(path);
+    let mut ours = MergeFileInput::new();
+    ours.content(local.as_bytes()).path(path);
+    let mut theirs = MergeFileInput::new();
+    theirs.content(remote.as_bytes()).path(path);
+    let result = git2::merge_file(&base, &ours, &theirs, Some(options))
+        .with_context(|| format!("Failed to merge {path}"))?;
+    String::from_utf8(result.content().to_vec())
+        .with_context(|| format!("Merged {path} is not valid UTF-8"))
 }
 
 pub fn has_conflict_markers(content: &str) -> bool {

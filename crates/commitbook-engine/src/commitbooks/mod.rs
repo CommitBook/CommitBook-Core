@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 pub use init::init_dot_commitbook;
 pub use preferences::{load_preferences, save_preferences, Preferences};
-pub use registry::scan_workspaces_root;
+pub use registry::{scan_workspaces, scan_workspaces_root, BrokenClone, WorkspaceScan};
 pub use slug::slug_for;
 
 /// Runtime view of a CommitBook clone on this device.

@@ -12,7 +12,9 @@ use askama::Template;
 
 use commitbook_engine::ai::ProviderChain;
 use commitbook_engine::config::local::LocalConfig;
+use commitbook_engine::config::{Agent, CommitAgent, CommitMode, ConflictMode};
 use commitbook_engine::cron::{self, SchedulerAdapter, SystemScheduler};
+use commitbook_engine::git::remote::{remote_identity, Provider, RemoteIdentity};
 use commitbook_engine::inspection::RepositoryStatus;
 use commitbook_engine::logger::FileLogger;
 use commitbook_engine::settings::{self, SchedulerContext, SettingsUpdate, SettingsUpdateError};
@@ -76,7 +78,67 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/start", post(api_start))
         .route("/api/stop", post(api_stop))
         .route("/api/providers", get(api_providers))
+        .layer(axum::middleware::from_fn(guard_local_requests))
         .with_state(state)
+}
+
+/// Host names the dashboard answers to. It only listens on 127.0.0.1.
+const LOCAL_HOSTS: &[&str] = &["127.0.0.1", "localhost", "[::1]"];
+
+/// The host name of a `host[:port]` value, lowercased.
+fn host_name(authority: &str) -> String {
+    let authority = authority.trim().to_ascii_lowercase();
+    if authority.starts_with('[') {
+        return authority
+            .split_once(']')
+            .map(|(host, _)| format!("{host}]"))
+            .unwrap_or(authority);
+    }
+    authority.split(':').next().unwrap_or_default().to_string()
+}
+
+/// Refuse requests a web page on another site could make through the
+/// user's browser. The dashboard has no login, so:
+/// - every request must name a local host, which defeats DNS rebinding
+///   (a foreign name resolving to 127.0.0.1 could otherwise read notes);
+/// - a request that changes something must come from the dashboard's own
+///   origin. Browsers send `Origin` (and `Sec-Fetch-Site`) with cross-site
+///   form posts, which need no CORS preflight, so those are rejected.
+///
+/// Requests without these headers (curl, scripts) are not browser-driven
+/// and are allowed.
+async fn guard_local_requests(request: Request, next: axum::middleware::Next) -> Response {
+    match rejection(request.method(), request.headers()) {
+        Some(reason) => (StatusCode::FORBIDDEN, format!("Forbidden: {reason}")).into_response(),
+        None => next.run(request).await,
+    }
+}
+
+/// Why `guard_local_requests` refuses a request, if it does.
+fn rejection(method: &axum::http::Method, headers: &axum::http::HeaderMap) -> Option<&'static str> {
+    let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+    let host = header("host");
+    if host.is_some_and(|host| !LOCAL_HOSTS.contains(&host_name(host).as_str())) {
+        return Some("unexpected Host");
+    }
+    if method == axum::http::Method::GET || method == axum::http::Method::HEAD {
+        return None;
+    }
+    if header("sec-fetch-site").is_some_and(|site| site != "same-origin" && site != "none") {
+        return Some("cross-site request");
+    }
+    if let Some(origin) = header("origin") {
+        let same_origin = match host {
+            Some(host) => origin.eq_ignore_ascii_case(&format!("http://{host}")),
+            None => origin
+                .strip_prefix("http://")
+                .is_some_and(|rest| LOCAL_HOSTS.contains(&host_name(rest).as_str())),
+        };
+        if !same_origin {
+            return Some("cross-origin request");
+        }
+    }
+    None
 }
 
 /// Run repository, lock, or scheduler work off the async executor.
@@ -115,9 +177,9 @@ struct DashboardTemplate {
     status_lines: Vec<String>,
     needs_attention: bool,
     running: bool,
+    scheduler_label: &'static str,
     schedule_desc: String,
     current_branch: String,
-    auto_push: bool,
     providers: Vec<ProviderInfo>,
 }
 
@@ -128,12 +190,38 @@ struct LogsTemplate {}
 #[derive(Template)]
 #[template(path = "config.html")]
 struct ConfigTemplate {
-    review_ai_resolutions: bool,
-    resolver: String,
-    ai_messages: bool,
+    name: String,
+    remote: String,
+    /// Provider, owner and repository parsed from the remote's URL; never the
+    /// URL itself, which can embed credentials.
+    remote_location: String,
     schedule: String,
     branch: String,
-    auto_push: bool,
+    checked_out_branch: String,
+    log_keep: String,
+    commit_modes: Vec<Choice>,
+    commit_agents: Vec<Choice>,
+    /// Only `ai` commit mode asks the commit agent.
+    commit_agent_used: bool,
+    conflict_modes: Vec<Choice>,
+    conflict_agents: Vec<Choice>,
+    /// Only the `ai` and `review` conflict modes ask the conflict agent.
+    conflict_agent_used: bool,
+}
+
+/// One `<option>` of a settings `<select>`.
+struct Choice {
+    value: &'static str,
+    selected: bool,
+}
+
+fn choices<T: Copy + PartialEq>(all: &[T], current: T, text: fn(T) -> &'static str) -> Vec<Choice> {
+    all.iter()
+        .map(|&value| Choice {
+            value: text(value),
+            selected: value == current,
+        })
+        .collect()
 }
 
 #[derive(Template)]
@@ -141,10 +229,9 @@ struct ConfigTemplate {
 struct StatusPartial {
     status_lines: Vec<String>,
     needs_attention: bool,
-    running: bool,
+    scheduler_label: &'static str,
     schedule_desc: String,
     current_branch: String,
-    auto_push: bool,
 }
 
 #[derive(Template)]
@@ -170,11 +257,51 @@ fn escape_html(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// `GitHub owner/repo` for the config page; a local path remote shows its
+/// parent folder and name.
+fn remote_location(identity: &RemoteIdentity) -> String {
+    let provider = match identity.provider {
+        Provider::Github => "GitHub",
+        Provider::Gitlab => "GitLab",
+        Provider::Codeberg => "Codeberg",
+        Provider::GenericGit => "Git",
+    };
+    if identity.owner.is_empty() {
+        format!("{provider} {}", identity.repo)
+    } else {
+        format!("{provider} {}/{}", identity.owner, identity.repo)
+    }
+}
+
+fn status_lines(status: &StatusResponse) -> Vec<String> {
+    status
+        .scheduler_warning
+        .iter()
+        .cloned()
+        .chain(status.repository.lines())
+        .collect()
+}
+
+fn scheduler_label(scheduler: &cron::SchedulerHealth) -> &'static str {
+    match scheduler {
+        cron::SchedulerHealth::Stopped => "Stopped",
+        cron::SchedulerHealth::Running => "Running",
+        cron::SchedulerHealth::Broken(_) => "Broken",
+    }
+}
+
 fn load_status(repo_path: &Path) -> StatusResponse {
     let repository = RepositoryStatus::read(repo_path);
+    let scheduler = cron::health(repo_path);
+    let scheduler_warning = scheduler.warning(
+        repository.schedule.as_deref(),
+        repository.last_attempt_at.as_deref(),
+        chrono::Utc::now(),
+    );
     StatusResponse {
-        running: cron::is_loaded(repo_path),
-        enabled: repository.enabled.unwrap_or(false),
+        running: scheduler.is_loaded(),
+        scheduler,
+        scheduler_warning,
         schedule: repository.schedule.clone().unwrap_or_default(),
         schedule_desc: repository
             .schedule
@@ -189,7 +316,6 @@ fn load_status(repo_path: &Path) -> StatusResponse {
             .current_branch
             .clone()
             .unwrap_or_else(|| "unknown".into()),
-        auto_push: repository.auto_push.unwrap_or(false),
         last_commit: repository.last_commit.clone(),
         changes_total: repository.changes_total,
         changes_summary: repository.local_status.clone(),
@@ -197,21 +323,20 @@ fn load_status(repo_path: &Path) -> StatusResponse {
     }
 }
 
+/// Commit-message agents the configured `[commit]` settings would try;
+/// empty in `timestamp` mode.
 fn load_providers(repo_path: &Path) -> Vec<ProviderInfo> {
-    let ai_messages = LocalConfig::load_read_only(repo_path)
-        .map(|config| config.commit.ai_messages)
-        .unwrap_or(false);
-    if !ai_messages {
+    let Ok(config) = LocalConfig::load_read_only(repo_path) else {
+        return Vec::new();
+    };
+    let mut keys =
+        commitbook_engine::ai::commit_provider_keys(config.commit.mode, config.commit.agent);
+    keys.retain(|key| key != "fallback");
+    if keys.is_empty() {
         return Vec::new();
     }
-    let chain = ProviderChain::new();
-    let default_keys = vec![
-        "gh-copilot".to_string(),
-        "claude-cli".to_string(),
-        "codex-cli".to_string(),
-    ];
-    chain
-        .check_availability(&default_keys)
+    ProviderChain::new()
+        .check_availability(&keys)
         .into_iter()
         .map(|(key, name, available)| ProviderInfo {
             key,
@@ -231,7 +356,7 @@ fn load_log_entries_filtered(
     offset: usize,
     level: Option<&str>,
 ) -> Vec<LogEntry> {
-    let logger = FileLogger::read_only(repo_path, 30);
+    let logger = FileLogger::read_only(repo_path);
 
     let lines = logger
         .read_entries_filtered(limit, offset, level)
@@ -261,13 +386,13 @@ pub async fn dashboard(State(state): State<Arc<AppState>>) -> Result<Html<String
     let providers = blocking(move || load_providers(&path)).await?;
 
     let tpl = DashboardTemplate {
-        status_lines: status.repository.lines(),
+        status_lines: status_lines(&status),
         needs_attention: status.repository.merge_in_progress
             || !status.repository.conflicts.is_empty(),
         running: status.running,
+        scheduler_label: scheduler_label(&status.scheduler),
         schedule_desc: status.schedule_desc,
         current_branch: status.current_branch,
-        auto_push: status.auto_push,
         providers,
     };
     Ok(Html(tpl.render().unwrap_or_else(|e| {
@@ -295,13 +420,40 @@ pub async fn config_page(State(state): State<Arc<AppState>>) -> impl IntoRespons
         }
         Err(_) => return Html("Configuration inspection failed".into()),
     };
+    let path = state.repo_path.clone();
+    let remote = config.git.remote.clone();
+    let (remote_location, checked_out_branch) = blocking(move || {
+        let location = remote_identity(&path, &remote)
+            .map(|identity| remote_location(&identity))
+            .unwrap_or_else(|_| "unknown".into());
+        let branch = commitbook_engine::git::GitRepo::open(&path)
+            .and_then(|repo| repo.current_branch())
+            .unwrap_or_else(|_| "unknown".into());
+        (location, branch)
+    })
+    .await
+    .unwrap_or_else(|_| ("unknown".into(), "unknown".into()));
     let tpl = ConfigTemplate {
-        review_ai_resolutions: config.conflict.review_ai_resolutions,
-        resolver: config.conflict.resolver,
-        ai_messages: config.commit.ai_messages,
-        schedule: config.schedule,
+        name: config.commitbook.name,
+        remote: config.git.remote,
+        remote_location,
+        schedule: config.sync.schedule,
         branch: config.git.branch,
-        auto_push: config.git.auto_push,
+        checked_out_branch,
+        log_keep: config.logs.keep.to_string(),
+        commit_modes: choices(CommitMode::ALL, config.commit.mode, CommitMode::as_str),
+        commit_agents: choices(CommitAgent::ALL, config.commit.agent, CommitAgent::as_str),
+        commit_agent_used: config.commit.mode == CommitMode::Ai,
+        conflict_modes: choices(
+            ConflictMode::ALL,
+            config.conflicts.mode,
+            ConflictMode::as_str,
+        ),
+        conflict_agents: choices(Agent::ALL, config.conflicts.agent, Agent::as_str),
+        conflict_agent_used: matches!(
+            config.conflicts.mode,
+            ConflictMode::Ai | ConflictMode::Review
+        ),
     };
     Html(
         tpl.render()
@@ -317,13 +469,12 @@ pub async fn htmx_status(State(state): State<Arc<AppState>>) -> Result<Html<Stri
     let path = state.repo_path.clone();
     let status = blocking(move || load_status(&path)).await?;
     let tpl = StatusPartial {
-        status_lines: status.repository.lines(),
+        status_lines: status_lines(&status),
         needs_attention: status.repository.merge_in_progress
             || !status.repository.conflicts.is_empty(),
-        running: status.running,
+        scheduler_label: scheduler_label(&status.scheduler),
         schedule_desc: status.schedule_desc,
         current_branch: status.current_branch,
-        auto_push: status.auto_push,
     };
     Ok(Html(tpl.render().unwrap_or_else(|e| {
         format!("Template error: {}", escape_html(&e.to_string()))
@@ -404,13 +555,14 @@ pub async fn api_config(State(state): State<Arc<AppState>>, request: Request) ->
         }
     };
     let settings_update = SettingsUpdate {
+        name: update.name,
         schedule: update.schedule,
         branch: update.branch,
-        auto_push: update.auto_push,
-        ai_messages: update.ai_messages,
-        enabled: None,
-        review_ai_resolutions: update.review_ai_resolutions,
-        resolver: update.resolver,
+        commit_mode: update.commit_mode,
+        commit_agent: update.commit_agent,
+        conflict_mode: update.conflict_mode,
+        conflict_agent: update.conflict_agent,
+        log_keep: update.log_keep,
     };
 
     let repo_path = state.repo_path.clone();
@@ -621,19 +773,21 @@ pub async fn api_sync(State(state): State<Arc<AppState>>) -> Result<Response, St
     let result = blocking(move || -> anyhow::Result<_> {
         let lock = commitbook_engine::state::RepoLock::acquire(&state.repo_path)?;
         let config = LocalConfig::load(&state.repo_path)?;
-        let logger = FileLogger::new(&state.repo_path, config.logging.max_log_days)?;
+        let logger = FileLogger::new(&state.repo_path, config.logs.keep)?;
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
             .block_on(async {
                 let repo = commitbook_engine::git::GitRepo::open(&state.repo_path)?;
-                let message = if config.commit.ai_messages
+                let message = if config.commit.mode == CommitMode::Ai
                     && !repo.merge_in_progress()
                     && repo.has_dirty_changes()?
                 {
                     let chain = ProviderChain::new();
-                    let keys =
-                        ["gh-copilot", "claude-cli", "codex-cli", "fallback"].map(str::to_string);
+                    let keys = commitbook_engine::ai::commit_provider_keys(
+                        config.commit.mode,
+                        config.commit.agent,
+                    );
                     Some(
                         chain
                             .generate(&repo.changes_summary()?, &keys, &state.repo_path)

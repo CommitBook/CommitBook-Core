@@ -38,10 +38,17 @@ fn command(repo_path: &Path, output_path: &Path) -> Command {
     command
 }
 
-fn run(prompt: &str, repo_path: &Path, timeout: Duration) -> Result<String> {
+/// Run codex with `prompt`. `full_prompt` requires it to read all of the
+/// prompt, which conflict resolution needs (see `run_with_full_prompt`).
+fn run(prompt: &str, repo_path: &Path, timeout: Duration, full_prompt: bool) -> Result<String> {
     let output_file =
         tempfile::NamedTempFile::new().context("Failed to create Codex output file")?;
-    let output = run_with_prompt(&mut command(repo_path, output_file.path()), prompt, timeout)?;
+    let mut command = command(repo_path, output_file.path());
+    let output = if full_prompt {
+        super::run_with_full_prompt(&mut command, prompt, timeout)?
+    } else {
+        run_with_prompt(&mut command, prompt, timeout)?
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("codex CLI failed: {}", stderr.trim());
@@ -76,7 +83,7 @@ impl CommitMessageProvider for CodexProvider {
             truncate(&diff_summary, 500)
         );
 
-        let raw = run(&prompt, repo_path, CODEX_TIMEOUT)?;
+        let raw = run(&prompt, repo_path, CODEX_TIMEOUT, false)?;
         let msg = clean_message(&raw);
 
         if msg.is_empty() {
@@ -111,11 +118,12 @@ impl ConflictResolver for CodexProvider {
     ) -> Result<ConflictResolution> {
         let prompt = build_resolve_prompt(conflict)?;
         let repo_path = repo_path.to_path_buf();
-        let raw =
-            tokio::task::spawn_blocking(move || run(&prompt, &repo_path, CODEX_RESOLVE_TIMEOUT))
-                .await
-                .context("spawn_blocking panicked")??;
-        finalize_resolved_text(&raw, "codex CLI")
+        let raw = tokio::task::spawn_blocking(move || {
+            run(&prompt, &repo_path, CODEX_RESOLVE_TIMEOUT, true)
+        })
+        .await
+        .context("spawn_blocking panicked")??;
+        finalize_resolved_text(&raw, conflict, "codex CLI")
     }
 }
 

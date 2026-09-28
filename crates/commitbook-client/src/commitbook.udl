@@ -56,6 +56,7 @@ dictionary CommitBookInput {
     string owner;
     string repo;
     string branch;
+    string? device_name = null;
 };
 
 dictionary CommitBookSummary {
@@ -69,6 +70,14 @@ dictionary CommitBookSummary {
     boolean auto_sync;
     u32 doc_count;
     u32 conflict_count;
+};
+
+// A clone in the workspaces root whose `.CommitBook/config.toml` could not
+// be loaded (for example an older config format). Listed separately so the
+// app can show it without hiding the other CommitBooks.
+dictionary BrokenCommitBook {
+    string path;
+    string error;
 };
 
 dictionary DiscoveredCommitBook {
@@ -113,6 +122,11 @@ dictionary ConflictSummary {
     string? local_content;
     string? remote_content;
     string opened_at;
+    string? revision = null;
+    string? proposal_content = null;
+    string? proposal_version = null;
+    boolean proposal_stale = false;
+    boolean proposal_rejected = false;
 };
 
 dictionary ResolveConflictInput {
@@ -120,6 +134,8 @@ dictionary ResolveConflictInput {
     string conflict_id;
     string resolution_type;
     string? manual_content;
+    string? revision = null;
+    string? proposal_version = null;
 };
 
 dictionary RepoInfo {
@@ -146,10 +162,16 @@ interface CommitBookEngineClient {
     sequence<CommitBookSummary> list_commitbooks();
 
     [Throws=CommitBookError]
-    CommitBookSummary get_commitbook(string commitbook_id);
+    sequence<BrokenCommitBook> list_broken_commitbooks();
 
     [Throws=CommitBookError]
-    void delete_commitbook(string commitbook_id);
+    CommitBookSummary get_commitbook(string commitbook_id);
+
+    // Refused with InvalidInput while the clone has uncommitted changes,
+    // commits not yet pushed, or a merge in progress, since deleting would
+    // lose them. force = true deletes anyway.
+    [Throws=CommitBookError]
+    void delete_commitbook(string commitbook_id, optional boolean force = false);
 
     [Throws=CommitBookError]
     sequence<DocumentSummary> list_documents(string commitbook_id);
@@ -157,8 +179,11 @@ interface CommitBookEngineClient {
     [Throws=CommitBookError]
     DocumentContent read_document(string commitbook_id, string path);
 
+    // Pass the `revision` from `read_document` as `expected_revision`: the
+    // save is refused with MergeError when a sync has changed the document
+    // since, instead of overwriting that change. null skips the check.
     [Throws=CommitBookError]
-    void save_document(string commitbook_id, string path, string content);
+    void save_document(string commitbook_id, string path, string content, optional string? expected_revision = null);
 
     [Throws=CommitBookError, Async]
     SyncResultSummary sync_commitbook(string commitbook_id, SyncMode mode, string token);

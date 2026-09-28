@@ -1,24 +1,16 @@
 name: Security Audit
 
+# New advisories land in the RustSec database at any time, independent of
+# changes here, so audit every push and pull request and once a day.
 on:
   push:
     branches:
       - main
-    paths:
-      - Cargo.toml
-      - Cargo.lock
-      - crates/**/Cargo.toml
-      - .github/workflows/audit.yml
   pull_request:
     branches:
       - main
-    paths:
-      - Cargo.toml
-      - Cargo.lock
-      - crates/**/Cargo.toml
-      - .github/workflows/audit.yml
   schedule:
-    - cron: "0 6 * * 1"
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 permissions:

@@ -218,7 +218,7 @@ fn generate_plist(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Re
     <key>ProgramArguments</key>
     <array>
         <string>{bin}</string>
-        <string>run</string>
+        <string>sync</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{repo}</string>
@@ -273,8 +273,8 @@ fn unload_and_remove(path: &Path, label: &str) -> Result<()> {
     Ok(())
 }
 
-/// Install a launchd job for the repo. Returns the plist path as scheduler_id.
-pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<String> {
+/// Install a launchd job for the repo.
+pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Result<()> {
     let path = plist_path(repo_path);
     let legacy_path = legacy_plist_path(repo_path);
     // Render first so a bad schedule cannot remove a currently working job.
@@ -305,12 +305,11 @@ pub fn install(repo_path: &Path, schedule: &str, commitbook_bin: &Path) -> Resul
         anyhow::bail!("launchctl load failed: {}", stderr.trim());
     }
 
-    Ok(path.to_string_lossy().to_string())
+    Ok(())
 }
 
 /// Uninstall a launchd job for the repo.
-pub fn uninstall(repo_path: &Path, scheduler_id: Option<&str>) -> Result<()> {
-    let _ = scheduler_id;
+pub fn uninstall(repo_path: &Path) -> Result<()> {
     unload_and_remove(&plist_path(repo_path), &plist_label(repo_path))?;
     unload_and_remove(
         &legacy_plist_path(repo_path),
@@ -339,27 +338,26 @@ pub fn is_legacy_loaded(repo_path: &Path) -> bool {
     label_is_loaded(&legacy_plist_label(repo_path))
 }
 
-/// Validate that the binary path in the plist still exists.
-#[allow(dead_code)]
-pub fn validate_binary_path(repo_path: &Path) -> Result<bool> {
-    let Some(path) = existing_plist_path(repo_path) else {
-        return Ok(false);
-    };
+/// Binary path the installed plist (current or legacy label) launches.
+pub fn scheduled_binary(repo_path: &Path) -> Option<PathBuf> {
+    let content = fs::read_to_string(existing_plist_path(repo_path)?).ok()?;
+    plist_program(&content)
+}
 
-    let content = fs::read_to_string(&path).with_context(|| "Failed to read plist")?;
+/// First `<string>` of the plist's `ProgramArguments` array, unescaped.
+pub(super) fn plist_program(content: &str) -> Option<PathBuf> {
+    let args = &content[content.find("<key>ProgramArguments</key>")?..];
+    let start = args.find("<string>")? + "<string>".len();
+    let end = args[start..].find("</string>")?;
+    Some(PathBuf::from(xml_unescape(&args[start..start + end])))
+}
 
-    // Extract binary path from ProgramArguments (first <string> after the array)
-    if let Some(start) = content.find("<array>") {
-        if let Some(str_start) = content[start..].find("<string>") {
-            let offset = start + str_start + 8;
-            if let Some(str_end) = content[offset..].find("</string>") {
-                let bin_path = &content[offset..offset + str_end];
-                return Ok(Path::new(bin_path).exists());
-            }
-        }
-    }
-
-    Ok(false)
+fn xml_unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 #[cfg(test)]

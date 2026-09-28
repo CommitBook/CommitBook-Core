@@ -31,7 +31,8 @@ These concepts recur across every surface. The design system needs a consistent 
 - **Sync mode**: `aiResolve` (let the configured AI rewrite conflicted files) or `manual` (leave conflict markers in place). Picked per-sync; background syncs default to `aiResolve`, user-initiated syncs may prompt.
 - **Conflict**: a path with ancestor/local/remote Git index entries. Sides are nullable for add/delete conflicts, and binary or special entries remain manual. Resolutions: take local, take remote, keep both, delete, or manual edit.
 - **Schedule**: a 5-field cron expression with friendly presets (every 5/15/30 min, hourly, every 4h, daily at 9am, custom). Display the cron in plain English wherever it appears.
-- **Scheduler state**: running / stopped, plus enabled / disabled. These are independent (a CommitBook can be enabled but not currently running, or running but disabled mid-cycle).
+- **Scheduler state**: running, stopped, or broken (a job is installed but its binary is gone). There is no separate enabled flag; stopping the scheduler is how a device pauses.
+- **Devices**: every device that syncs a CommitBook has a name and platform, visible to the other devices.
 - **AI provider**: Claude, Copilot, Codex, Gemini, Cursor, or a fallback (timestamp-based message). The UI should show which providers are installed/available on the user's machine, and which one is currently selected for commit messages and for conflict resolution (these can differ).
 - **Auth**: a personal access token tied to a provider (GitHub, GitLab, etc.), stored locally with restrictive permissions. The UI must support add / replace / clear, and surface "your token is missing or invalid" without leaking the token itself.
 - **Activity log**: a JSON-lines stream of events (timestamp, level, message). Levels are debug / info / warn / error. Logs rotate daily; default retention is 30 days. The UI streams new entries in real time on the TUI and web surfaces.
@@ -41,7 +42,7 @@ These concepts recur across every surface. The design system needs a consistent 
 
 ### 1. CLI (`commitbook`)
 
-Ten commands: `init`, `sync`, `start`, `stop`, `status`, `schedule <expr>`, `doctor [--fix]`, `log [-n] [-f]`, `login --token --provider`, `completions <shell>`.
+Nine commands: `init`, `sync`, `start`, `stop`, `status`, `schedule <expr>`, `doctor [--fix]`, `log [-n] [-f]`, `completions <shell>`.
 
 Output is colored text: bold cyan headers, green/yellow/red status glyphs, dimmed secondary text. A `--json` flag produces machine-readable output. There are no spinners, tables, or interactive prompts: everything is a single pass of structured text.
 

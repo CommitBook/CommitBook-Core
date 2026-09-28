@@ -7,9 +7,7 @@ use std::time::Duration;
 use super::conflict::{
     build_resolve_prompt, finalize_resolved_text, ConflictResolution, ConflictResolver,
 };
-use super::{
-    clean_message, looks_like_diff_narration, truncate, wait_with_timeout, CommitMessageProvider,
-};
+use super::{clean_message, looks_like_diff_narration, truncate, CommitMessageProvider};
 use crate::git::{ChangesSummary, GitConflict};
 
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -44,15 +42,13 @@ impl CommitMessageProvider for ClaudeProvider {
 
         let repo_path = repo_path.to_path_buf();
         let output = tokio::task::spawn_blocking(move || {
-            let child = Command::new("claude")
-                .args(["-p", &prompt])
-                .current_dir(&repo_path)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .context("Failed to start claude CLI")?;
-
-            wait_with_timeout(child, CLAUDE_TIMEOUT).context("claude CLI timed out")
+            crate::process::run_bounded(
+                Command::new("claude")
+                    .args(["-p", &prompt])
+                    .current_dir(&repo_path),
+                None,
+                CLAUDE_TIMEOUT,
+            )
         })
         .await
         .context("spawn_blocking panicked")??;
@@ -98,7 +94,7 @@ impl ConflictResolver for ClaudeProvider {
         let prompt = build_resolve_prompt(conflict)?;
         let repo_path = repo_path.to_path_buf();
         let output = tokio::task::spawn_blocking(move || {
-            super::run_with_prompt(
+            super::run_with_full_prompt(
                 Command::new("claude").arg("-p").current_dir(&repo_path),
                 &prompt,
                 CLAUDE_RESOLVE_TIMEOUT,
@@ -113,7 +109,7 @@ impl ConflictResolver for ClaudeProvider {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).to_string();
-        finalize_resolved_text(&raw, "claude CLI")
+        finalize_resolved_text(&raw, conflict, "claude CLI")
     }
 }
 

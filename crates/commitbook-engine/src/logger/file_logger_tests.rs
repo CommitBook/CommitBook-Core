@@ -2,14 +2,14 @@ use super::*;
 
 fn make_logger() -> (tempfile::TempDir, FileLogger) {
     let tmp = tempfile::tempdir().unwrap();
-    let logger = FileLogger::new(tmp.path(), 10).unwrap();
+    let logger = FileLogger::new(tmp.path(), LogKeep::Days(10)).unwrap();
     (tmp, logger)
 }
 
 #[test]
 fn test_creates_logs_dir() {
     let tmp = tempfile::tempdir().unwrap();
-    let _logger = FileLogger::new(tmp.path(), 10).unwrap();
+    let _logger = FileLogger::new(tmp.path(), LogKeep::Days(10)).unwrap();
     assert!(tmp
         .path()
         .join(".CommitBook")
@@ -190,4 +190,16 @@ fn test_read_entries_offset_beyond_end() {
 
     let entries = logger.read_entries(10, 100).unwrap();
     assert!(entries.is_empty());
+}
+
+#[test]
+fn test_cleanup_keeps_everything_when_retention_is_forever() {
+    let tmp = tempfile::tempdir().unwrap();
+    let logger = FileLogger::new(tmp.path(), LogKeep::Forever).unwrap();
+    let old = logger.logs_dir().join("2020-01-01.log");
+    fs::write(&old, "{}\n").unwrap();
+
+    logger.cleanup_old_logs().unwrap();
+
+    assert!(old.exists());
 }
