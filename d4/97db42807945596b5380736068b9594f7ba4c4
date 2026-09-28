@@ -1,0 +1,35 @@
+docs/BrandKit/commitbook-app-icon-secondary.svg
+  s_fb1d6ea40365f5::t_816126a0ab7533 1
+docs/BrandKit/commitbook-app-icon.svg
+  s_fb1d6ea40365f5::t_816126a0ab7533 1
+docs/BrandKit/commitbook-product-icon.svg
+  s_fb1d6ea40365f5::t_816126a0ab7533 1
+docs/BrandKit/README.md
+  s_fb1d6ea40365f5::t_816126a0ab7533 18,28
+  s_fb1d6ea40365f5::t_c4a4953661e18a 3,5,34,38-39,44,46
+  s_fb1d6ea40365f5::t_c6c5986c65cd5a 15
+docs/BrandKit/commitbook-logo.svg
+  s_fb1d6ea40365f5::t_816126a0ab7533 1
+docs/BrandKit/commitbook-github-avatar.svg
+  s_fb1d6ea40365f5::t_c6c5986c65cd5a 1
+docs/BrandKit/index.html
+  s_fb1d6ea40365f5::t_c4a4953661e18a 1
+docs/BrandKit/github-avatar-preview.html
+  s_fb1d6ea40365f5::t_c6c5986c65cd5a 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d497db42807945596b5380736068b9594f7ba4c4",
+  "prompts": {},
+  "sessions": {
+    "s_fb1d6ea40365f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7eb-0c9e-7a60-9b56-a8f002ba23d3",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
