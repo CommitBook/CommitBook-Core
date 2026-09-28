@@ -9,6 +9,7 @@
 //! registry. `scan_workspaces_root` reads each subdirectory's
 //! `.CommitBook/config.toml` to materialize `CommitBook` summaries.
 
+pub mod identity;
 pub mod init;
 pub mod preferences;
 pub mod publication;
@@ -25,8 +26,8 @@ pub use slug::slug_for;
 /// Runtime view of a CommitBook clone on this device.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitBook {
-    /// `<owner>/<repo>`, stable across devices.
-    pub id: String,
+    /// Persisted eight-character identity of this local clone.
+    pub commitbook_id: String,
     pub owner: String,
     pub repo: String,
     pub name: String,
@@ -36,12 +37,6 @@ pub struct CommitBook {
     pub auto_sync: bool,
     /// `<workspacesRoot>/<owner>__<repo>` on disk.
     pub local_path: PathBuf,
-}
-
-impl CommitBook {
-    pub fn id(owner: &str, repo: &str) -> String {
-        format!("{owner}/{repo}")
-    }
 }
 
 #[cfg(test)]

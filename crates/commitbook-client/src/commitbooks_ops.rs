@@ -31,15 +31,16 @@ pub fn init_local_commitbook(
     if clone_path.exists() {
         // Already cloned. Repair and publish metadata while holding the same
         // repository lock used by sync and every other mutating FFI call.
-        let _lock = RepoLock::acquire(&clone_path)
+        let lock = RepoLock::acquire(&clone_path)
             .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
         validate_existing_identity(&clone_path, input)?;
         let (remote, _branch) = configured_or_inferred_target(&clone_path, &input.branch)?;
         ensure_commitbook_initialized(&clone_path, input, &remote, &creds)?;
+        commitbook_engine::commitbooks::identity::ensure_locked(&clone_path, &lock)?;
     } else {
         let repo_url = format!("https://github.com/{}/{}.git", input.owner, input.repo);
         clone_repo_with_creds(&repo_url, &clone_path, &input.branch, &creds)?;
-        let _lock = RepoLock::acquire(&clone_path)
+        let lock = RepoLock::acquire(&clone_path)
             .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
         // A fork, transfer, or stale committed config can identify a
         // different CommitBook even in a freshly-created local clone. Do not
@@ -47,6 +48,7 @@ pub fn init_local_commitbook(
         // repository.
         let (remote, _branch) = prepare_fresh_clone(&clone_path, input)?;
         ensure_commitbook_initialized(&clone_path, input, &remote, &creds)?;
+        commitbook_engine::commitbooks::identity::ensure_locked(&clone_path, &lock)?;
     }
 
     let config = LocalConfig::load(&clone_path)
@@ -72,7 +74,8 @@ pub fn init_local_commitbook(
         .unwrap_or_else(|| input.mode.clone());
 
     Ok(CommitBookSummary {
-        id: format!("{owner}/{repo}"),
+        commitbook_id: commitbook_engine::commitbooks::identity::load(&clone_path)
+            .map_err(|e| CommitBookError::database(format!("Read identity: {e:#}")))?,
         owner,
         repo,
         name: config.commitbook.name,

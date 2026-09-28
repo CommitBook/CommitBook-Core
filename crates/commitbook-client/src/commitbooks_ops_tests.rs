@@ -695,7 +695,10 @@ fn existing_clone_summary_uses_config_name_remote_identity_and_device_auth() {
     request.name = "Ignored input name".to_string();
     request.mode = "pat".to_string();
     let summary = init_local_commitbook(root.path(), &request, "unused").unwrap();
-    assert_eq!(summary.id, "owner/notes");
+    assert_eq!(
+        summary.commitbook_id,
+        commitbook_engine::commitbooks::identity::load(&clone).unwrap()
+    );
     assert_eq!(summary.owner, "owner");
     assert_eq!(summary.repo, "notes");
     assert_eq!(summary.name, "Preserved name");

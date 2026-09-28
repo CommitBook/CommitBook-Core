@@ -23,3 +23,15 @@ pub use errors::*;
 pub use types::*;
 
 uniffi::include_scaffolding!("commitbook");
+
+#[cfg(test)]
+mod test_support {
+    pub fn set_identity(root: &std::path::Path) {
+        commitbook_engine::commitbooks::identity::ensure(root).unwrap();
+        std::fs::write(
+            commitbook_engine::commitbooks::identity::path(root),
+            "CommitBook-Id = \"a1b2c3d4\"\n",
+        )
+        .unwrap();
+    }
+}

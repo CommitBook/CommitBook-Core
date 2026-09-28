@@ -572,3 +572,32 @@ use `sync`). Old files are left untouched. For obsolete development setups,
 back up local credentials and state, stop old schedulers, and initialize a fresh
 clone with the current CLI. The current advisory lock is `local/.lock`; its file
 remains after unlocking and does not itself indicate a running process.
+
+## Local CommitBook-Id
+
+Each local clone has its own eight-character lowercase hexadecimal
+`CommitBook-Id`, stored only in `.CommitBook/local/CommitBook-ID.toml`:
+
+```toml
+CommitBook-Id = "a7c39e2b"
+```
+
+Initialization or the first sync creates it under the repository lock, using a
+SHA-256 hash of the canonical path and fresh OS randomness. It is saved once,
+not recalculated when the folder, display name, or remote changes. Git never
+stages or synchronizes this file. Device IDs remain separate.
+
+IDs are probabilistically unique, not global identifiers. There is no registry
+or generation-time comparison with other clones. A workspace scan reports
+both clones if a copied folder or chance collision produces duplicate IDs;
+operations never silently choose one. To repair, remove **only the intended
+copy's** `local/CommitBook-ID.toml` and run `commitbook init` (which asks before
+publishing metadata), or use the SDK's local-only registration method.
+
+SDK consumers use `commitbook_id` returned by initialization/listing for all
+operations, not `owner/repo` or absolute paths. Register an externally cloned
+workspace with `register_local_commitbook(relative_path)`; this writes only
+local identity, without committing or contacting the remote. Lists and status
+never create or repair IDs; missing, malformed, and unsafe identity files are
+reported for explicit repair. A Git remote identifies the remote repository,
+not this local clone.

@@ -173,7 +173,7 @@ impl CommitBookEngineClient {
         Ok(books
             .into_iter()
             .map(|cb| CommitBookSummary {
-                id: cb.id,
+                commitbook_id: cb.commitbook_id,
                 owner: cb.owner,
                 repo: cb.repo,
                 name: cb.name,
@@ -187,10 +187,31 @@ impl CommitBookEngineClient {
             .collect())
     }
 
+    /// Register a direct child clone. Does not modify Git history or shared config.
+    pub fn register_local_commitbook(&self, relative_path: String) -> Result<CommitBookSummary> {
+        let mut components = std::path::Path::new(&relative_path).components();
+        if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+            || components.next().is_some()
+            || relative_path.contains(['/', '\\'])
+        {
+            return Err(CommitBookError::invalid_input(
+                "Expected one workspace directory name",
+            ));
+        }
+        let path = self.workspaces_root.join(relative_path);
+        crate::paths::validate_managed_clone(&self.workspaces_root, &path)?;
+        let lock = commitbook_engine::state::RepoLock::acquire(&path)
+            .map_err(|e| CommitBookError::database(format!("Lock clone: {e:#}")))?;
+        let config = commitbook_engine::config::LocalConfig::load(&path)?;
+        commitbook_engine::git::remote::remote_identity(&path, &config.git.remote)?;
+        let id = commitbook_engine::commitbooks::identity::ensure_locked(&path, &lock)?;
+        self.get_commitbook(id)
+    }
+
     pub fn get_commitbook(&self, commitbook_id: String) -> Result<CommitBookSummary> {
         let cb = crate::paths::find_managed_commitbook(&self.workspaces_root, &commitbook_id)?;
         Ok(CommitBookSummary {
-            id: cb.id,
+            commitbook_id: cb.commitbook_id,
             owner: cb.owner,
             repo: cb.repo,
             name: cb.name,

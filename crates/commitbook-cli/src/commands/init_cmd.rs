@@ -16,7 +16,7 @@ fn initialize_and_publish(
     remote_name: Option<&str>,
     device_name: Option<&str>,
 ) -> Result<()> {
-    let _lock = RepoLock::acquire(repo_root)?;
+    let lock = RepoLock::acquire(repo_root)?;
     let repo = GitRepo::open(repo_root)?;
     if repo.merge_in_progress() {
         bail!(
@@ -30,6 +30,7 @@ fn initialize_and_publish(
         None => LocalConfig::load(repo_root)?.git.remote,
     };
     state::initialize(repo_root, &remote_name, &current_branch)?;
+    commitbook_engine::commitbooks::identity::ensure_locked(repo_root, &lock)?;
     let config = LocalConfig::load(repo_root)?;
     let auth = devices::desktop_auth(repo_root, &config.git.remote);
     devices::register(repo_root, device_name, auth)?;

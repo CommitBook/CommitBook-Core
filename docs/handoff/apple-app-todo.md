@@ -114,3 +114,18 @@ These are owned by the engine repo, but the Apple repo waits on them:
 
 - [ ] First real release tagged `0.5.0` (no `v` prefix) with `CommitBookEngine.xcframework.zip` attached and SHA256 in release notes.
 - [ ] Future releases bump to `0.5.1` / `0.6.0` etc., Apple repo bumps `.core-version` per release.
+
+## Local clone identity contract
+
+`CommitBookSummary.commitbookId` is an eight-character local clone identifier,
+not `owner/repo`. Persist the value returned by the engine; never reconstruct
+it from a path or remote. Resolve the current app-private `workspacesRoot` at
+startup, then list clones. Identity is stored in the ignored
+`.CommitBook/local/CommitBook-ID.toml` with the key `CommitBook-Id`. Moving the
+app storage root or renaming a clone does not change its identity.
+
+For an imported direct-child clone, call `registerLocalCommitbook(relativePath)`
+to initialize local identity without Git publication. Listing is read-only;
+show broken-clone diagnostics for missing/invalid/duplicate IDs. Do not silently
+reset identities. After explicitly removing a copied clone's duplicate identity
+file, register that copy again and replace its saved UI selection.

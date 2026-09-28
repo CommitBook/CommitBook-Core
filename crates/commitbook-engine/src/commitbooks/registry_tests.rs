@@ -15,6 +15,7 @@ fn write_commitbook(root: &std::path::Path, owner: &str, repo: &str, branch: &st
     LocalConfig::new(&format!("{repo} display"), branch, "origin")
         .save(&clone)
         .unwrap();
+    identity::ensure(&clone).unwrap();
 }
 
 #[test]
@@ -65,7 +66,10 @@ fn scan_finds_one_commitbook() {
     let cbs = scan_workspaces_root(tmp.path()).unwrap();
     assert_eq!(cbs.len(), 1);
     let cb = &cbs[0];
-    assert_eq!(cb.id, "manuel/notes");
+    assert_eq!(
+        cb.commitbook_id,
+        identity::load(&tmp.path().join("manuel__notes")).unwrap()
+    );
     assert_eq!(cb.owner, "manuel");
     assert_eq!(cb.repo, "notes");
     assert_eq!(cb.name, "notes display");
@@ -83,12 +87,13 @@ fn scan_returns_sorted_results() {
     write_commitbook(tmp.path(), "alice", "notes", "main");
     write_commitbook(tmp.path(), "alice", "todo", "main");
     let cbs = scan_workspaces_root(tmp.path()).unwrap();
-    let ids: Vec<_> = cbs.iter().map(|c| c.id.as_str()).collect();
-    assert_eq!(ids, vec!["alice/notes", "alice/todo", "bob/diary"]);
+    let ids: Vec<_> = cbs.iter().map(|c| c.commitbook_id.as_str()).collect();
+    assert_eq!(ids.len(), 3);
+    assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
 }
 
 #[test]
-fn scan_skips_clones_whose_remote_has_no_owner() {
+fn scan_supports_local_remotes_without_owner() {
     let tmp = tempfile::tempdir().unwrap();
     let clone = tmp.path().join("local-only");
     git2::Repository::init(&clone)
@@ -98,9 +103,10 @@ fn scan_skips_clones_whose_remote_has_no_owner() {
     LocalConfig::new("Notes", "main", "origin")
         .save(&clone)
         .unwrap();
+    identity::ensure(&clone).unwrap();
 
     let cbs = scan_workspaces_root(tmp.path()).unwrap();
-    assert!(cbs.is_empty(), "{cbs:?}");
+    assert_eq!(cbs.len(), 1, "{cbs:?}");
 }
 
 /// A clone whose config uses the pre-0.9 format, which no longer loads.
@@ -123,8 +129,15 @@ fn scan_reports_a_broken_clone_without_hiding_the_others() {
     write_old_format_clone(tmp.path(), "manuel__old");
 
     let scan = scan_workspaces(tmp.path()).unwrap();
-    let ids: Vec<&str> = scan.commitbooks.iter().map(|cb| cb.id.as_str()).collect();
-    assert_eq!(ids, ["manuel/notes"]);
+    let ids: Vec<&str> = scan
+        .commitbooks
+        .iter()
+        .map(|cb| cb.commitbook_id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        [identity::load(&tmp.path().join("manuel__notes")).unwrap()]
+    );
     assert_eq!(scan.broken.len(), 1);
     let error = &scan.broken[0].error;
     assert!(
@@ -135,9 +148,12 @@ fn scan_reports_a_broken_clone_without_hiding_the_others() {
     assert!(error.contains("commitbook init"), "{error}");
 
     // The usable clone is still found by id.
-    assert!(registry::find_by_id(tmp.path(), "manuel/notes")
-        .unwrap()
-        .is_some());
+    assert!(registry::find_by_id(
+        tmp.path(),
+        &identity::load(&tmp.path().join("manuel__notes")).unwrap()
+    )
+    .unwrap()
+    .is_some());
 }
 
 #[test]
@@ -180,9 +196,12 @@ fn find_by_id_returns_none_when_missing() {
 fn find_by_id_returns_match() {
     let tmp = tempfile::tempdir().unwrap();
     write_commitbook(tmp.path(), "manuel", "notes", "main");
-    let cb = registry::find_by_id(tmp.path(), "manuel/notes")
-        .unwrap()
-        .unwrap();
+    let cb = registry::find_by_id(
+        tmp.path(),
+        &identity::load(&tmp.path().join("manuel__notes")).unwrap(),
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(cb.repo, "notes");
 }
 
@@ -264,4 +283,28 @@ fn init_keeps_an_existing_config_and_device() {
     let (id, device) = crate::devices::this_device(tmp.path()).unwrap().unwrap();
     assert_eq!(device.name, crate::devices::default_name(&id));
     assert_eq!(device.auth, Auth::Pat);
+}
+
+#[test]
+fn scan_reports_missing_and_duplicate_identities_without_repair() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_commitbook(tmp.path(), "one", "notes", "main");
+    write_commitbook(tmp.path(), "two", "notes", "main");
+    let one = tmp.path().join("one__notes");
+    let two = tmp.path().join("two__notes");
+    let id = identity::load(&one).unwrap();
+    fs::copy(identity::path(&one), identity::path(&two)).unwrap();
+    let scan = scan_workspaces(tmp.path()).unwrap();
+    assert!(scan.commitbooks.is_empty());
+    assert_eq!(scan.broken.len(), 2);
+    assert!(registry::find_by_id(tmp.path(), &id)
+        .unwrap_err()
+        .to_string()
+        .contains("Duplicate"));
+    assert_eq!(identity::load(&two).unwrap(), id);
+    fs::remove_file(identity::path(&two)).unwrap();
+    let scan = scan_workspaces(tmp.path()).unwrap();
+    assert_eq!(scan.commitbooks.len(), 1);
+    assert_eq!(scan.broken.len(), 1);
+    assert!(!identity::path(&two).exists());
 }

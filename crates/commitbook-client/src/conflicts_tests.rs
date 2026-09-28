@@ -59,6 +59,7 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
         commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
+    crate::test_support::set_identity(&clone);
     std::fs::write(clone.join("base.md"), "base\n").unwrap();
     let repo = GitRepo::open(&clone).unwrap();
     repo.stage_all().unwrap();
@@ -73,7 +74,7 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
     let error = resolve_conflict(
         root.path(),
         &ResolveConflictInput {
-            commitbook_id: "owner/notes".to_string(),
+            commitbook_id: "a1b2c3d4".to_string(),
             conflict_id: "base.md".to_string(),
             resolution_type: "delete".to_string(),
             manual_content: None,
@@ -97,7 +98,7 @@ fn manual_resolution_refuses_wrong_branch_before_touching_index() {
     let error = resolve_conflict(
         root.path(),
         &ResolveConflictInput {
-            commitbook_id: "owner/notes".to_string(),
+            commitbook_id: "a1b2c3d4".to_string(),
             conflict_id: "base.md".to_string(),
             resolution_type: "delete".to_string(),
             manual_content: None,

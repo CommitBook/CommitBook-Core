@@ -91,14 +91,20 @@ pub fn scan_workspaces(workspaces_root: &Path) -> Result<WorkspaceScan> {
                 continue;
             }
         };
-        // Identity comes from the remote URL; a clone whose remote cannot be
-        // parsed is not addressable by `<owner>/<repo>`.
+        let commitbook_id = match super::identity::load(&canonical_path) {
+            Ok(id) => id,
+            Err(error) => {
+                broken.push(BrokenClone {
+                    path: canonical_path,
+                    error: format!("{error:#}"),
+                });
+                continue;
+            }
+        };
+        // Remote metadata is descriptive, not the clone's identity.
         let Ok(identity) = remote_identity(&canonical_path, &config.git.remote) else {
             continue;
         };
-        if identity.owner.is_empty() {
-            continue;
-        }
         let mode = crate::devices::this_device(&canonical_path)
             .ok()
             .flatten()
@@ -108,7 +114,7 @@ pub fn scan_workspaces(workspaces_root: &Path) -> Result<WorkspaceScan> {
         let prefs = load_preferences(&canonical_path).unwrap_or_default();
 
         out.push(CommitBook {
-            id: CommitBook::id(&identity.owner, &identity.repo),
+            commitbook_id,
             owner: identity.owner,
             repo: identity.repo,
             name: config.commitbook.name,
@@ -120,7 +126,19 @@ pub fn scan_workspaces(workspaces_root: &Path) -> Result<WorkspaceScan> {
         });
     }
 
-    out.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut counts = std::collections::HashMap::new();
+    for cb in &out {
+        *counts.entry(cb.commitbook_id.clone()).or_insert(0usize) += 1;
+    }
+    out.retain(|cb| {
+        if counts[&cb.commitbook_id] > 1 {
+            broken.push(BrokenClone { path: cb.local_path.clone(), error: format!(
+                "Duplicate CommitBook-Id {} at {}; remove the intended copy's local/CommitBook-ID.toml and register it again",
+                cb.commitbook_id, cb.local_path.display()) });
+            false
+        } else { true }
+    });
+    out.sort_by(|a, b| a.commitbook_id.cmp(&b.commitbook_id));
     broken.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(WorkspaceScan {
         commitbooks: out,
@@ -128,12 +146,16 @@ pub fn scan_workspaces(workspaces_root: &Path) -> Result<WorkspaceScan> {
     })
 }
 
-/// Find a single CommitBook by id (`<owner>/<repo>`). Returns `None` if not
+/// Find one local clone by persisted CommitBook-Id. Returns `None` if not
 /// present in `workspaces_root`. When it is missing and some clones could not
 /// be loaded, the error names them: the requested one may be among them.
 pub fn find_by_id(workspaces_root: &Path, id: &str) -> Result<Option<CommitBook>> {
     let scan = scan_workspaces(workspaces_root)?;
-    if let Some(found) = scan.commitbooks.into_iter().find(|cb| cb.id == id) {
+    if let Some(found) = scan
+        .commitbooks
+        .into_iter()
+        .find(|cb| cb.commitbook_id == id)
+    {
         return Ok(Some(found));
     }
     if scan.broken.is_empty() {

@@ -60,7 +60,7 @@ dictionary CommitBookInput {
 };
 
 dictionary CommitBookSummary {
-    string id;
+    string commitbook_id;
     string owner;
     string repo;
     string name;
@@ -166,6 +166,10 @@ interface CommitBookEngineClient {
 
     [Throws=CommitBookError]
     CommitBookSummary get_commitbook(string commitbook_id);
+
+    // Register only local identity, without committing or contacting the remote.
+    [Throws=CommitBookError]
+    CommitBookSummary register_local_commitbook(string relative_path);
 
     // Refused with InvalidInput while the clone has uncommitted changes,
     // commits not yet pushed, or a merge in progress, since deleting would

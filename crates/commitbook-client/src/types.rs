@@ -33,7 +33,7 @@ pub struct CommitBookInput {
 /// Materialized view of a CommitBook clone on this device.
 #[derive(Debug, Clone)]
 pub struct CommitBookSummary {
-    pub id: String,
+    pub commitbook_id: String,
     pub owner: String,
     pub repo: String,
     pub name: String,

@@ -23,6 +23,7 @@ chrono = { version = "0.4.45", features = ["serde"] }
 fs2 = "0.4.3"
 git2 = { version = "0.21.0", default-features = false, features = ["https", "ssh"] }
 hex = "0.4.3"
+getrandom = "0.4.3"
 libc = "0.2.189"
 log = "0.4.34"
 serde = { version = "1.0.229", features = ["derive"] }
