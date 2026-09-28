@@ -63,10 +63,10 @@ it does not build or publish this Core artifact.
 
 - Destination: `CommitBook/homebrew-tap`, default branch,
   `Formula/commitbook.rb`. No cask is generated.
-- Configure `HOMEBREW_TAP_REPO_COMMIT_TOKEN` as a repository secret or a secret
-  in the `release` environment. It needs **Contents: read/write** access to the
-  tap repository. The normal `GITHUB_TOKEN` reads this source repository's
-  release; it cannot write to the separate tap.
+- Keep `HOMEBREW_TAP_DEPLOY_KEY` as a Core repository Actions secret. Its public
+  half is a write deploy key on `CommitBook/homebrew-tap`; organization deploy
+  keys must remain enabled. The normal `GITHUB_TOKEN` reads this source
+  repository's release but cannot write to the separate tap.
 - Keep the `release` environment restricted to `main` and version-shaped tags.
   S3's publish job uses that environment. If tap branch
   protection disallows the token's direct push, maintainers must configure an
