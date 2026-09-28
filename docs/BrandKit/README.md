@@ -6,6 +6,7 @@ The approved primary identity is green on pure black: a bright green front page,
 
 | Asset | Use |
 |---|---|
+| `commitbook-readme-banner.svg` / `.png` | 1200 × 440 centered banner; black app-icon tile on soft mint with generous vertical spacing |
 | `commitbook-logo.svg` | Transparent, editable logo master with semantic color tokens |
 | `commitbook-logo.png` | Transparent 512 × 512 raster logo |
 | `commitbook-app-icon.svg` | 1024 × 1024 opaque square vector source; no baked corner mask |
@@ -43,4 +44,4 @@ References: [GitHub organization profile instructions](https://docs.github.com/e
 
 ## Retained assets
 
-Only the approved green-on-black identity, pale-green secondary, and their required logo, product, favicon, and GitHub avatar exports are retained. Superseded variants, archives, and comparison pages have been removed.
+Only the approved green-on-black identity, pale-green secondary, and their required logo, README banner, product, favicon, and GitHub avatar exports are retained. Superseded variants, archives, and comparison pages have been removed.
