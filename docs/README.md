@@ -563,3 +563,12 @@ cycle; the additional `last_attempt_at`, `last_fetch_at`, and `last_push_at`
 fields distinguish attempts, remote checks, and publication. The web status
 API retains its existing fields and adds a `repository` object containing the
 shared detailed status. Unknown change counts are null rather than zero.
+
+## Pre-launch compatibility
+
+Only the current schema and `.CommitBook/local/` layout are supported. There
+are no upgrades for older development layouts or commands (`run` is removed;
+use `sync`). Old files are left untouched. For obsolete development setups,
+back up local credentials and state, stop old schedulers, and initialize a fresh
+clone with the current CLI. The current advisory lock is `local/.lock`; its file
+remains after unlocking and does not itself indicate a running process.

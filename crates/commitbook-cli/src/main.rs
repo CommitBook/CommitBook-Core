@@ -70,7 +70,6 @@ enum Commands {
     },
 
     /// Commit locally and sync with remote
-    #[command(alias = "run")]
     Sync,
 
     /// Preview the next local snapshot without changing files or contacting the remote

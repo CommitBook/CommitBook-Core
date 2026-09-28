@@ -81,17 +81,28 @@ pub fn initialize(repo_root: &Path, remote_name: &str, branch: &str) -> Result<(
     Ok(())
 }
 
-/// Prepare device-local state and migrate files written by pre-`local/`
-/// releases. New destinations win collisions; legacy files are retained so
-/// recovery is always possible.
-pub fn prepare_local_state(repo_root: &Path) -> Result<()> {
-    ensure_local_layout(repo_root)?;
-    migrate_legacy_state(repo_root)
+/// Reject unknown metadata before sync can stage or publish abandoned state.
+/// This validates the current layout only; it never moves or removes anything.
+pub fn validate_metadata_layout(repo_root: &Path) -> Result<()> {
+    let directory = crate::config::LocalConfig::commitbook_dir(repo_root);
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        if !matches!(
+            entry.file_name().to_str(),
+            Some("config.toml" | ".gitignore" | "devices" | "local")
+        ) {
+            bail!("Unexpected CommitBook metadata entry {}; refusing sync to avoid publishing local state. Back up the development layout and initialize a fresh clone", entry.path().display());
+        }
+    }
+    Ok(())
 }
 
-/// Create only the directories required to open the canonical lock. This is
-/// deliberately separate from migration so `RepoLock` can coordinate with an
-/// active legacy process before moving any state.
+/// Prepare only the current device-local layout. Never migrates old files.
+pub fn prepare_local_state(repo_root: &Path) -> Result<()> {
+    ensure_local_layout(repo_root)
+}
+
+/// Create directories required for the current repository lock and state.
 pub(crate) fn ensure_local_layout(repo_root: &Path) -> Result<()> {
     let cb_dir = repo_root.join(".CommitBook");
     let local = cb_dir.join("local");
@@ -138,167 +149,6 @@ fn ensure_real_directory(path: &Path) -> Result<()> {
             Err(error).with_context(|| format!("Failed to inspect local state: {}", path.display()))
         }
     }
-}
-
-/// Move legacy state after the caller has coordinated any legacy lock.
-pub(crate) fn migrate_legacy_state(repo_root: &Path) -> Result<()> {
-    let cb_dir = repo_root.join(".CommitBook");
-    let local = cb_dir.join("local");
-
-    let recovery = local.join("legacy");
-    for name in ["auth.toml", "state.toml"] {
-        migrate_entry(&cb_dir.join(name), &local.join(name), &recovery)?;
-    }
-
-    let legacy_logs = cb_dir.join("logs");
-    let local_logs = local.join("logs");
-    match fs::symlink_metadata(&legacy_logs) {
-        Ok(metadata) => {
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                bail!(
-                    "Legacy logs path is not a real directory: {}",
-                    legacy_logs.display()
-                );
-            }
-            for entry in fs::read_dir(&legacy_logs)
-                .with_context(|| format!("Failed to read {}", legacy_logs.display()))?
-            {
-                let entry = entry?;
-                let destination = local_logs.join(entry.file_name());
-                let file_type = entry.file_type()?;
-                if file_type.is_symlink() || !file_type.is_file() {
-                    quarantine_legacy_entry(
-                        &entry.path(),
-                        &recovery.join("logs"),
-                        &entry.file_name(),
-                    )?;
-                } else if let Ok(destination_metadata) = fs::symlink_metadata(&destination) {
-                    if destination_metadata.file_type().is_symlink()
-                        || !destination_metadata.is_file()
-                    {
-                        bail!(
-                            "Local log destination is not a regular file: {}",
-                            destination.display()
-                        );
-                    }
-                    quarantine_legacy_entry(
-                        &entry.path(),
-                        &recovery.join("logs"),
-                        &entry.file_name(),
-                    )?;
-                } else {
-                    fs::rename(entry.path(), &destination).with_context(|| {
-                        format!("Failed to migrate log to {}", destination.display())
-                    })?;
-                }
-            }
-            if fs::read_dir(&legacy_logs)
-                .with_context(|| format!("Failed to re-read {}", legacy_logs.display()))?
-                .next()
-                .is_none()
-            {
-                fs::remove_dir(&legacy_logs).with_context(|| {
-                    format!(
-                        "Failed to remove empty legacy logs: {}",
-                        legacy_logs.display()
-                    )
-                })?;
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(error).with_context(|| {
-                format!("Failed to inspect legacy logs: {}", legacy_logs.display())
-            })
-        }
-    }
-
-    Ok(())
-}
-
-fn migrate_entry(source: &Path, destination: &Path, recovery_dir: &Path) -> Result<()> {
-    match fs::symlink_metadata(source) {
-        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
-        Ok(_) => bail!("Legacy state is not a regular file: {}", source.display()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("Failed to inspect legacy state: {}", source.display()))
-        }
-    }
-    match fs::symlink_metadata(destination) {
-        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
-            let file_name = source
-                .file_name()
-                .context("Legacy state path has no file name")?;
-            quarantine_legacy_entry(source, recovery_dir, file_name)?;
-            return Ok(());
-        }
-        Ok(_) => bail!(
-            "Local state destination is not a regular file: {}",
-            destination.display()
-        ),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(error).with_context(|| {
-                format!(
-                    "Failed to inspect local state destination: {}",
-                    destination.display()
-                )
-            })
-        }
-    }
-    fs::rename(source, destination).with_context(|| {
-        format!(
-            "Failed to migrate {} to {}",
-            source.display(),
-            destination.display()
-        )
-    })?;
-    Ok(())
-}
-
-fn quarantine_legacy_entry(
-    source: &Path,
-    recovery_dir: &Path,
-    file_name: &std::ffi::OsStr,
-) -> Result<PathBuf> {
-    if let Some(parent) = recovery_dir.parent() {
-        ensure_real_directory(parent)?;
-    }
-    ensure_real_directory(recovery_dir)?;
-    let stem = file_name.to_string_lossy();
-    let destination = (0u32..)
-        .map(|suffix| {
-            if suffix == 0 {
-                recovery_dir.join(file_name)
-            } else {
-                recovery_dir.join(format!("{stem}.{suffix}"))
-            }
-        })
-        .find(|candidate| match fs::symlink_metadata(candidate) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
-            Ok(_) | Err(_) => false,
-        })
-        .context("Could not select a unique legacy recovery path")?;
-    fs::rename(source, &destination).with_context(|| {
-        format!(
-            "Failed to retain legacy state {} at {}",
-            source.display(),
-            destination.display()
-        )
-    })?;
-    log::warn!(
-        "Retained legacy state {} in ignored recovery path {}",
-        source.display(),
-        destination.display()
-    );
-    Ok(destination)
-}
-
-/// Get the local state directory (`.CommitBook/local/`) from a `.CommitBook/` dir path.
-pub fn local_dir(commitbook_dir: &Path) -> PathBuf {
-    commitbook_dir.join("local")
 }
 
 /// Get the repo root from a `.CommitBook/` dir path.

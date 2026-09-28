@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PendingInitPush {
     pub commit_oid: String,
     pub remote: String,
@@ -10,12 +11,8 @@ pub struct PendingInitPush {
 }
 
 /// Sync state stored in `.CommitBook/local/state.toml`.
-///
-/// Persistent across runs. `remote_head` from older versions of CommitBook
-/// is no longer needed (derivable via `git rev-parse origin/<branch>`); it
-/// loads silently from old `state.toml` files via serde's default
-/// unknown-field tolerance.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct SyncState {
     #[serde(default)]
     pub last_attempt_at: Option<String>,

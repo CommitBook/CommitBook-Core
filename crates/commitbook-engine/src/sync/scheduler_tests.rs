@@ -1758,3 +1758,35 @@ async fn both_mode_preserves_pending_rejected_and_stale_reviews() {
         assert!(state.last_error.unwrap().contains("await review"));
     }
 }
+
+#[tokio::test]
+async fn abandoned_metadata_cannot_be_snapshotted_or_pushed() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    let repository = git2::Repository::open(root).unwrap();
+    let before = repository.head().unwrap().target();
+    let index_before = std::fs::read(repository.path().join("index")).unwrap();
+    let abandoned = root.join(".CommitBook/auth.toml");
+    std::fs::write(&abandoned, "private fixture").unwrap();
+    std::fs::write(root.join("draft.md"), "pending notes").unwrap();
+    let error = sync_with_resolver(
+        root,
+        &SyncOptions::new("origin", &fx.branch, true),
+        None,
+        &SystemCredentials,
+        &logger,
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("refusing sync"));
+    assert_eq!(repository.head().unwrap().target(), before);
+    assert_eq!(
+        std::fs::read(repository.path().join("index")).unwrap(),
+        index_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(abandoned).unwrap(),
+        "private fixture"
+    );
+}
