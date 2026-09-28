@@ -63,14 +63,16 @@ it does not build or publish this Core artifact.
 
 - Destination: `CommitBook/homebrew-tap`, default branch,
   `Formula/commitbook.rb`. No cask is generated.
-- Keep `HOMEBREW_TAP_DEPLOY_KEY` as a Core repository Actions secret. Its public
-  half is a write deploy key on `CommitBook/homebrew-tap`; organization deploy
-  keys must remain enabled. The normal `GITHUB_TOKEN` reads this source
-  repository's release but cannot write to the separate tap.
+- Keep `HOMEBREW_TAP_DEPLOY_KEY` as a secret of the Core `release` environment,
+  so only jobs that pass that environment's policy can read it. Its public half
+  is a write deploy key on `CommitBook/homebrew-tap`; organization deploy keys
+  must remain enabled. The normal `GITHUB_TOKEN` reads this source repository's
+  release but cannot write to the separate tap. A deploy key is used instead of
+  a personal access token because it reaches only the tap, belongs to no
+  person, and does not expire.
 - Keep the `release` environment restricted to `main` and version-shaped tags.
-  S3's publish job uses that environment. If tap branch
-  protection disallows the token's direct push, maintainers must configure an
-  appropriate publishing identity before using S3.
+  S3's publish job uses that environment. If a branch rule or ruleset protects
+  the tap's default branch, add the deploy key as a bypass actor so S3 can push.
 - Release assets must be publicly downloadable for Homebrew users. S3 downloads
   and checks all four archives against `SHA256SUMS`, verifies their exact file
   layout and license files, then installs through the formula's public URL on a
@@ -82,6 +84,7 @@ it does not build or publish this Core artifact.
 - Only the verified formula artifact reaches the publish job. Publication is
   serialized; rerunning the same version skips committing if nothing changed.
   A failed push fails the job rather than overwriting concurrent tap changes.
+  S3 refuses to publish a version older than the one already in the tap.
 
 Once S3 has published the first formula, users can install with:
 
