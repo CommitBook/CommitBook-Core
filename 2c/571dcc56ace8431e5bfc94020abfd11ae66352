@@ -1,0 +1,20 @@
+docs/README.md
+  s_fb1d6ea40365f5::t_6c62acabe6c17f 3
+  s_fb1d6ea40365f5::t_b7afdf5b075c1c 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2c571dcc56ace8431e5bfc94020abfd11ae66352",
+  "prompts": {},
+  "sessions": {
+    "s_fb1d6ea40365f5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7eb-0c9e-7a60-9b56-a8f002ba23d3",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
