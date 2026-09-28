@@ -1,0 +1,40 @@
+crates/commitbook-cli/Cargo.toml
+  s_5e303680607837::t_49829f24ed4c4c 3,15-17
+  s_5e303680607837::t_c7085538898e51 18
+.github/workflows/release.yml
+  s_5e303680607837::t_060c81725400a2 101,106
+crates/commitbook-cli/src/bin/cobo.rs
+  s_f4434f139eefd8::t_f63dafdbb16593 1-3
+crates/commitbook-cli/src/commands/doctor.rs
+  s_f4434f139eefd8::t_20cf9176dbdf71 466
+crates/commitbook-cli/src/lib.rs
+  s_f4434f139eefd8::t_91d6bd0500c88f 1-237
+crates/commitbook-cli/src/main.rs
+  s_f4434f139eefd8::t_5e3df8407e17b0 1-2
+crates/commitbook-cli/tests/aliases.rs
+  s_f4434f139eefd8::t_cd48c3e227ad01 1-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d0f4e3484d8fd6e464554b3551aac031d83e4bab",
+  "prompts": {},
+  "sessions": {
+    "s_5e303680607837": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e81c-1fc6-7043-b2d9-b8a01da41277",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
