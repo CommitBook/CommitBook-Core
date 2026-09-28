@@ -1,0 +1,44 @@
+crates/commitbook-engine/src/cron/linux_tests.rs
+  s_59b845c264c16d::t_958c384b56e655 218
+CONTRIBUTING.md
+  s_59b845c264c16d::t_958c384b56e655 41,52
+SECURITY.md
+  s_59b845c264c16d::t_958c384b56e655 11
+  s_8e850644764da8::t_37ec227052544e 35
+docs/README.md
+  s_59b845c264c16d::t_958c384b56e655 5
+docs/design/designer-brief.md
+  s_59b845c264c16d::t_958c384b56e655 5,21,28
+docs/details/sync-architecture.md
+  s_59b845c264c16d::t_958c384b56e655 62,164,240
+.claude/CLAUDE.md
+  s_59b845c264c16d::t_958c384b56e655 3
+crates/commitbook-cli/Cargo.toml
+  s_59b845c264c16d::t_958c384b56e655 4
+docs/release-readiness.md
+  s_8e850644764da8::t_a34db732195aad 53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d2ba013f900df9b6ca6eff07131a8978b3e3f6ed",
+  "prompts": {},
+  "sessions": {
+    "s_59b845c264c16d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e829-24e1-7340-8269-a7a02b020069",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_8e850644764da8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e81e-2fdf-7800-b8d1-79f84532a54e",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
