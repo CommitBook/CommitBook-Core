@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
 echo "========================================"
@@ -28,5 +28,5 @@ echo "========================================"
 echo "  Archive Complete"
 echo "========================================"
 echo ""
-echo "Build artifacts removed. Run ./toolkit/Conductor/setup.sh to rebuild."
+echo "Build artifacts removed. Run ./.conductor/setup.sh to rebuild."
 echo ""
