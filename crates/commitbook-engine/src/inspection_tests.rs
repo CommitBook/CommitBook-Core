@@ -1,5 +1,5 @@
 use super::*;
-use crate::git::test_support::{setup_repo_with_base, BaseRepoFixture};
+use crate::git::test_support::{set_repo_excludes, setup_repo_with_base, BaseRepoFixture};
 fn setup() -> BaseRepoFixture {
     let fx = setup_repo_with_base(&[
         ("note.md", "original\n"),
@@ -275,5 +275,74 @@ fn preview_omits_local_state_even_when_not_ignored() {
             .iter()
             .all(|e| !e.path.starts_with(".CommitBook/local")),
         "{entries:?}"
+    );
+}
+
+#[test]
+fn preview_leaves_out_untracked_metadata_and_matches_staging() {
+    let fx = setup();
+    let root = &fx.repo_root;
+    set_repo_excludes(root, "");
+    std::fs::write(root.join(".CommitBook/.DS_Store"), "finder").unwrap();
+    std::fs::write(root.join(".CommitBook/._config.toml"), "appledouble").unwrap();
+    std::fs::write(root.join(".DS_Store"), "finder").unwrap();
+    std::fs::write(root.join("draft.md"), "draft\n").unwrap();
+
+    let preview = preview(root);
+    assert!(preview.blockers.is_empty(), "{:?}", preview.blockers);
+    assert!(preview.warnings.is_empty(), "{:?}", preview.warnings);
+    let mut paths: Vec<_> = preview.entries.iter().map(|e| e.path.clone()).collect();
+    paths.sort();
+    assert_eq!(paths, [".DS_Store", "draft.md"]);
+
+    fx.repo().stage_all().unwrap();
+    let repo = git2::Repository::open(root).unwrap();
+    let head = repo.head().unwrap().peel_to_tree().unwrap();
+    let diff = repo.diff_tree_to_index(Some(&head), None, None).unwrap();
+    let mut staged: Vec<_> = diff
+        .deltas()
+        .map(|d| d.new_file().path().unwrap().to_string_lossy().to_string())
+        .collect();
+    staged.sort();
+    assert_eq!(staged, paths);
+}
+
+#[test]
+fn preview_warns_but_does_not_block_on_legacy_metadata() {
+    let fx = setup();
+    let root = &fx.repo_root;
+    set_repo_excludes(root, "");
+    std::fs::write(root.join(".CommitBook/auth.toml"), "token").unwrap();
+
+    let preview = preview(root);
+    assert!(preview.blockers.is_empty(), "{:?}", preview.blockers);
+    assert_eq!(preview.warnings.len(), 1, "{:?}", preview.warnings);
+    assert!(
+        preview.warnings[0].contains(".CommitBook/auth.toml"),
+        "{:?}",
+        preview.warnings
+    );
+    assert!(
+        preview
+            .entries
+            .iter()
+            .all(|e| e.path != ".CommitBook/auth.toml"),
+        "{:?}",
+        preview.entries
+    );
+}
+
+#[test]
+fn status_does_not_count_untracked_metadata() {
+    let fx = setup();
+    let root = &fx.repo_root;
+    set_repo_excludes(root, "");
+    let before = RepositoryStatus::read(root).changes_total;
+    std::fs::write(root.join(".CommitBook/.DS_Store"), "finder").unwrap();
+    assert_eq!(RepositoryStatus::read(root).changes_total, before);
+    std::fs::write(root.join("draft.md"), "draft\n").unwrap();
+    assert_eq!(
+        RepositoryStatus::read(root).changes_total,
+        before.map(|n| n + 1)
     );
 }
