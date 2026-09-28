@@ -15,6 +15,27 @@ pub fn is_local_state_path(path: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
+/// True for any path inside `.CommitBook/` other than the published metadata:
+/// `config.toml`, `.gitignore`, and `devices/<id>.toml`. Covers device-local
+/// state, pre-release files, and OS or editor files such as Finder's
+/// `.DS_Store`. Sync never adds these, whatever the ignore files say.
+pub fn is_unpublished_metadata_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix(".CommitBook/") else {
+        return false;
+    };
+    match rest.split_once('/') {
+        None => !matches!(rest, "config.toml" | ".gitignore"),
+        Some(("devices", name)) => name.contains('/') || !name.ends_with(".toml"),
+        Some(_) => true,
+    }
+}
+
+/// An untracked path that `stage_all` never adds. The dirty check, change
+/// summary, preview, and status skip exactly these so they agree with sync.
+pub fn is_unadded_metadata(path: &str, status: git2::Status) -> bool {
+    status == git2::Status::WT_NEW && is_unpublished_metadata_path(path)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct HeadExpectation {
     symbolic_target: Option<String>,
@@ -347,6 +368,9 @@ impl GitRepo {
                 .context("Changed path is not valid UTF-8")?
                 .to_string();
             let status = entry.status();
+            if is_unadded_metadata(&path, status) {
+                continue;
+            }
 
             if status.is_wt_new() || status.is_index_new() {
                 summary.new_files.push(path);
@@ -376,14 +400,26 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Stage all changes (equivalent to `git add -A`), except
-    /// `.CommitBook/local/`. The committed `.CommitBook/.gitignore` normally
-    /// excludes it, but that file can be changed by a merge, so staging never
-    /// relies on it: the token in `auth.toml` must not reach the remote.
+    /// Stage all changes (equivalent to `git add -A`), except new files inside
+    /// `.CommitBook/` other than the published metadata
+    /// (`is_unpublished_metadata_path`), and always except `.CommitBook/local/`.
+    /// The committed `.CommitBook/.gitignore` normally excludes `local/`, but
+    /// that file can be changed by a merge, so staging never relies on it: the
+    /// token in `auth.toml` must not reach the remote. Files already tracked
+    /// inside `.CommitBook/` follow Git: edits and deletions are staged.
     pub fn stage_all(&self) -> Result<()> {
         let mut index = self.repo.index().context("Failed to get index")?;
+        // A positive return skips the path; tracked edits and deletions are
+        // still staged by `update_all` below.
+        let mut skip_unpublished = |path: &Path, _: &[u8]| {
+            i32::from(path.to_str().is_some_and(is_unpublished_metadata_path))
+        };
         index
-            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .add_all(
+                ["*"].iter(),
+                git2::IndexAddOption::DEFAULT,
+                Some(&mut skip_unpublished as &mut git2::IndexMatchedPath),
+            )
             .context("Failed to stage files")?;
         index
             .update_all(["*"].iter(), None)
@@ -1470,7 +1506,8 @@ impl GitRepo {
     }
 
     /// Whether Git reports any staged or unstaged non-ignored change.
-    /// Hidden paths and non-Markdown files are intentionally included.
+    /// Hidden paths and non-Markdown files are intentionally included; new
+    /// files that `stage_all` never adds are not (`is_unadded_metadata`).
     pub fn has_dirty_changes(&self) -> Result<bool> {
         let mut opts = StatusOptions::new();
         opts.include_untracked(true)
@@ -1481,7 +1518,10 @@ impl GitRepo {
             .statuses(Some(&mut opts))
             .context("Failed to get repository status")?;
         Ok(statuses.iter().any(|entry| {
-            entry.status() != git2::Status::CURRENT && !entry.path().is_ok_and(is_local_state_path)
+            entry.status() != git2::Status::CURRENT
+                && !entry.path().is_ok_and(|path| {
+                    is_local_state_path(path) || is_unadded_metadata(path, entry.status())
+                })
         }))
     }
 
