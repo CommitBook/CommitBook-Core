@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
       - name: Verify workspace version and tagged commit
         working-directory: release-source
-        run: python3 ../scripts/release/validate-release.py "$RELEASE_TAG"
+        run: python3 scripts/release/validate-release.py "$RELEASE_TAG"
       - name: Download existing release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -59,7 +59,7 @@ jobs:
           gh release download "$RELEASE_TAG" --repo CommitBook/CommitBook-Core --dir assets \
             --pattern SHA256SUMS --pattern 'commitbook-*.tar.gz'
       - name: Verify all archives and render formula
-        run: python3 scripts/release/homebrew.py "$RELEASE_TAG" assets rendered/commitbook.rb
+        run: python3 release-source/scripts/release/homebrew.py "$RELEASE_TAG" assets rendered/commitbook.rb
       - name: Validate and smoke-test in a temporary tap
         env:
           HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}

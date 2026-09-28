@@ -307,3 +307,32 @@ fn scan_reports_missing_and_duplicate_identities_without_repair() {
     assert_eq!(scan.broken.len(), 1);
     assert!(!identity::path(&two).exists());
 }
+
+#[test]
+fn duplicate_id_with_broken_remote_blocks_both_clones() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_commitbook(tmp.path(), "one", "notes", "main");
+    write_commitbook(tmp.path(), "two", "notes", "main");
+    let one = tmp.path().join("one__notes");
+    let two = tmp.path().join("two__notes");
+    let id = identity::load(&one).unwrap();
+    fs::copy(identity::path(&one), identity::path(&two)).unwrap();
+    git2::Repository::open(&two)
+        .unwrap()
+        .remote_delete("origin")
+        .unwrap();
+
+    let scan = scan_workspaces(tmp.path()).unwrap();
+    assert!(scan.commitbooks.is_empty());
+    assert_eq!(scan.broken.len(), 2);
+    assert!(scan
+        .broken
+        .iter()
+        .all(|entry| entry.error.contains("Duplicate")));
+    assert!(scan
+        .broken
+        .iter()
+        .any(|entry| entry.error.contains("configured Git remote")));
+    assert!(registry::find_by_id(tmp.path(), &id).is_err());
+    assert_eq!(identity::load(&two).unwrap(), id);
+}

@@ -25,7 +25,7 @@ The design system must cover all four surfaces, but the iOS/macOS and Android ap
 
 These concepts recur across every surface. The design system needs a consistent visual treatment for each:
 
-- **CommitBook**: a collection of notes backed by a single git repository on a provider (GitHub, GitLab, Codeberg, generic git). Identified by `<owner>/<repo>`. Has a name, a branch, a sync mode, a provider, an auto-sync flag, a doc count, and a conflict count.
+- **CommitBook**: a local clone of a Git repository on a provider (GitHub, GitLab, Codeberg, generic git). The eight-character `commitbook_local_id` selects this clone; its remote URL and provider are descriptive Git metadata, not its local identity. It has a name, a branch, a sync mode, an auto-sync flag, a doc count, and a conflict count.
 - **Document**: one markdown file inside a CommitBook. Has a path and content.
 - **Sync**: one cycle of (commit local changes) → (fetch and libgit2 3-way merge) → (push). Outcome is a `SyncResult` with five numbers the UI may want to surface: `committed` (bool), `pulled` (count), `pushed` (count), `conflictsResolved` (count, AI), `manualConflicts` (count, left for user), plus an `errors` list.
 - **Sync mode**: `aiResolve` (let the configured AI rewrite conflicted files) or `manual` (leave conflict markers in place). Picked per-sync; background syncs default to `aiResolve`, user-initiated syncs may prompt.

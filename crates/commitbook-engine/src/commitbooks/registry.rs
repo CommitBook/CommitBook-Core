@@ -49,6 +49,8 @@ pub fn scan_workspaces(workspaces_root: &Path) -> Result<WorkspaceScan> {
 
     let mut out = Vec::new();
     let mut broken = Vec::new();
+    let mut id_paths: std::collections::HashMap<String, Vec<PathBuf>> =
+        std::collections::HashMap::new();
     for entry in entries.flatten() {
         let path = entry.path();
         // Never follow a workspace entry symlink. Otherwise merely listing
@@ -101,15 +103,26 @@ pub fn scan_workspaces(workspaces_root: &Path) -> Result<WorkspaceScan> {
                 continue;
             }
         };
+        id_paths
+            .entry(commitbook_local_id.clone())
+            .or_default()
+            .push(canonical_path.clone());
         // Remote metadata is descriptive, not the clone's identity.
-        let Ok(remote_url) = get_remote_url(&canonical_path, &config.git.remote) else {
-            continue;
-        };
-        let Ok(identity) = parse_remote_url(&remote_url) else {
-            continue;
-        };
-        let Ok(remote_url) = credential_free_url(&remote_url) else {
-            continue;
+        let remote = (|| -> Result<_> {
+            let url = get_remote_url(&canonical_path, &config.git.remote)?;
+            let identity = parse_remote_url(&url)?;
+            let display_url = credential_free_url(&url)?;
+            Ok((identity, display_url))
+        })();
+        let (identity, remote_url) = match remote {
+            Ok(remote) => remote,
+            Err(error) => {
+                broken.push(BrokenClone {
+                    path: canonical_path,
+                    error: format!("Failed to load configured Git remote: {error:#}"),
+                });
+                continue;
+            }
         };
         let mode = crate::devices::this_device(&canonical_path)
             .ok()
@@ -131,20 +144,24 @@ pub fn scan_workspaces(workspaces_root: &Path) -> Result<WorkspaceScan> {
         });
     }
 
-    let mut counts = std::collections::HashMap::new();
-    for cb in &out {
-        *counts
-            .entry(cb.commitbook_local_id.clone())
-            .or_insert(0usize) += 1;
+    for (id, paths) in id_paths.into_iter().filter(|(_, paths)| paths.len() > 1) {
+        out.retain(|cb| cb.commitbook_local_id != id);
+        for path in paths {
+            let message = format!(
+                "Duplicate commitbook_local_id {id} at {}; remove the intended copy's local/commitbook_local_id.toml and register it again",
+                path.display()
+            );
+            if let Some(existing) = broken.iter_mut().find(|clone| clone.path == path) {
+                existing.error.push_str("; ");
+                existing.error.push_str(&message);
+            } else {
+                broken.push(BrokenClone {
+                    path,
+                    error: message,
+                });
+            }
+        }
     }
-    out.retain(|cb| {
-        if counts[&cb.commitbook_local_id] > 1 {
-            broken.push(BrokenClone { path: cb.local_path.clone(), error: format!(
-                "Duplicate commitbook_local_id {} at {}; remove the intended copy's local/commitbook_local_id.toml and register it again",
-                cb.commitbook_local_id, cb.local_path.display()) });
-            false
-        } else { true }
-    });
     out.sort_by(|a, b| a.commitbook_local_id.cmp(&b.commitbook_local_id));
     broken.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(WorkspaceScan {
