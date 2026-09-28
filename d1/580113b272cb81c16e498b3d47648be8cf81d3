@@ -1,0 +1,51 @@
+crates/commitbook-client/scripts/smoke-swift.sh
+  s_f4434f139eefd8::t_4886a9da36e893 50
+crates/commitbook-client/src/client.rs
+  s_f4434f139eefd8::t_9f4b2c16985a03 24,43,87-91,125,133,144,147,197,236,290,293,309,317,322,325,342
+crates/commitbook-client/src/client_tests.rs
+  s_f4434f139eefd8::t_fefa438240699c 18-19,70-71,124-125,221,246-247
+crates/commitbook-client/src/commitbook.udl
+  s_f4434f139eefd8::t_e4c657c97129cf 5,150
+crates/commitbook-client/src/commitbooks_ops.rs
+  s_f4434f139eefd8::t_f4c9337e04a4bd 23,56,73,79,103,114,124,130,137,159,171,192,198,216,221,229,232,243,261,273,296,328,336,362,365,370,384,387,404-405,407-411,413-425,427-437,450,461,469,472
+crates/commitbook-client/src/commitbooks_ops_tests.rs
+  s_f4434f139eefd8::t_5beec4bf05231e 193-201,251,500-508,518,711-716,791-818
+crates/commitbook-client/src/conflicts.rs
+  s_f4434f139eefd8::t_05c137efc68f49 14,44,61
+crates/commitbook-client/src/documents.rs
+  s_f4434f139eefd8::t_0b731e67360fe9 18,21,31,81,105,123,139,152,158,160,173,179,189,200,204,207,229
+crates/commitbook-client/src/errors.rs
+  s_f4434f139eefd8::t_7f2228ecea54f9 7-8,34-35,61
+crates/commitbook-client/src/paths.rs
+  s_f4434f139eefd8::t_6132f8c5dd1c67 11,23,59-92,101,118,127,162,217,253,261,269
+crates/commitbook-client/src/paths_tests.rs
+  s_f4434f139eefd8::t_bb93001bc26efb 72-89
+crates/commitbook-client/src/sync_ops.rs
+  s_f4434f139eefd8::t_7f543d5e080c83 157,183
+crates/commitbook-client/src/types.rs
+  s_f4434f139eefd8::t_b17ff1f9c0247f 23,146
+crates/commitbook-engine/src/git/remote.rs
+  s_f4434f139eefd8::t_5a3a27299af1ad 32-33,57-61,98
+crates/commitbook-engine/src/git/remote_tests.rs
+  s_f4434f139eefd8::t_12d997e6e386d0 153-161
+docs/handoff/android-app-todo.md
+  s_f4434f139eefd8::t_3596fa82d73f9e 46,114-122
+docs/handoff/apple-app-todo.md
+  s_f4434f139eefd8::t_36723477140304 55,66,131-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d1580113b272cb81c16e498b3d47648be8cf81d3",
+  "prompts": {},
+  "sessions": {
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
