@@ -1,0 +1,21 @@
+SECURITY.md
+  s_f4434f139eefd8::t_9a8354576a8ab6 15-19
+docs/release-readiness.md
+  s_f4434f139eefd8::t_9a8354576a8ab6 45-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0df720f078071f32d894411c3908a55bb3f3fd23",
+  "prompts": {},
+  "sessions": {
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
