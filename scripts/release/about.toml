@@ -1,0 +1,4 @@
+# License choices for the locked workspace, including build-time generators.
+accepted = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0", "Unicode-DFS-2016", "CC0-1.0", "MPL-2.0", "OpenSSL", "CDLA-Permissive-2.0"]
+ignore-dev-dependencies = true
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu", "aarch64-apple-ios", "aarch64-apple-ios-sim", "x86_64-apple-ios"]

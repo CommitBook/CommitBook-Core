@@ -10,7 +10,8 @@ fi
 set -euo pipefail
 
 REPO="CommitBook/CommitBook-Core"
-INSTALL_DIR="${HOME}/.local/bin"
+INSTALL_PREFIX="${COMMITBOOK_INSTALL_PREFIX:-${HOME}/.local}"
+INSTALL_DIR="${INSTALL_PREFIX}/bin"
 
 # Verify a downloaded file against a SHA256SUMS manifest.
 # The manifest lists every release target, so we filter it down to the one
@@ -45,6 +46,39 @@ verify_checksum() {
     fi
 
     echo "Checksum verified: ${file}"
+}
+
+# Also used by fixture tests; no networking or shell-profile changes here.
+install_archive() {
+    local archive="$1" staging="$2" name
+    # Reject extra paths before extraction; published archives contain only files.
+    local listing
+    listing="$(tar tzf "$archive")"
+    while IFS= read -r name; do
+        case "$name" in
+            bin/commitbook|bin/cobo|bin/commitbook-tui|bin/commitbook-web|share/licenses/commitbook/LICENSE|share/licenses/commitbook/THIRD_PARTY_NOTICES.txt) ;;
+            *) echo "Unexpected archive entry: $name" >&2; return 1 ;;
+        esac
+    done <<< "$listing"
+    if ! tar tvzf "$archive" | awk 'substr($0, 1, 1) != "-" { exit 1 }'; then
+        echo "Archive must contain regular files only" >&2
+        return 1
+    fi
+    mkdir -p "$staging"
+    tar xzf "$archive" -C "$staging"
+    for name in commitbook cobo commitbook-tui commitbook-web; do
+        [ -f "$staging/bin/$name" ] && [ ! -L "$staging/bin/$name" ] || return 1
+    done
+    for name in LICENSE THIRD_PARTY_NOTICES.txt; do
+        [ -f "$staging/share/licenses/commitbook/$name" ] && [ ! -L "$staging/share/licenses/commitbook/$name" ] || return 1
+    done
+    mkdir -p "$INSTALL_DIR" "$INSTALL_PREFIX/share/licenses/commitbook"
+    for name in commitbook cobo commitbook-tui commitbook-web; do
+        install -m 755 "$staging/bin/$name" "$INSTALL_DIR/$name"
+    done
+    for name in LICENSE THIRD_PARTY_NOTICES.txt; do
+        install -m 644 "$staging/share/licenses/commitbook/$name" "$INSTALL_PREFIX/share/licenses/commitbook/$name"
+    done
 }
 
 main() {
@@ -92,7 +126,8 @@ main() {
     local archive="commitbook-${target}.tar.gz"
     local tmp
     tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
+    COMMITBOOK_INSTALL_TMP="$tmp"
+    trap 'rm -rf -- "$COMMITBOOK_INSTALL_TMP"' EXIT
 
     echo "Downloading ${base}/${archive}..."
     curl -fsSL "${base}/${archive}" -o "${tmp}/${archive}"
@@ -103,8 +138,7 @@ main() {
     verify_checksum "$tmp" "$archive" "${tmp}/SHA256SUMS"
 
     echo "Extracting to ${INSTALL_DIR}..."
-    mkdir -p "$INSTALL_DIR"
-    tar xzf "${tmp}/${archive}" -C "$INSTALL_DIR"
+    install_archive "${tmp}/${archive}" "${tmp}/unpacked"
 
     # Verify
     if command -v "${INSTALL_DIR}/commitbook" &>/dev/null; then
@@ -124,4 +158,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]:-}" == "$0" ]]; then
+    main "$@"
+fi

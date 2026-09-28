@@ -24,10 +24,7 @@ permissions:
   contents: read
 
 jobs:
-  # Nothing is built for release until the exact commit passes the same
-  # checks CI runs, plus the dependency audit.
-  verify:
-    name: Verify
+  resolve:
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.commit.outputs.sha }}
@@ -35,19 +32,35 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.sha }}
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  checks:
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+  audit:
+    needs: resolve
+    uses: ./.github/workflows/audit.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+  # Nothing is built for release until the exact commit passes the same
+  # checks CI runs, plus the dependency audit.
+  verify:
+    name: Verify
+    needs: [resolve, checks, audit]
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
       - name: Record verified commit
         id: commit
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: stable
-          components: clippy
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
-      - name: Audit dependencies
-        run: |
-          cargo install cargo-audit --version 0.22.2 --locked --no-default-features
-          cargo audit --deny warnings
+      - name: Validate release version and tag
+        run: python3 scripts/release/validate-release.py "$RELEASE_TAG" --fetch
 
   build:
     name: Build (${{ matrix.target }})
@@ -98,12 +111,12 @@ jobs:
             cargo build "${args[@]}"
           fi
 
-      # All four binaries are built above, so a missing one fails the release
-      # instead of silently shipping a CLI-only archive.
+      - name: Install pinned license generator
+        run: cargo install cargo-about --version 0.9.2 --features cli --locked
+      - name: Generate license materials
+        run: python3 scripts/release/notices.py target/licenses
       - name: Package
-        run: |
-          cd target/${{ matrix.target }}/release
-          tar czf ../../../commitbook-${{ matrix.target }}.tar.gz commitbook cobo commitbook-tui commitbook-web
+        run: python3 scripts/release/package-desktop.py "target/${{ matrix.target }}/release" target/licenses "commitbook-${{ matrix.target }}.tar.gz"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -136,13 +149,7 @@ jobs:
         env:
           TAG: ${{ env.RELEASE_TAG }}
           BUILT_SHA: ${{ needs.verify.outputs.sha }}
-        run: |
-          git fetch --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
-          tagged="$(git rev-parse "refs/tags/${TAG}^{commit}")"
-          if [ "$tagged" != "$BUILT_SHA" ]; then
-            echo "Tag ${TAG} is ${tagged}, but the build used ${BUILT_SHA}" >&2
-            exit 1
-          fi
+        run: python3 scripts/release/validate-release.py "$TAG" --sha "$BUILT_SHA" --fetch
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

@@ -25,7 +25,8 @@ cargo install --path crates/commitbook-cli
 ### Manual download
 
 Grab a tarball from [GitHub Releases](https://github.com/CommitBook/CommitBook-Core/releases),
-verify it against `SHA256SUMS`, and extract it onto your `PATH`.
+verify it against `SHA256SUMS`, and extract it into your install prefix.
+Executables are under `bin/`; licenses are under `share/licenses/commitbook/`.
 
 ## Quick start
 

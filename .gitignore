@@ -16,3 +16,6 @@ Thumbs.db
 
 # Conductor
 .context/
+
+# Python release-tool caches
+__pycache__/

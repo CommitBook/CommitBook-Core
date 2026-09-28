@@ -601,3 +601,24 @@ local identity, without committing or contacting the remote. Lists and status
 never create or repair IDs; missing, malformed, and unsafe identity files are
 reported for explicit repair. A Git remote identifies the remote repository,
 not this local clone.
+
+## Release artifacts
+
+Desktop archives contain `bin/commitbook`, `bin/cobo`, `bin/commitbook-tui`,
+and `bin/commitbook-web`, plus `share/licenses/commitbook/LICENSE` and
+`THIRD_PARTY_NOTICES.txt`. The installer defaults to `~/.local`; set
+`COMMITBOOK_INSTALL_PREFIX` to choose a different prefix. It verifies checksums
+and the archive layout before installing.
+
+Apple framework ZIPs include a `Licenses/` directory. Release builds use the
+committed lockfile, pinned cargo-about 0.9.2 (with its `cli` feature), and
+`scripts/release/notices.py` to collect Rust license texts and bundled libgit2,
+libssh2, zlib, and OpenSSL notices from the resolved source packages. Keep
+these materials with redistributed binaries; source archive links for the
+locked Rust dependency versions are included. License-generation failures
+block packaging.
+
+Both release pipelines resolve their input ref once, run the reusable full CI
+and audit workflows on that commit, and require the release tag to equal the
+workspace version and point to the same commit. No tool here automatically
+creates a tag, changes visibility, or publishes to crates.io.

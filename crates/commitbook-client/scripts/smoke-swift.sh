@@ -47,6 +47,7 @@ cat > "$WORK/main.swift" <<'SWIFT'
 import Foundation
 
 let tmp = NSTemporaryDirectory() + "cb-smoke-\(UUID().uuidString)"
+defer { try? FileManager.default.removeItem(atPath: tmp) }
 let client = try! CommitBookEngineClient(workspacesRoot: tmp,
                                          conflictResolver: nil)
 
@@ -57,6 +58,42 @@ guard books.isEmpty else {
     exit(1)
 }
 print("listCommitbooks -> 0 entries")
+
+// Exercise the new registration and summary fields across generated Swift FFI.
+func git(_ args: [String]) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = args
+    try! process.run()
+    process.waitUntilExit()
+    precondition(process.terminationStatus == 0)
+}
+let clone = tmp + "/notes"
+git(["init", clone])
+git(["-C", clone, "remote", "add", "origin", "https://github.com/example/notes.git"])
+try! FileManager.default.createDirectory(atPath: clone + "/.CommitBook", withIntermediateDirectories: true)
+let config = """
+[config]
+schema = 1
+[commitbook]
+name = "Smoke notes"
+[git]
+remote = "origin"
+branch = "main"
+[sync]
+schedule = "1h"
+[commit]
+mode = "timestamp"
+agent = "any"
+[conflicts]
+mode = "manual"
+agent = "claude"
+"""
+try! config.write(toFile: clone + "/.CommitBook/config.toml", atomically: true, encoding: .utf8)
+let registered = try! client.registerLocalCommitbook(relativePath: "notes")
+precondition(registered.commitbookId.count == 8)
+precondition(try! client.getCommitbook(commitbookId: registered.commitbookId).commitbookId == registered.commitbookId)
+print("registerLocalCommitbook -> persistent local identity")
 
 // Async method: this traps if the shared tokio runtime is missing. A bogus id
 // fails at the registry lookup, so no network is required.

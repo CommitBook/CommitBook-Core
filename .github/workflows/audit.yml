@@ -11,6 +11,12 @@ on:
       - main
   schedule:
     - cron: "0 6 * * *"
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
 
 permissions:
@@ -26,6 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked --no-default-features
       - name: Deny all RustSec findings
