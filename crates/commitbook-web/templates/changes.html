@@ -7,6 +7,7 @@
 {% match preview.remote %}{% when Some with (value) %}<p>Remote: {{ value }}</p>{% when None %}<p>Remote: unknown</p>{% endmatch %}
 
 {% for blocker in preview.blockers %}<p class="flash flash-error">{{ blocker }}</p>{% endfor %}
+{% for warning in preview.warnings %}<p class="flash flash-warning">{{ warning }}</p>{% endfor %}
 <table><thead><tr><th>Path</th><th>Change</th><th>Staged</th><th>Unstaged</th></tr></thead><tbody>
 {% for entry in preview.entries %}<tr><td>{{ entry.path }}</td><td>{{ entry.change }}</td><td>{{ entry.staged }}</td><td>{{ entry.unstaged }}</td></tr>{% endfor %}
 </tbody></table></div>

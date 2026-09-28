@@ -26,6 +26,12 @@ pub fn draw(f: &mut Frame, app: &App) {
                 .iter()
                 .map(|b| Line::raw(format!("Blocked: {b}"))),
         );
+        lines.extend(
+            preview
+                .warnings
+                .iter()
+                .map(|w| Line::raw(format!("Warning: {w}"))),
+        );
         lines.extend(preview.entries.iter().map(|e| {
             Line::raw(format!(
                 "{} {} (staged: {}, unstaged: {})",

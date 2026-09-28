@@ -242,6 +242,26 @@ fn diagnose(cb_dir: &Path, repo_root: &Path) -> DoctorReport {
         vec![],
     ));
 
+    // Pre-release files never block sync (it never adds them), so they warn.
+    let contents = match commitbook_engine::state::legacy_metadata_entries(repo_root) {
+        Ok(entries) if entries.is_empty() => {
+            Check::new(".CommitBook/ contents", "ok", false, vec![])
+        }
+        Ok(entries) => Check::new(
+            ".CommitBook/ contents",
+            "old files",
+            false,
+            vec![commitbook_engine::state::legacy_metadata_warning(&entries)],
+        ),
+        Err(error) => Check::new(
+            ".CommitBook/ contents",
+            "skip",
+            false,
+            vec![format!("{error:#}")],
+        ),
+    };
+    report.checks.push(contents);
+
     let config_check = if !LocalConfig::exists(repo_root) {
         Check::new("config.toml", "missing", true, vec![])
     } else {

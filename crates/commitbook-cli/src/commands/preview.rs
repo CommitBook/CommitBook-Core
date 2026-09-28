@@ -21,6 +21,9 @@ pub fn run(root: &Path, json: bool) -> Result<()> {
         for blocker in &preview.blockers {
             println!("Blocked: {blocker}");
         }
+        for warning in &preview.warnings {
+            println!("Warning: {warning}");
+        }
     }
     anyhow::ensure!(
         preview.blockers.is_empty(),
