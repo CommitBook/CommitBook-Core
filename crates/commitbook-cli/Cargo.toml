@@ -1,5 +1,6 @@
 [package]
 name = "commitbook-cli"
+default-run = "commitbook"
 description = "CLI for CommitBook, automated git commits for markdown notebooks"
 version.workspace = true
 edition.workspace = true
@@ -10,6 +11,10 @@ authors.workspace = true
 [[bin]]
 name = "commitbook"
 path = "src/main.rs"
+
+[[bin]]
+name = "cobo"
+path = "src/bin/cobo.rs"
 
 [dependencies]
 commitbook-engine = { path = "../commitbook-engine" }

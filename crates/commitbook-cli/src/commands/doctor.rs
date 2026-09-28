@@ -463,9 +463,7 @@ fn fix_plist_binary_path(_repo_root: &Path) -> Option<Check> {
 
 #[cfg(target_os = "macos")]
 fn fix_plist_binary_path(repo_root: &Path) -> Option<Check> {
-    let Ok(current_exe) = std::env::current_exe() else {
-        return None;
-    };
+    let current_exe = commitbook_engine::settings::current_binary();
 
     if !cron::is_loaded(repo_root) {
         return None;

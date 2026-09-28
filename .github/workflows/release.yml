@@ -98,12 +98,12 @@ jobs:
             cargo build "${args[@]}"
           fi
 
-      # All three binaries are built above, so a missing one fails the release
+      # All four binaries are built above, so a missing one fails the release
       # instead of silently shipping a CLI-only archive.
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../commitbook-${{ matrix.target }}.tar.gz commitbook commitbook-tui commitbook-web
+          tar czf ../../../commitbook-${{ matrix.target }}.tar.gz commitbook cobo commitbook-tui commitbook-web
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

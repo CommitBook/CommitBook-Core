@@ -50,6 +50,13 @@ commitbook start
 commitbook status
 ```
 
+## Short command
+
+`cobo` is installed alongside `commitbook` and accepts the same commands, for
+example `cobo sync` or `cobo status`. Schedulers always invoke `commitbook sync`;
+keep both executables installed together. Generate completions with
+`cobo completions <shell>` for the short name.
+
 ## Documentation
 
 Full documentation, configuration reference, and troubleshooting live in
