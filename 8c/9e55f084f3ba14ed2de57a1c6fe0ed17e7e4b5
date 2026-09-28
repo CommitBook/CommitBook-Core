@@ -1,0 +1,30 @@
+crates/commitbook-engine/src/state/mod_tests.rs
+  s_98e5975b63ea83::t_d93a0eac2a2d13 253-260,296-299
+  s_98e5975b63ea83::t_fad9be058ce8e8 178,181-201,203,206-252,261-295,300-301
+crates/commitbook-engine/src/inspection_tests.rs
+  s_98e5975b63ea83::t_19f90536ef7a8d 2,280-348
+crates/commitbook-engine/src/inspection.rs
+  s_98e5975b63ea83::t_ea205fa40157d9 7,23-25,61-64,151,189-197,322-326,328-332
+  s_98e5975b63ea83::t_6cf123ce76cb1a 327
+crates/commitbook-engine/src/state/mod.rs
+  s_98e5975b63ea83::t_2ec3a3284b198a 84-102,104-126,129-138
+crates/commitbook-engine/src/sync/scheduler_tests.rs
+  s_98e5975b63ea83::t_38c68982f2dea3 4-5,1763-1784,1788,1792-1806,1812-1814,1819-1857,1862-1879,1883,1890-1897,1902-1944
+  s_98e5975b63ea83::t_d93a0eac2a2d13 1807-1810,1815-1818,1858-1861,1880-1882,1898-1901
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8c9e55f084f3ba14ed2de57a1c6fe0ed17e7e4b5",
+  "prompts": {},
+  "sessions": {
+    "s_98e5975b63ea83": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "366ee35a-1635-4994-ac3d-005e0443b403",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
