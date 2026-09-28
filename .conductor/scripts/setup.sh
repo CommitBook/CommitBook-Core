@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_DIR"
 
 GREEN='\033[0;32m'
@@ -74,6 +74,6 @@ echo "  Setup Complete"
 echo "========================================"
 echo ""
 echo "Next steps:"
-echo "  Run demo:   ./.conductor/run.sh"
+echo "  Run demo:   ./.conductor/scripts/run.sh"
 echo "  Run tests:  cargo test"
 echo ""
