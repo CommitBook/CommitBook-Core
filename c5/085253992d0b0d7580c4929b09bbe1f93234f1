@@ -1,0 +1,24 @@
+crates/commitbook-engine/src/cron/macos.rs
+  s_32e518f8e96fc5::t_672de89ee71c39 291,305,308,310
+crates/commitbook-cli/src/commands/doctor.rs
+  s_32e518f8e96fc5::t_672de89ee71c39 470,476
+  s_32e518f8e96fc5::t_19eec325b408f2 473-475
+crates/commitbook-engine/src/cron/macos_tests.rs
+  s_32e518f8e96fc5::t_672de89ee71c39 32-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c5085253992d0b0d7580c4929b09bbe1f93234f1",
+  "prompts": {},
+  "sessions": {
+    "s_32e518f8e96fc5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e6f1-f962-7410-851d-579954a7f469",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
