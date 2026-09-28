@@ -1,0 +1,27 @@
+.github/workflows/S3-Publish-Homebrew.yml
+  s_f4434f139eefd8::t_3ca4b8ec4b7247 50,62
+crates/commitbook-engine/src/commitbooks/registry_tests.rs
+  s_f4434f139eefd8::t_f7bea7b99da68c 310-327,336-338
+  s_f4434f139eefd8::t_0398995631d266 328-335
+docs/design/designer-brief.md
+  s_f4434f139eefd8::t_3ca4b8ec4b7247 28
+crates/commitbook-engine/src/commitbooks/registry.rs
+  s_f4434f139eefd8::t_3ca4b8ec4b7247 52-53,106-109,111-125,147-157,162-163
+  s_f4434f139eefd8::t_0398995631d266 158-161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "214aaa4adceef3f68d990e4344fea6cf18e7b88e",
+  "prompts": {},
+  "sessions": {
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
