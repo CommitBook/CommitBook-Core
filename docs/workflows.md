@@ -67,8 +67,8 @@ it does not build or publish this Core artifact.
   in the `release` environment. It needs **Contents: read/write** access to the
   tap repository. The normal `GITHUB_TOKEN` reads this source repository's
   release; it cannot write to the separate tap.
-- Keep required reviewers and release-tag restrictions on the existing
-  `release` environment. S3's publish job uses that environment. If tap branch
+- Keep the `release` environment restricted to `main` and version-shaped tags.
+  S3's publish job uses that environment. If tap branch
   protection disallows the token's direct push, maintainers must configure an
   appropriate publishing identity before using S3.
 - Release assets must be publicly downloadable for Homebrew users. S3 downloads

@@ -1,6 +1,6 @@
 # Pre-launch verification
 
-Rechecked against pushed branch `C/Homebrew` at `85fa005` on 2026-09-28.
+Locally rechecked against branch `C/Homebrew` at `85fa005` on 2026-09-28.
 This code uses an eight-hex-character, OS-random `commitbook_local_id` in the
 ignored `.CommitBook/local/commitbook_local_id.toml`. SDK-created clones use
 that ID as their directory name and check for local collisions. The older
@@ -24,8 +24,9 @@ that ID as their directory name and check for local collisions. The older
 
 ## Remaining release gates
 
-Hosted GitHub CI has not run for this branch: there is no pull request to `main`
-and no branch workflow run. No GitHub release or tag has been published, so the
+Draft PR #6 has started hosted CI. Its first coverage job failed because the
+report output directory did not exist; a workflow fix needs a fresh green run.
+No GitHub release or tag has been published, so the
 Homebrew formula-generation workflow has no real assets to consume. The private
 `CommitBook/homebrew-tap` repository still contains no formula. Local tool tests
 do not replace a live `brew install` and `brew test` against published assets.
@@ -33,9 +34,9 @@ The Swift smoke test constructs a credential callback, but does not perform an
 authenticated Git operation through the real iOS app; validate that flow with
 a disposable remote before release.
 
-The repository remains private. GitHub Free branch protection, required release
-environment reviewers, and private vulnerability reporting cannot all be
-configured and verified before the visibility change. Follow the order in
+The repository is public. Private vulnerability reporting, secret scanning,
+push protection, `main` protection, and release-environment ref restrictions
+are enabled. Follow
 [release readiness](release-readiness.md) before tagging or announcing a public
 release. A clean scanner result is bounded by the scanned refs and detector
 rules, not proof that no secret exists.

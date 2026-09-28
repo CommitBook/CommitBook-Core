@@ -32,24 +32,20 @@ license changes; do not bypass them to publish. Build outputs are not committed.
 The source workflows cannot enforce repository-level controls by themselves.
 Before launch, maintainers must verify:
 
-- `main` requires a pull request and successful CI/audit checks. Require review,
-  block force pushes and deletion, and apply protections to administrators.
-- The `release` environment has a designated required reviewer, prevents
-  self-review, and restricts deployment to approved release tags.
+- `main` requires a pull request and successful CI/audit checks, blocks force
+  pushes and deletion, and applies protections to administrators.
+- The `release` environment restricts deployment to `main` and version-shaped
+  tags.
 - Private vulnerability reporting is enabled and its reporting link works.
 - Secret scanning/push protection are enabled where available, in addition to
   the checked-in full-history scanner.
 - No unresolved dependency advisories, credential findings, or license gaps.
 
-At the initial private-repository inspection, branch-protection access returned
-HTTP 403 with a plan/visibility restriction. The release environment and private
-vulnerability-reporting endpoints returned 404. GitHub Free provides branch
-protection and required environment reviewers for public repositories, and
-private vulnerability reporting is available only after a repository is public.
-Therefore these gates cannot all be verified while this repository is private:
-first make it public, then immediately configure and verify them **before
-tagging, releasing, or announcing the launch**. Do not claim full readiness
-until they are verified.
+The repository is now public. Private vulnerability reporting, secret scanning,
+push protection, branch protection, and release-environment ref restrictions
+have been enabled. The remaining gate is a clean hosted PR check run, followed
+by a published release and live Homebrew formula installation. Do not claim
+full release readiness until those checks pass.
 
 See [workflow stages and Homebrew setup](workflows.md) for S1/S2/S3 dispatch
 commands, required credentials, coverage artifacts, and publication checks.

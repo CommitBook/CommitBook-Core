@@ -121,8 +121,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # Add required reviewers to this environment in the repository settings
-    # (Settings > Environments > release) so publishing needs an approval.
+    # Environment policy restricts publication to main or version-shaped tags.
     environment: release
     steps:
       # Checked out into a subdirectory so install.sh can be published as a
