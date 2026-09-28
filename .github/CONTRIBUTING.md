@@ -3,7 +3,7 @@
 CommitBook is pre-launch. Prefer one current behavior over compatibility aliases
 or migrations, and discuss public SDK changes before expanding their scope.
 
-The main user guide is [docs/README.md](docs/README.md).
+The main user guide is [docs/README.md](../docs/README.md).
 
 ## Development
 
@@ -27,7 +27,7 @@ tests use temporary local repositories and fake schedulers rather than installin
 real launchd/cron jobs. Tests belong in adjacent `*_tests.rs` files or integration
 test directories. Keep assertions about observable behavior and data preservation.
 
-See [workflow stages](docs/workflows.md) for CI, release, and Homebrew validation.
+See [workflow stages](../docs/workflows.md) for CI, release, and Homebrew validation.
 
 ## Architecture and conventions
 
@@ -56,6 +56,6 @@ Use imperative titles under 72 characters that explain what and why, such as:
 Avoid unrelated formatting, generated artifacts, and dependency upgrades.
 
 Follow the repository's agent approval rule: propose exact commit messages and
-wait for confirmation before committing or pushing. See [release readiness](docs/release-readiness.md)
+wait for confirmation before committing or pushing. See [release readiness](../docs/release-readiness.md)
 for packaging checks and GitHub settings that cannot be guaranteed by source code.
 For vulnerabilities, follow [SECURITY.md](SECURITY.md), not public issues.

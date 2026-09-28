@@ -4,7 +4,7 @@
 # instead. Kept POSIX so every shell can run it.
 if [ -z "${BASH_VERSION:-}" ]; then
     echo "This installer needs bash. Run it with:" >&2
-    echo "  curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | bash" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/scripts/release/install.sh | bash" >&2
     exit 1
 fi
 set -euo pipefail

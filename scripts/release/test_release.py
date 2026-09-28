@@ -68,7 +68,7 @@ class ReleaseTests(unittest.TestCase):
             sums = root / 'SHA256SUMS'
             sums.write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + '  fixture.tar.gz\n')
             env = dict(os.environ, COMMITBOOK_INSTALL_PREFIX=str(root / 'prefix'))
-            command = ['bash', '-c', 'source "$1"; verify_checksum "$2" fixture.tar.gz "$2/SHA256SUMS"; install_archive "$2/fixture.tar.gz" "$2/unpacked"', 'fixture', str(ROOT / 'install.sh'), str(root)]
+            command = ['bash', '-c', 'source "$1"; verify_checksum "$2" fixture.tar.gz "$2/SHA256SUMS"; install_archive "$2/fixture.tar.gz" "$2/unpacked"', 'fixture', str(ROOT / 'scripts/release/install.sh'), str(root)]
             result = subprocess.run(command, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / 'prefix/bin/cobo').is_file())
@@ -109,7 +109,7 @@ else:
             for script in mocks.iterdir(): script.chmod(0o755)
             env = dict(os.environ, PATH=str(mocks) + os.pathsep + os.environ['PATH'],
                        FIXTURE_DOWNLOAD_ROOT=str(root), COMMITBOOK_INSTALL_PREFIX=str(root / 'installed'))
-            result = subprocess.run(['bash'], input=(ROOT / 'install.sh').read_text(),
+            result = subprocess.run(['bash'], input=(ROOT / 'scripts/release/install.sh').read_text(),
                                     env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / 'installed/bin/cobo').exists())

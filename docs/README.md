@@ -16,7 +16,7 @@ Commit messages use a timestamp by default, or an AI CLI (GitHub Copilot, Claude
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/scripts/release/install.sh | bash
 
 # Navigate to your notes repo
 cd ~/my-notes
@@ -322,7 +322,7 @@ All state is file-based (no database). The `.CommitBook/` directory is self-cont
 ### Install Script (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/scripts/release/install.sh | bash
 ```
 
 Detects your platform, downloads the latest release, verifies it against the
@@ -661,7 +661,7 @@ or publishes to crates.io.
 
 ## Contributing and security
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md), [SECURITY.md](../SECURITY.md), and the
+See [CONTRIBUTING.md](../.github/CONTRIBUTING.md), [SECURITY.md](../.github/SECURITY.md), and the
 [release-readiness checklist](release-readiness.md). Supported launch artifacts
 are the macOS/Linux desktop tools and Apple XCFramework. Android packaging and
 crates.io publication are deferred.
