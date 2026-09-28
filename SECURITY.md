@@ -12,10 +12,11 @@ Do not include credentials, private CommitBook contents, or exploit details in a
 public issue. Share a minimal reproduction using synthetic data through the
 private reporting channel.
 
-**Launch prerequisite:** maintainers must enable and test that channel before
-making the repository public. It was not verifiable during this private-repo
-preparation; this document does not claim that it is currently enabled. Do not
-substitute a public issue if private reporting is unavailable.
+GitHub offers private vulnerability reporting only for public repositories.
+Immediately after making this repository public, maintainers must enable it
+and test this link **before announcing the launch or publishing a release**.
+The link may return 404 while the repository is private or before the feature
+is enabled. Do not substitute a public issue for a private report.
 
 ## Trust boundaries
 

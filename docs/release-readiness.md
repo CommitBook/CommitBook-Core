@@ -42,9 +42,13 @@ Before launch, maintainers must verify:
 
 At the initial private-repository inspection, branch-protection access returned
 HTTP 403 with a plan/visibility restriction. The release environment and private
-vulnerability-reporting endpoints returned 404. These responses do not establish
-that the controls are configured. Recheck after the necessary GitHub plan or
-visibility change; never label the launch fully ready until verified.
+vulnerability-reporting endpoints returned 404. GitHub Free provides branch
+protection and required environment reviewers for public repositories, and
+private vulnerability reporting is available only after a repository is public.
+Therefore these gates cannot all be verified while this repository is private:
+first make it public, then immediately configure and verify them **before
+tagging, releasing, or announcing the launch**. Do not claim full readiness
+until they are verified.
 
 ## Recorded verification
 
