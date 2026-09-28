@@ -1,0 +1,45 @@
+docs/verification.md
+  s_f4434f139eefd8::t_60f25a5cab2acc 13,17
+  s_f4434f139eefd8::t_bbc0e76f11e664 1-11,14-16,18-20,26-43
+  s_f4434f139eefd8::t_dea2a1b78305ff 25
+  s_f4434f139eefd8::t_98427614f82484 12,21-24
+docs/README.md
+  s_5e303680607837::t_49829f24ed4c4c 363,368-369,372-376,380-384
+  s_f4434f139eefd8::t_87213114bdffb5 3-4,41-47,579-580,634-640
+.claude/CLAUDE.md
+  s_5e303680607837::t_57892bfa636dac 21,144,162-174
+.github/workflows/audit.yml
+  s_f4434f139eefd8::t_1907c142b78ab1 26,41-53
+CONTRIBUTING.md
+  s_f4434f139eefd8::t_5eea22963b5123 1-58
+SECURITY.md
+  s_5e303680607837::t_6f28b48e190eb0 1-47
+docs/release-readiness.md
+  s_5e303680607837::t_41546d70cca64b 1-54
+scripts/scan-secrets.py
+  s_5e303680607837::t_91d9f66b789dd0 1-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0dcb09872d703a1876d3faa919d2d4dfe2050039",
+  "prompts": {},
+  "sessions": {
+    "s_5e303680607837": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e81c-1fc6-7043-b2d9-b8a01da41277",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
