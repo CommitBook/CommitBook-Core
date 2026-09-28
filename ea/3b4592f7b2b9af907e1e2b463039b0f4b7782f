@@ -1,0 +1,29 @@
+crates/commitbook-cli/src/errors.rs
+  s_98e5975b63ea83::t_b3e098bb15b640 53-71
+crates/commitbook-cli/src/commands/sync_cmd_tests.rs
+  s_98e5975b63ea83::t_a56919493e4a40 75-119
+  s_98e5975b63ea83::t_ea10505f85ffa9 53
+  s_98e5975b63ea83::t_a03f4dc9df88b1 120
+crates/commitbook-cli/src/errors_tests.rs
+  s_98e5975b63ea83::t_a56919493e4a40 42-60
+crates/commitbook-cli/src/commands/sync_cmd.rs
+  s_98e5975b63ea83::t_fb61f731f6d5eb 18-20,30,62,141-152
+crates/commitbook-cli/src/lib.rs
+  s_98e5975b63ea83::t_b3e098bb15b640 145-147,152-154,212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ea3b4592f7b2b9af907e1e2b463039b0f4b7782f",
+  "prompts": {},
+  "sessions": {
+    "s_98e5975b63ea83": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "366ee35a-1635-4994-ac3d-005e0443b403",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
