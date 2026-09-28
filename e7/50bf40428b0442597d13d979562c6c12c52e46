@@ -1,0 +1,19 @@
+.conductor/settings.toml
+  s_5f31f3e341ff6e::t_8cf8036f29eae8 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e750bf40428b0442597d13d979562c6c12c52e46",
+  "prompts": {},
+  "sessions": {
+    "s_5f31f3e341ff6e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e818-57ed-7750-bf30-8025c1b63337",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
