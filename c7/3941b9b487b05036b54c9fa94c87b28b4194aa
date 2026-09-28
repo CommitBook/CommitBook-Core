@@ -1,0 +1,38 @@
+crates/commitbook-engine/src/state/lock_tests.rs
+  s_f4434f139eefd8::t_82c0b1100d4b7e 108-140
+  s_f4434f139eefd8::t_43813575ad2bd0 141
+crates/commitbook-engine/src/sync/scheduler_tests.rs
+  s_f4434f139eefd8::t_a2a4c9d5c2ceb6 1761-1792
+crates/commitbook-cli/src/main_tests.rs
+  s_f4434f139eefd8::t_c25e8d2f846eee 4-9
+crates/commitbook-engine/src/state/lock.rs
+  s_f4434f139eefd8::t_773906b4a5776d 50
+crates/commitbook-engine/src/state/mod.rs
+  s_f4434f139eefd8::t_2eda093a31f19e 84-100,102,105
+crates/commitbook-engine/src/state/mod_tests.rs
+  s_f4434f139eefd8::t_99d4d30fe34c3e 145-152,154-158,176-193
+crates/commitbook-engine/src/state/sync_state.rs
+  s_f4434f139eefd8::t_f4d23351a2c19a 6,15
+crates/commitbook-engine/src/state/sync_state_tests.rs
+  s_f4434f139eefd8::t_1e4be44593b6bc 70,73-78
+crates/commitbook-engine/src/sync/scheduler.rs
+  s_f4434f139eefd8::t_83e289486bfc22 258
+docs/README.md
+  s_f4434f139eefd8::t_7a8d9ecc029a19 566-574
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c73941b9b487b05036b54c9fa94c87b28b4194aa",
+  "prompts": {},
+  "sessions": {
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
