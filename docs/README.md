@@ -1,6 +1,6 @@
-# CommitBook
-
 <img src="BrandKit/commitbook-readme-banner.svg" width="1200" alt="CommitBook — Your notes. Saved and Synced with Git.">
+
+# CommitBook
 
 Automated git commits and sync for your markdown CommitBooks. Turn any git repository into a self-saving, self-syncing note-taking workspace.
 
