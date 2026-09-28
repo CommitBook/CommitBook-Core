@@ -1,0 +1,55 @@
+install.sh
+  s_f4434f139eefd8::t_a6d7bc91aa466e 13-14,51-83,129-130,141,161-163
+scripts/release/notices.hbs
+  s_f4434f139eefd8::t_a6d7bc91aa466e 1-14
+crates/commitbook-client/scripts/build-xcframework.sh
+  s_f4434f139eefd8::t_a6d7bc91aa466e 43,59,145-146
+  s_f4434f139eefd8::t_c76eaa4b3ae781 147
+.github/workflows/audit.yml
+  s_f4434f139eefd8::t_569b79ceb372fd 15-19,35
+  s_f4434f139eefd8::t_a6d7bc91aa466e 14
+  s_f4434f139eefd8::t_d950f716cefd39 36
+.github/workflows/xcframework.yml
+  s_f4434f139eefd8::t_a6d7bc91aa466e 30,32,35,37,62-69,94,112
+  s_f4434f139eefd8::t_569b79ceb372fd 20-29,31,33-34,36,38-39,42,50
+.github/workflows/ci.yml
+  s_f4434f139eefd8::t_569b79ceb372fd 9-13,32-33,44-45,60-61,77-78,91-92
+  s_f4434f139eefd8::t_a6d7bc91aa466e 8,53,67,83
+crates/commitbook-client/scripts/smoke-swift.sh
+  s_f4434f139eefd8::t_4886a9da36e893 50,62-96
+  s_f4434f139eefd8::t_0df3595f842067 97
+scripts/release/package-desktop.py
+  s_f4434f139eefd8::t_a6d7bc91aa466e 1-33
+scripts/release/validate-release.py
+  s_f4434f139eefd8::t_a6d7bc91aa466e 1-30
+scripts/release/about.toml
+  s_f4434f139eefd8::t_a6d7bc91aa466e 1-4
+scripts/release/notices.py
+  s_f4434f139eefd8::t_bc0e61937c1895 30-38
+  s_f4434f139eefd8::t_a6d7bc91aa466e 1-29,39-59
+.github/workflows/release.yml
+  s_f4434f139eefd8::t_a6d7bc91aa466e 37,39,42,44,62-63,114-117,119,152
+  s_f4434f139eefd8::t_569b79ceb372fd 27-36,38,40-41,43,45-46,51,58
+.gitignore
+  s_f4434f139eefd8::t_bbd8c5059a893c 19-21
+docs/README.md
+  s_f4434f139eefd8::t_360afcfda2704a 604-624
+scripts/release/test_release.py
+  s_f4434f139eefd8::t_0aa747352c5d31 1-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7eac0047e6d5af74d772de3979f5a34d73eafa6e",
+  "prompts": {},
+  "sessions": {
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
