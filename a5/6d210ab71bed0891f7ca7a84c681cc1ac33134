@@ -1,0 +1,21 @@
+Cargo.toml
+  s_bd4ea1257d214d::t_7a639659c2e4a9 13
+Cargo.lock
+  s_bd4ea1257d214d::t_034395e8680f31 543,563,585,608,623
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a56d210ab71bed0891f7ca7a84c681cc1ac33134",
+  "prompts": {},
+  "sessions": {
+    "s_bd4ea1257d214d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7aa-55b3-7c83-aae6-b0a2647d07eb",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
