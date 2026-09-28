@@ -1,5 +1,7 @@
 # CommitBook
 
+<img src="BrandKit/commitbook-product-icon.png" width="96" height="96" alt="CommitBook logo: stacked pages and saved-history timeline">
+
 Automated git commits and sync for your markdown notebooks. Turn any git repository into a self-saving, self-syncing note-taking workspace.
 
 ## What It Does
@@ -35,6 +37,13 @@ commitbook start
 | Guide | Description |
 |---|---|
 | [AI Agent Dotfiles](use-cases/DotFiles-with-AI-Agents.md) | Auto-sync config for Claude, Cursor, Codex, Copilot and other AI agents |
+
+## Short command
+
+`cobo` is installed alongside `commitbook` and accepts the same commands, for
+example `cobo sync` or `cobo status`. Schedulers always invoke `commitbook sync`;
+keep both executables installed together. Generate completions with
+`cobo completions <shell>` for the short name.
 
 ## Commands
 
@@ -351,29 +360,28 @@ Every release publishes tarballs for:
 
 To install one by hand, download the tarball for your target plus `SHA256SUMS`
 from [GitHub Releases](https://github.com/CommitBook/CommitBook-Core/releases),
-verify it, and extract it onto your `PATH`:
+verify it, and extract it into your install prefix:
 
 ```bash
 TARGET=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
 shasum -a 256 -c <(grep "commitbook-${TARGET}.tar.gz" SHA256SUMS)
-mkdir -p ~/.local/bin
-tar xzf "commitbook-${TARGET}.tar.gz" -C ~/.local/bin
+mkdir -p ~/.local
+tar xzf "commitbook-${TARGET}.tar.gz" -C ~/.local
 ```
 
-Each tarball contains `commitbook`, `commitbook-tui`, and `commitbook-web`.
-The binaries bundle their own OpenSSL, so they run on any glibc-based Linux
-without a matching system OpenSSL; update CommitBook to pick up OpenSSL
-security fixes.
+Each tarball contains all four executables in `bin/`, including `cobo`,
+and license materials in `share/licenses/commitbook/`. Add `~/.local/bin` to `PATH`.
+The binaries bundle OpenSSL and libgit2, so matching system versions of those
+libraries are not required. Linux still needs a compatible glibc/runtime for
+the release build target. Update CommitBook to receive bundled-library fixes.
 
 ### Upgrading
 
-Run `commitbook stop` before replacing the binary, then `commitbook start`
-afterwards. Schedulers installed before 0.8.0 run the removed `commitbook run`
-command, and configs from those releases use the old format: delete
-`.CommitBook/config.toml`, run `commitbook init`, then `commitbook start`, on
-every device. Releases before 0.6.0 delete the repository lock file when they
-finish, so a scheduler from an older release running alongside a newer one can
-let two syncs mutate the same repository at the same time.
+Stop scheduled syncs before replacing an installed binary, then start them
+again using the new installation. Pre-launch development layouts have no
+migration support: preserve any local credentials/state you need and initialize
+a fresh clone. Do not run old and new development binaries against the same
+clone. Old LaunchAgent labels are not discovered or removed by current commands.
 
 ## Requirements
 
@@ -568,7 +576,8 @@ shared detailed status. Unknown change counts are null rather than zero.
 
 Only the current schema and `.CommitBook/local/` layout are supported. There
 are no upgrades for older development layouts or commands (`run` is removed;
-use `sync`). Old files are left untouched. For obsolete development setups,
+use `sync`). Old files are left untouched. Sync refuses unexpected top-level `.CommitBook/`
+entries so abandoned state cannot be accidentally published. For obsolete development setups,
 back up local credentials and state, stop old schedulers, and initialize a fresh
 clone with the current CLI. The current advisory lock is `local/.lock`; its file
 remains after unlocking and does not itself indicate a running process.
@@ -622,3 +631,10 @@ Both release pipelines resolve their input ref once, run the reusable full CI
 and audit workflows on that commit, and require the release tag to equal the
 workspace version and point to the same commit. No tool here automatically
 creates a tag, changes visibility, or publishes to crates.io.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md), [SECURITY.md](../SECURITY.md), and the
+[release-readiness checklist](release-readiness.md). Supported launch artifacts
+are the macOS/Linux desktop tools and Apple XCFramework. Android packaging and
+crates.io publication are deferred.

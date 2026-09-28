@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: audit-${{ github.event.pull_request.number || github.ref }}
+  group: audit-${{ github.workflow }}-${{ inputs.ref || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,3 +38,16 @@ jobs:
         run: cargo install cargo-audit --version 0.22.2 --locked --no-default-features
       - name: Deny all RustSec findings
         run: cargo audit --deny warnings
+
+  secrets:
+    name: Scan Git history for secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+      - name: Fetch available branch and tag history
+        run: git fetch origin '+refs/heads/*:refs/remotes/origin/*' --tags
+      - name: Scan all available refs with fully redacted output
+        run: python3 scripts/scan-secrets.py
