@@ -168,7 +168,8 @@ no global registry exists; SDK-created clones check local ID collisions. Scans a
 read-only and report missing/invalid/duplicate IDs. Registration and first
 mutating sync generate missing IDs under the current repository lock.
 
-The SDK constructor takes `workspaces_root` and the optional resolver, not a
-database path. Storage failures use `StorageError`. Native cloning/discovery
-is GitHub-only; local registration supports existing clones without pushing.
+The SDK constructor takes `workspaces_root`, the optional conflict resolver,
+and the optional Git credential callback, not a database path. Storage failures
+use `StorageError`. Native cloning accepts validated remote URLs; GitHub API
+discovery remains GitHub-only. Local registration does not push.
 The `run` alias, old state migrations, and old lock handling are removed.

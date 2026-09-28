@@ -42,8 +42,9 @@ and logs live in ignored `local/`. Never stage this directory or perform repairs
 from status/list/preview operations. Serialize mutations with the repository lock.
 Keep subprocesses bounded and avoid logging credentials or CommitBook contents.
 
-Native cloning/discovery is GitHub-only; desktop sync supports existing Git
-remotes. Apple artifacts are shipped separately from desktop binaries. Android
+Native cloning accepts validated Git remote URLs and obtains Git credentials
+from the host-app callback; GitHub API discovery remains GitHub-only. Desktop
+sync supports existing Git remotes. Apple artifacts ship separately. Android
 packaging and crates.io publication are not supported launch channels.
 
 ## Pull requests and commits

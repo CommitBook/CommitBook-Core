@@ -27,7 +27,9 @@ is enabled. Do not substitute a public issue for a private report.
   explicitly excluded from staging as well as ignored by Git.
 - Desktop transport normally uses system Git credentials. Optional file-backed
   tokens use `local/auth.toml` with restricted permissions. Native apps should
-  keep tokens in platform secure storage and pass them to the SDK as needed.
+  keep Git secrets in platform secure storage and supply them through
+  `GitCredentialCallback`, not embed them in remote URLs. GitHub API discovery
+  separately accepts a PAT.
 - Timestamp commit messages do not invoke AI. Opting into AI messages or conflict
   resolution can send diffs or conflicting content to the selected CLI/provider.
   Review that provider's settings and data handling before enabling AI.
