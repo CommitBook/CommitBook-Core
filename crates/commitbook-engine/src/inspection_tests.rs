@@ -11,6 +11,7 @@ fn setup() -> BaseRepoFixture {
         &LocalConfig::new("notes", &fx.branch, "origin"),
     )
     .unwrap();
+    crate::commitbooks::identity::ensure(&fx.repo_root).unwrap();
     fx.repo().stage_all().unwrap();
     fx.repo().commit("settings").unwrap();
     fx
@@ -80,8 +81,15 @@ fn status_is_read_only_and_reports_actual_head_and_unknown_remote() {
     assert_eq!(status.last_commit.as_deref(), Some("settings"));
     assert!(status.head_timestamp.is_some());
     assert!(status.ahead.is_none());
-    assert_eq!(status.remote_status, "Remote status unknown");
-    assert!(status.diagnostics.is_empty(), "{:?}", status.diagnostics);
+    assert_eq!(
+        status.remote_status,
+        "Remote status unknown; inspection needs attention"
+    );
+    assert!(status
+        .diagnostics
+        .iter()
+        .any(|d| d.contains("commitbook_local_id")));
+    assert_eq!(status.diagnostics.len(), 1, "{:?}", status.diagnostics);
     assert_eq!(before, snapshot(&fx.repo_root));
 }
 #[test]

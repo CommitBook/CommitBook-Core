@@ -8,10 +8,13 @@ use commitbook_engine::state::RepoLock;
 use crate::errors::{CommitBookError, Result};
 use crate::types::{ConflictSummary, ResolveConflictInput};
 
-pub fn list_conflicts(workspaces_root: &Path, commitbook_id: &str) -> Result<Vec<ConflictSummary>> {
-    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
+pub fn list_conflicts(
+    workspaces_root: &Path,
+    commitbook_local_id: &str,
+) -> Result<Vec<ConflictSummary>> {
+    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_local_id)?;
     let conflicts = commitbook_engine::review::list(&commitbook.local_path)
-        .map_err(|error| CommitBookError::database(format!("List conflicts: {error:#}")))?;
+        .map_err(|error| CommitBookError::storage(format!("List conflicts: {error:#}")))?;
 
     let now = chrono::Utc::now().to_rfc3339();
     Ok(conflicts
@@ -37,11 +40,12 @@ pub fn list_conflicts(workspaces_root: &Path, commitbook_id: &str) -> Result<Vec
 }
 
 pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) -> Result<()> {
-    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, &input.commitbook_id)?;
+    let commitbook =
+        crate::paths::find_managed_commitbook(workspaces_root, &input.commitbook_local_id)?;
     let _lock = RepoLock::acquire(&commitbook.local_path)
         .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
     let repo = GitRepo::open(&commitbook.local_path)
-        .map_err(|error| CommitBookError::database(format!("Open repo: {error}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Open repo: {error}")))?;
     let current_branch = repo
         .current_branch()
         .map_err(|error| CommitBookError::merge(format!("Read current branch: {error}")))?;
@@ -58,11 +62,11 @@ pub fn resolve_conflict(workspaces_root: &Path, input: &ResolveConflictInput) ->
     }
     let conflict = repo
         .find_conflict(&input.conflict_id)
-        .map_err(|error| CommitBookError::database(format!("Read conflict: {error}")))?
+        .map_err(|error| CommitBookError::storage(format!("Read conflict: {error}")))?
         .ok_or_else(|| {
             CommitBookError::not_found(format!(
                 "Conflict {} not found in CommitBook {}",
-                input.conflict_id, input.commitbook_id
+                input.conflict_id, input.commitbook_local_id
             ))
         })?;
 

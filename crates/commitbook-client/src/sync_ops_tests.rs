@@ -1,5 +1,6 @@
 use super::*;
 use crate::types::{AiConflictCallbackResult, AiConflictResolution, AiConflictResolutionAction};
+use commitbook_engine::platform::TokenCredentials;
 
 struct ContentCallback;
 
@@ -43,7 +44,7 @@ fn text_conflict() -> GitConflict {
 #[test]
 fn host_callback_receives_structured_sides() {
     let resolver = HostConflictResolver {
-        commitbook_id: "owner/repo".to_string(),
+        commitbook_local_id: "a1b2c3d4".to_string(),
         callback: Arc::new(ContentCallback),
     };
     let resolution = crate::runtime::runtime()
@@ -78,7 +79,7 @@ impl ConflictResolverCallback for InvalidDeleteCallback {
 #[test]
 fn host_callback_rejects_inconsistent_delete_response() {
     let resolver = HostConflictResolver {
-        commitbook_id: "owner/repo".to_string(),
+        commitbook_local_id: "a1b2c3d4".to_string(),
         callback: Arc::new(InvalidDeleteCallback),
     };
     assert!(crate::runtime::runtime()
@@ -104,7 +105,7 @@ fn run_fixed(
     conflict: &GitConflict,
 ) -> AnyResult<ConflictResolution> {
     let resolver = HostConflictResolver {
-        commitbook_id: "owner/repo".to_string(),
+        commitbook_local_id: "a1b2c3d4".to_string(),
         callback: Arc::new(FixedCallback(result)),
     };
     crate::runtime::runtime().block_on(resolver.resolve(conflict, Path::new("/tmp")))
@@ -171,7 +172,7 @@ fn binary_conflict_never_invokes_host_callback() {
     let mut conflict = text_conflict();
     conflict.local.as_mut().unwrap().content = b"binary\0content".to_vec();
     let resolver = HostConflictResolver {
-        commitbook_id: "owner/repo".to_string(),
+        commitbook_local_id: "a1b2c3d4".to_string(),
         callback: Arc::new(MustNotRunCallback),
     };
     assert!(crate::runtime::runtime()
@@ -206,7 +207,7 @@ impl ConflictResolverCallback for BlockingCallback {
 #[test]
 fn blocking_foreign_callback_is_covered_by_timeout() {
     let resolver = HostConflictResolver {
-        commitbook_id: "owner/repo".to_string(),
+        commitbook_local_id: "a1b2c3d4".to_string(),
         callback: Arc::new(BlockingCallback),
     };
     let started = std::time::Instant::now();
@@ -232,7 +233,7 @@ impl ConflictResolverCallback for PanickingCallback {
 #[test]
 fn panicking_foreign_callback_becomes_resolver_failure() {
     let resolver = HostConflictResolver {
-        commitbook_id: "owner/repo".to_string(),
+        commitbook_local_id: "a1b2c3d4".to_string(),
         callback: Arc::new(PanickingCallback),
     };
     let error = crate::runtime::runtime()
@@ -272,6 +273,7 @@ fn managed_sync_fixture() -> (
         commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
+    crate::test_support::set_identity(&clone);
     std::fs::write(clone.join("shared.md"), "base\n").unwrap();
     let repo = commitbook_engine::git::GitRepo::open(&clone).unwrap();
     repo.stage_all().unwrap();
@@ -298,14 +300,8 @@ fn managed_sync_fixture() -> (
 #[test]
 fn ai_mode_without_callback_allows_conflict_free_sync() {
     let (root, _remote, _clone, _branch) = managed_sync_fixture();
-    let outcome = sync_one_commitbook(
-        root.path(),
-        "owner/repo",
-        SyncMode::AiResolve,
-        "unused",
-        None,
-    )
-    .unwrap();
+    let outcome =
+        sync_one_commitbook(root.path(), "a1b2c3d4", SyncMode::AiResolve, None, None).unwrap();
     assert_eq!(outcome.manual_conflicts, 0);
     assert!(!outcome
         .errors
@@ -323,8 +319,8 @@ fn sync_lock_contention_leaves_config_untouched() {
     std::fs::write(clone.join(".CommitBook/config.toml"), &original).unwrap();
     let _lock = commitbook_engine::state::RepoLock::acquire(&clone).unwrap();
 
-    let error = sync_one_commitbook(root.path(), "owner/repo", SyncMode::Manual, "unused", None)
-        .unwrap_err();
+    let error =
+        sync_one_commitbook(root.path(), "a1b2c3d4", SyncMode::Manual, None, None).unwrap_err();
     assert!(matches!(error, CommitBookError::MergeError { .. }));
     assert_eq!(
         std::fs::read_to_string(clone.join(".CommitBook/config.toml")).unwrap(),
@@ -358,14 +354,8 @@ fn ai_mode_can_recover_preserved_merge_after_callback_is_configured() {
         .push_with("origin", &branch, &TokenCredentials::new("unused"))
         .unwrap();
 
-    let outcome = sync_one_commitbook(
-        root.path(),
-        "owner/repo",
-        SyncMode::AiResolve,
-        "unused",
-        None,
-    )
-    .unwrap();
+    let outcome =
+        sync_one_commitbook(root.path(), "a1b2c3d4", SyncMode::AiResolve, None, None).unwrap();
     assert_eq!(outcome.manual_conflicts, 1);
     assert!(outcome
         .errors
@@ -387,9 +377,9 @@ fn ai_mode_can_recover_preserved_merge_after_callback_is_configured() {
     });
     let recovered = sync_one_commitbook(
         root.path(),
-        "owner/repo",
+        "a1b2c3d4",
         SyncMode::AiResolve,
-        "unused",
+        None,
         Some(Arc::new(callback)),
     )
     .unwrap();
@@ -440,14 +430,8 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
         .push_with("origin", &branch, &TokenCredentials::new("unused"))
         .unwrap();
 
-    let outcome = sync_one_commitbook(
-        root.path(),
-        "owner/repo",
-        SyncMode::AiResolve,
-        "unused",
-        None,
-    )
-    .unwrap();
+    let outcome =
+        sync_one_commitbook(root.path(), "a1b2c3d4", SyncMode::AiResolve, None, None).unwrap();
     assert_eq!(outcome.manual_conflicts, 1);
     assert!(outcome
         .errors
@@ -472,9 +456,9 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
     config.save(&clone).unwrap();
     let recovered = sync_one_commitbook(
         root.path(),
-        "owner/repo",
+        "a1b2c3d4",
         SyncMode::AiResolve,
-        "unused",
+        None,
         Some(Arc::new(callback)),
     )
     .unwrap();
@@ -493,7 +477,7 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
     let before = std::fs::read(clone.join("shared.md")).unwrap();
     let proposal_version = proposals[0].proposal_version.clone();
     let manual =
-        sync_one_commitbook(root.path(), "owner/repo", SyncMode::Manual, "unused", None).unwrap();
+        sync_one_commitbook(root.path(), "a1b2c3d4", SyncMode::Manual, None, None).unwrap();
     assert_eq!(manual.manual_conflicts, 1);
     assert_eq!(manual.pushed, 0);
     assert!(manual
@@ -506,7 +490,7 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
         proposal_version
     );
 
-    let listed = crate::conflicts::list_conflicts(root.path(), "owner/repo").unwrap();
+    let listed = crate::conflicts::list_conflicts(root.path(), "a1b2c3d4").unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(
         listed[0].proposal_content.as_deref(),
@@ -515,7 +499,7 @@ fn native_ai_review_preserves_conflicts_for_host_resolution() {
     assert!(!listed[0].proposal_stale);
     assert!(!listed[0].proposal_rejected);
     let input = crate::types::ResolveConflictInput {
-        commitbook_id: "owner/repo".to_string(),
+        commitbook_local_id: "a1b2c3d4".to_string(),
         conflict_id: listed[0].id.clone(),
         resolution_type: "accept".to_string(),
         manual_content: None,
@@ -590,9 +574,9 @@ fn manual_mode_overrides_shared_both_and_review_without_invoking_callback() {
         for _ in 0..2 {
             let outcome = sync_one_commitbook(
                 root.path(),
-                "owner/repo",
+                "a1b2c3d4",
                 SyncMode::Manual,
-                "unused",
+                None,
                 Some(Arc::new(CountCallback(Arc::clone(&calls)))),
             )
             .unwrap();
@@ -603,7 +587,7 @@ fn manual_mode_overrides_shared_both_and_review_without_invoking_callback() {
             assert_eq!(local.rev_parse("HEAD").unwrap(), head);
             assert_eq!(remote_repo.refname_to_id(&remote_ref).unwrap(), remote_tip);
             assert!(local.merge_in_progress());
-            let conflicts = crate::conflicts::list_conflicts(root.path(), "owner/repo").unwrap();
+            let conflicts = crate::conflicts::list_conflicts(root.path(), "a1b2c3d4").unwrap();
             assert_eq!(conflicts.len(), 1);
             assert!(conflicts[0].proposal_version.is_none());
             assert!(std::fs::read_to_string(clone.join("shared.md"))

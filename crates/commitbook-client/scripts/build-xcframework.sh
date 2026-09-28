@@ -40,7 +40,7 @@ export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
 build_target() {
     local target="$1"
     echo ">> Building $target"
-    cargo build --release --target "$target" -p "$CRATE" --lib
+    cargo build --locked --release --target "$target" -p "$CRATE" --lib
 }
 
 # 1. Build all five slices.
@@ -56,7 +56,7 @@ build_target x86_64-apple-darwin
 echo ">> Building host UniFFI bindgen"
 HOST_TARGET="$(rustc -vV | awk '/^host: / { print $2 }')"
 [ -n "$HOST_TARGET" ] || { echo "error: could not determine Rust host target" >&2; exit 1; }
-cargo build --release --target "$HOST_TARGET" --bin uniffi-bindgen -p "$CRATE"
+cargo build --locked --release --target "$HOST_TARGET" --bin uniffi-bindgen -p "$CRATE"
 
 echo ">> Generating Swift bindings"
 "$REPO_ROOT/target/$HOST_TARGET/release/uniffi-bindgen" \
@@ -141,6 +141,9 @@ xcodebuild -create-xcframework \
 #    consumers add these to their target.
 mkdir -p "$OUT_DIR/${FRAMEWORK_NAME}.xcframework/Sources"
 cp "$BINDINGS_DIR"/*.swift "$OUT_DIR/${FRAMEWORK_NAME}.xcframework/Sources/" 2>/dev/null || true
+
+# License texts travel with the framework, including statically linked C libraries.
+python3 scripts/release/notices.py "$OUT_DIR/${FRAMEWORK_NAME}.xcframework/Licenses"
 
 # 8. Zip.
 echo ">> Zipping"

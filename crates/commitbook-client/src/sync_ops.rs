@@ -8,14 +8,14 @@ use async_trait::async_trait;
 use commitbook_engine::ai::{ConflictResolution, ConflictResolver};
 use commitbook_engine::config::{ConflictMode, LocalConfig};
 use commitbook_engine::git::GitConflict;
-use commitbook_engine::platform::{Logger, TokenCredentials};
+use commitbook_engine::platform::Logger;
 use commitbook_engine::state::RepoLock;
 use commitbook_engine::sync::scheduler::{sync_with_resolver_locked, SyncOptions};
 
 use crate::errors::{CommitBookError, Result};
 use crate::types::{
     AiConflictRequest, AiConflictResolutionAction, ConflictResolutionContinuation,
-    ConflictResolverCallback, SyncMode, SyncResultSummary,
+    ConflictResolverCallback, GitCredentialCallback, SyncMode, SyncResultSummary,
 };
 
 #[cfg(not(test))]
@@ -36,7 +36,7 @@ impl Logger for NullLogger {
 }
 
 struct HostConflictResolver {
-    commitbook_id: String,
+    commitbook_local_id: String,
     callback: Arc<dyn ConflictResolverCallback>,
 }
 
@@ -66,7 +66,7 @@ impl ConflictResolver for HostConflictResolver {
             );
         }
         let request = AiConflictRequest {
-            commitbook_id: self.commitbook_id.clone(),
+            commitbook_local_id: self.commitbook_local_id.clone(),
             path: conflict.path.clone(),
             conflict_type: conflict.classification().to_string(),
             binary: false,
@@ -145,16 +145,16 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> anyhow::Error {
 
 pub fn sync_one_commitbook(
     workspaces_root: &Path,
-    commitbook_id: &str,
+    commitbook_local_id: &str,
     mode: SyncMode,
-    token: &str,
+    credential_callback: Option<Arc<dyn GitCredentialCallback>>,
     callback: Option<Arc<dyn ConflictResolverCallback>>,
 ) -> Result<SyncResultSummary> {
-    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_id)?;
+    let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_local_id)?;
     let lock = RepoLock::acquire(&commitbook.local_path)
         .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
     let config = LocalConfig::load(&commitbook.local_path)
-        .map_err(|error| CommitBookError::database(format!("Load config: {error}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Load config: {error}")))?;
     let mut options = SyncOptions::from(&config.git);
     // An explicit manual call overrides shared automatic conflict modes.
     // Existing proposals still block sync through the engine's review guard.
@@ -163,7 +163,7 @@ pub fn sync_one_commitbook(
     options.keep_both = automatic && config.conflicts.mode == ConflictMode::Both;
 
     let host_resolver = callback.map(|callback| HostConflictResolver {
-        commitbook_id: commitbook_id.to_string(),
+        commitbook_local_id: commitbook_local_id.to_string(),
         callback,
     });
     let requested_ai_without_callback =
@@ -175,12 +175,12 @@ pub fn sync_one_commitbook(
         SyncMode::Manual => None,
     };
 
-    let creds = TokenCredentials::new(token.to_string());
+    let creds = crate::credentials::HostCredentials::new(credential_callback);
     let logger = NullLogger;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|error| CommitBookError::database(format!("Tokio runtime: {error}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Tokio runtime: {error}")))?;
     let mut outcome = runtime
         .block_on(sync_with_resolver_locked(
             &commitbook.local_path,

@@ -24,6 +24,40 @@ fn test_get_remote_url_with_remote() {
 }
 
 #[test]
+fn clone_urls_hide_credentials_and_match_across_transports() {
+    assert!(same_remote(
+        "https://github.com/Owner/Notes.git",
+        "git@github.com:owner/notes.git"
+    ));
+    assert!(!same_remote(
+        "https://gitlab.com/owner/notes.git",
+        "https://github.com/owner/notes.git"
+    ));
+    assert_eq!(
+        credential_free_url("https://user:secret@example.com/team/notes.git?token=hidden").unwrap(),
+        "https://example.com/team/notes.git"
+    );
+    assert!(validate_clone_url("https://user:secret@example.com/notes.git").is_err());
+    assert!(validate_clone_url("https://example.com/notes.git?token=secret").is_err());
+    assert!(validate_clone_url("git@example.com:team/notes.git").is_ok());
+}
+
+#[test]
+fn different_local_remotes_with_the_same_filename_are_distinct() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let a = first.path().join("notes.git");
+    let b = second.path().join("notes.git");
+    std::fs::create_dir(&a).unwrap();
+    std::fs::create_dir(&b).unwrap();
+    assert!(same_remote(
+        a.to_str().unwrap(),
+        &format!("file://{}", a.display())
+    ));
+    assert!(!same_remote(a.to_str().unwrap(), b.to_str().unwrap()));
+}
+
+#[test]
 fn parses_github_https_and_ssh_urls() {
     for url in [
         "https://github.com/manuel/notes.git",
@@ -149,4 +183,13 @@ fn local_path_normalization_preserves_scp_and_posix_paths() {
         assert_eq!(identity.owner, r"books\archive");
         assert_eq!(identity.repo, "notes");
     }
+}
+
+#[test]
+fn retains_actual_hostname_without_credentials() {
+    let identity =
+        parse_remote_url("https://user:secret@Git.Example.org:8443/team/notes.git").unwrap();
+    assert_eq!(identity.host.as_deref(), Some("git.example.org"));
+    assert!(!format!("{identity:?}").contains("secret"));
+    assert_eq!(parse_remote_url("/srv/git/notes.git").unwrap().host, None);
 }

@@ -30,6 +30,7 @@ fn managed_clone() -> (tempfile::TempDir, std::path::PathBuf) {
         commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
+    crate::test_support::set_identity(&clone);
     std::fs::write(clone.join("base.md"), "base\n").unwrap();
     let repo = GitRepo::open(&clone).unwrap();
     repo.stage_all().unwrap();
@@ -80,14 +81,7 @@ fn save_commits_only_the_selected_document() {
     std::fs::write(clone.join("unrelated.md"), "already staged\n").unwrap();
     repo.stage_paths(&["unrelated.md".to_string()]).unwrap();
 
-    save_document(
-        root.path(),
-        "owner/notes",
-        "daily/today.md",
-        "today\n",
-        None,
-    )
-    .unwrap();
+    save_document(root.path(), "a1b2c3d4", "daily/today.md", "today\n", None).unwrap();
 
     let repository = git2::Repository::open(&clone).unwrap();
     let tree = repository.head().unwrap().peel_to_tree().unwrap();
@@ -104,7 +98,7 @@ fn save_commits_only_the_selected_document() {
 fn save_reports_repository_lock_contention() {
     let (root, clone) = managed_clone();
     let _lock = RepoLock::acquire(&clone).unwrap();
-    let error = save_document(root.path(), "owner/notes", "busy.md", "busy", None)
+    let error = save_document(root.path(), "a1b2c3d4", "busy.md", "busy", None)
         .expect_err("second mutator must not enter the repository");
     assert!(matches!(error, CommitBookError::MergeError { .. }));
     assert!(!clone.join("busy.md").exists());
@@ -123,7 +117,7 @@ fn save_refuses_to_commit_during_merge_resolution() {
     )
     .unwrap();
 
-    let error = save_document(root.path(), "owner/notes", "base.md", "changed\n", None)
+    let error = save_document(root.path(), "a1b2c3d4", "base.md", "changed\n", None)
         .expect_err("saving during a merge must fail");
     assert!(matches!(error, CommitBookError::MergeError { .. }));
     assert_eq!(repository.head().unwrap().target(), Some(head_before));
@@ -148,14 +142,8 @@ fn save_refuses_wrong_branch_before_writing() {
     repository.checkout_head(None).unwrap();
     let before = std::fs::read(clone.join("base.md")).unwrap();
 
-    let error = save_document(
-        root.path(),
-        "owner/notes",
-        "base.md",
-        "wrong branch\n",
-        None,
-    )
-    .expect_err("save must honor the configured branch");
+    let error = save_document(root.path(), "a1b2c3d4", "base.md", "wrong branch\n", None)
+        .expect_err("save must honor the configured branch");
     assert!(matches!(error, CommitBookError::InvalidInput { .. }));
     assert_eq!(std::fs::read(clone.join("base.md")).unwrap(), before);
 }
@@ -169,21 +157,14 @@ fn document_api_never_writes_through_symlink_parent() {
     let outside = tempfile::tempdir().unwrap();
     symlink(outside.path(), clone.join("linked")).unwrap();
 
-    assert!(save_document(
-        root.path(),
-        "owner/notes",
-        "linked/secret.md",
-        "secret",
-        None
-    )
-    .is_err());
+    assert!(save_document(root.path(), "a1b2c3d4", "linked/secret.md", "secret", None).is_err());
     assert!(!outside.path().join("secret.md").exists());
 }
 
 #[test]
 fn save_is_refused_when_the_document_changed_since_it_was_read() {
     let (root, clone) = managed_clone();
-    let read = read_document(root.path(), "owner/notes", "base.md").unwrap();
+    let read = read_document(root.path(), "a1b2c3d4", "base.md").unwrap();
     let revision = read.revision.clone().unwrap();
 
     // A background sync lands another device's edit to the same note.
@@ -194,7 +175,7 @@ fn save_is_refused_when_the_document_changed_since_it_was_read() {
 
     let error = save_document(
         root.path(),
-        "owner/notes",
+        "a1b2c3d4",
         "base.md",
         "base\nfrom the phone\n",
         Some(&revision),
@@ -214,10 +195,10 @@ fn save_is_refused_when_the_document_changed_since_it_was_read() {
     );
 
     // Reading again gives the new revision, and saving with it succeeds.
-    let fresh = read_document(root.path(), "owner/notes", "base.md").unwrap();
+    let fresh = read_document(root.path(), "a1b2c3d4", "base.md").unwrap();
     save_document(
         root.path(),
-        "owner/notes",
+        "a1b2c3d4",
         "base.md",
         "base\nfrom the laptop\nfrom the phone\n",
         fresh.revision.as_deref(),

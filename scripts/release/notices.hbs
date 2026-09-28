@@ -1,0 +1,14 @@
+CommitBook third-party notices
+Generated from Cargo.lock. Includes runtime and build-time dependencies for supported targets.
+Crate source archives: https://crates.io/api/v1/crates/<name>/<version>/download
+Unmodified MPL-2.0 dependency sources are available at the source archive links below.
+
+{{#each licenses}}
+{{name}}
+Used by:
+{{#each used_by}}
+  {{crate.name}} {{crate.version}} — https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download
+{{/each}}
+{{{text}}}
+
+{{/each}}

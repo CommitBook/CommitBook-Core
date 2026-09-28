@@ -2,7 +2,7 @@
 
 ## What CommitBook is
 
-CommitBook turns any git repository of markdown notes into a self-syncing notebook. A user writes notes in their editor of choice; CommitBook runs in the background and, on a schedule the user picks, commits all non-ignored Git changes first, then fetches the latest from the remote, runs an in-process libgit2 3-way merge, and pushes when auto-push is enabled. Desktop AI features invoke an installed CLI such as Claude, Copilot, Codex, Gemini, or Cursor. Mobile conflict resolution calls back into the same Swift/Kotlin app, which talks to its AI service from the phone; it never depends on a desktop app.
+CommitBook turns any git repository of markdown notes into a self-syncing CommitBook. A user writes notes in their editor of choice; CommitBook runs in the background and, on a schedule the user picks, commits all non-ignored Git changes first, then fetches the latest from the remote, runs an in-process libgit2 3-way merge, and pushes when auto-push is enabled. Desktop AI features invoke an installed CLI such as Claude, Copilot, Codex, Gemini, or Cursor. Mobile conflict resolution calls back into the same Swift/Kotlin app, which talks to its AI service from the phone; it never depends on a desktop app.
 
 Each repository is self-contained. There is no global config, no database, and no central server. State lives in a `.CommitBook/` directory inside the repo (`config.toml` and the nested `.gitignore` are committed; `/local/` is ignored). Initialization is explicit: `commitbook init` must be run before any other command works.
 
@@ -18,14 +18,14 @@ The design system must cover all four surfaces, but the iOS/macOS and Android ap
 ## Who uses it
 
 - **Power users / developers**: live in the CLI and TUI. Already comfortable with terminals, git, and dotfiles. Care about density, keyboard control, and seeing logs.
-- **Note-takers using the native apps**: may not know what git is. They see a list of notebooks, open one, type, and trust that their notes are being saved and synced. Conflicts and sync state must be legible without git vocabulary.
+- **Note-takers using the native apps**: may not know what git is. They see a list of CommitBooks, open one, type, and trust that their notes are being saved and synced. Conflicts and sync state must be legible without git vocabulary.
 - **Self-hosters / tinkerers**: open the local web dashboard occasionally to check the scheduler, read logs, and tweak settings.
 
 ## Core domain concepts the UI must visualize
 
 These concepts recur across every surface. The design system needs a consistent visual treatment for each:
 
-- **CommitBook**: one notebook, backed by a single git repository on a provider (GitHub, GitLab, Codeberg, generic git). Identified by `<owner>/<repo>`. Has a name, a branch, a sync mode, a provider, an auto-sync flag, a doc count, and a conflict count.
+- **CommitBook**: a local clone of a Git repository on a provider (GitHub, GitLab, Codeberg, generic git). The eight-character `commitbook_local_id` selects this clone; its remote URL and provider are descriptive Git metadata, not its local identity. It has a name, a branch, a sync mode, an auto-sync flag, a doc count, and a conflict count.
 - **Document**: one markdown file inside a CommitBook. Has a path and content.
 - **Sync**: one cycle of (commit local changes) → (fetch and libgit2 3-way merge) → (push). Outcome is a `SyncResult` with five numbers the UI may want to surface: `committed` (bool), `pulled` (count), `pushed` (count), `conflictsResolved` (count, AI), `manualConflicts` (count, left for user), plus an `errors` list.
 - **Sync mode**: `aiResolve` (let the configured AI rewrite conflicted files) or `manual` (leave conflict markers in place). Picked per-sync; background syncs default to `aiResolve`, user-initiated syncs may prompt.

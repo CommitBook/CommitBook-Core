@@ -2,7 +2,7 @@ namespace commitbook {};
 
 [Error]
 enum CommitBookError {
-    "DatabaseError",
+    "StorageError",
     "TransportError",
     "MergeError",
     "AuthError",
@@ -15,13 +15,43 @@ enum SyncMode {
     "Manual",
 };
 
+enum GitCredentialKind {
+    "Default",
+    "Username",
+    "UserPassword",
+    "SshKey",
+};
+
+dictionary GitCredentialRequest {
+    string remote_url;
+    string? username_from_url;
+    boolean allow_default;
+    boolean allow_username;
+    boolean allow_user_password;
+    boolean allow_ssh_key;
+};
+
+dictionary GitCredentialResponse {
+    GitCredentialKind kind;
+    string? username;
+    string? password;
+    string? public_key;
+    string? private_key;
+    string? passphrase;
+    string? error_message;
+};
+
+callback interface GitCredentialCallback {
+    GitCredentialResponse provide(GitCredentialRequest request);
+};
+
 enum AiConflictResolutionAction {
     "WriteContent",
     "DeleteFile",
 };
 
 dictionary AiConflictRequest {
-    string commitbook_id;
+    string commitbook_local_id;
     string path;
     string conflict_type;
     boolean binary;
@@ -52,17 +82,14 @@ interface ConflictResolutionContinuation {
 dictionary CommitBookInput {
     string name;
     string mode;
-    string provider;
-    string owner;
-    string repo;
+    string remote_url;
     string branch;
     string? device_name = null;
 };
 
 dictionary CommitBookSummary {
-    string id;
-    string owner;
-    string repo;
+    string commitbook_local_id;
+    string remote_url;
     string name;
     string mode;
     string provider;
@@ -81,8 +108,8 @@ dictionary BrokenCommitBook {
 };
 
 dictionary DiscoveredCommitBook {
-    string owner;
-    string repo;
+    string remote_url;
+    string name;
     string default_branch;
     boolean is_private;
     boolean has_dot_commitbook;
@@ -130,7 +157,7 @@ dictionary ConflictSummary {
 };
 
 dictionary ResolveConflictInput {
-    string commitbook_id;
+    string commitbook_local_id;
     string conflict_id;
     string resolution_type;
     string? manual_content;
@@ -139,7 +166,7 @@ dictionary ResolveConflictInput {
 };
 
 dictionary RepoInfo {
-    string owner;
+    string remote_url;
     string name;
     string default_branch;
     boolean is_private;
@@ -147,7 +174,7 @@ dictionary RepoInfo {
 
 interface CommitBookEngineClient {
     [Throws=CommitBookError]
-    constructor(string db_path, string workspaces_root, ConflictResolverCallback? conflict_resolver);
+    constructor(string workspaces_root, ConflictResolverCallback? conflict_resolver, GitCredentialCallback? credential_callback);
 
     [Throws=CommitBookError, Async]
     sequence<RepoInfo> validate_pat(string token);
@@ -156,7 +183,7 @@ interface CommitBookEngineClient {
     sequence<DiscoveredCommitBook> discover_commitbooks(string token);
 
     [Throws=CommitBookError, Async]
-    CommitBookSummary init_commitbook(CommitBookInput input, string token);
+    CommitBookSummary init_commitbook(CommitBookInput input);
 
     [Throws=CommitBookError]
     sequence<CommitBookSummary> list_commitbooks();
@@ -165,31 +192,35 @@ interface CommitBookEngineClient {
     sequence<BrokenCommitBook> list_broken_commitbooks();
 
     [Throws=CommitBookError]
-    CommitBookSummary get_commitbook(string commitbook_id);
+    CommitBookSummary get_commitbook(string commitbook_local_id);
+
+    // Register only local identity, without committing or contacting the remote.
+    [Throws=CommitBookError]
+    CommitBookSummary register_local_commitbook(string relative_path);
 
     // Refused with InvalidInput while the clone has uncommitted changes,
     // commits not yet pushed, or a merge in progress, since deleting would
     // lose them. force = true deletes anyway.
     [Throws=CommitBookError]
-    void delete_commitbook(string commitbook_id, optional boolean force = false);
+    void delete_commitbook(string commitbook_local_id, optional boolean force = false);
 
     [Throws=CommitBookError]
-    sequence<DocumentSummary> list_documents(string commitbook_id);
+    sequence<DocumentSummary> list_documents(string commitbook_local_id);
 
     [Throws=CommitBookError]
-    DocumentContent read_document(string commitbook_id, string path);
+    DocumentContent read_document(string commitbook_local_id, string path);
 
     // Pass the `revision` from `read_document` as `expected_revision`: the
     // save is refused with MergeError when a sync has changed the document
     // since, instead of overwriting that change. null skips the check.
     [Throws=CommitBookError]
-    void save_document(string commitbook_id, string path, string content, optional string? expected_revision = null);
+    void save_document(string commitbook_local_id, string path, string content, optional string? expected_revision = null);
 
     [Throws=CommitBookError, Async]
-    SyncResultSummary sync_commitbook(string commitbook_id, SyncMode mode, string token);
+    SyncResultSummary sync_commitbook(string commitbook_local_id, SyncMode mode);
 
     [Throws=CommitBookError]
-    sequence<ConflictSummary> list_conflicts(string commitbook_id);
+    sequence<ConflictSummary> list_conflicts(string commitbook_local_id);
 
     [Throws=CommitBookError]
     void resolve_conflict(ResolveConflictInput input);

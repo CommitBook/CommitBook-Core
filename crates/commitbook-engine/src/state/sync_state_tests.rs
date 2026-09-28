@@ -67,19 +67,15 @@ fn test_save_overwrites_existing() {
 }
 
 #[test]
-fn test_load_legacy_state_with_remote_head() {
-    // Old state.toml files written before the SyncState shrink contained a
-    // `remote_head` field. They must still load (silently ignored).
+fn rejects_unknown_state_fields() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join("local")).unwrap();
-    let legacy = r#"
-remote_head = "abc123"
-last_sync_at = "2026-04-09T10:00:00Z"
-"#;
-    std::fs::write(tmp.path().join("local").join("state.toml"), legacy).unwrap();
-
-    let loaded = SyncState::load(tmp.path()).unwrap();
-    assert_eq!(loaded.last_sync_at.as_deref(), Some("2026-04-09T10:00:00Z"));
+    std::fs::write(
+        tmp.path().join("local/state.toml"),
+        "remote_head = \"abc\"\n",
+    )
+    .unwrap();
+    assert!(SyncState::load(tmp.path()).is_err());
 }
 
 #[test]

@@ -28,26 +28,26 @@ Track that work upstream. The remaining items here only become actionable once t
 ## 2. Rename Kotlin types: `Workspace*` → `CommitBook*`
 
 - [ ] `app/src/main/java/com/commitbook/app/data/model/Models.kt`:
-  - `WorkspaceInput` → `CommitBookInput`. Drop `remoteUrl`, `localRoot`. Add `owner`, `repo` (renamed from `repoName`).
-  - `WorkspaceSummary` → `CommitBookSummary`. Add `owner`, `repo`, `docCount`, `conflictCount`.
+  - `WorkspaceInput` → `CommitBookInput`. Keep `remoteUrl`; drop `localRoot`, `owner`, and `repo`. New clone folders use `commitbookLocalId`.
+  - `WorkspaceSummary` → `CommitBookSummary`. Add `remoteUrl`, `commitbookLocalId`, `docCount`, and `conflictCount`.
   - Add `DiscoveredCommitBook`, `RepoInfo`, `SyncMode { AiResolve, Manual }`.
   - Add the structured AI conflict request/response types (including nullable error), explicit write/delete action, `ConflictResolutionContinuation`, and nullable ancestor/local/remote fields on `ConflictSummary`.
   - `SyncResultSummary`: add `committed: Boolean`, `conflictsResolved: Int`, `manualConflicts: Int`.
 
 - [ ] `app/src/main/java/com/commitbook/app/data/engine/CommitBookEngine.kt`:
   - Rename all methods `*Workspace` → `*CommitBook`.
-  - `initCommitBook(input: CommitBookInput, token: String): CommitBookSummary` - now `suspend` AND takes `token`.
+  - `initCommitBook(input: CommitBookInput): CommitBookSummary` - now `suspend`; Git credentials come from the host callback.
   - Add `validatePAT(token: String): List<RepoInfo>` and `discoverCommitBooks(token: String): List<DiscoveredCommitBook>`.
-  - `syncCommitBook(commitBookId: String, mode: SyncMode, token: String): SyncResultSummary`.
+  - `syncCommitBook(commitBookLocalId: String, mode: SyncMode): SyncResultSummary`.
 
 ## 3. Implement `RealEngine.kt` (mirror of Apple's RealEngine.swift)
 
 - [ ] New file `app/src/main/java/com/commitbook/app/data/engine/RealEngine.kt`. Wraps the UniFFI-generated `CommitBookEngineClient`.
-- [ ] Construct `CommitBookEngineClient(dbPath, workspacesRoot, conflictResolver)` using:
-  - `dbPath` = `context.filesDir / "commitbook" / "db"` (private app data, not on `getExternalFilesDir`).
+- [ ] Construct `CommitBookEngineClient(workspacesRoot, conflictResolver, credentialCallback)` using:
   - `workspacesRoot` = `context.filesDir / "commitbook" / "repos"`.
   - Create both directories on first run.
 - [ ] Implement `ConflictResolverCallback` in Kotlin. Its synchronous entry point starts the app's async HTTPS request and returns immediately; complete the supplied continuation with explicit content, deletion, or an error within 120 seconds. It never calls a desktop app. Pass `null` until configured and surface the engine's actionable error if an `AiResolve` sync encounters a conflict without it.
+- [ ] Implement `GitCredentialCallback` using secure app storage. Return a username, HTTPS username/password, or in-memory SSH key according to the request's allowed types; never put credentials in `remoteUrl`. Direct URL entry may use HTTPS, SSH, or a local Git path.
 - [ ] Map UniFFI types → app types via small adapters (the Kotlin equivalent of Apple's `FFIMapper.swift`).
 - [ ] Map UniFFI errors → app errors (Apple's `FFIErrorAdapter.swift` analogue).
 
@@ -97,3 +97,29 @@ Track that work upstream. The remaining items here only become actionable once t
 - [ ] Add `scripts/build-android-aar.sh` analogous to `scripts/build-xcframework.sh` (lives in `crates/commitbook-client/scripts/`).
 - [ ] Tag conventions match iOS: `0.5.1`, `0.6.0`, no `v` prefix.
 - [ ] Both artifacts (xcframework + AAR) attached to the same release tag, so `.core-version` in both app repos can pin to the same number.
+
+## Local clone identity contract
+
+`CommitBookSummary.commitbookLocalId` is an eight-character local clone identifier,
+not `owner/repo`. Persist the value returned by the engine; never reconstruct
+it from a path or remote. Resolve the current app-private `workspacesRoot` at
+startup, then list clones. Identity is stored in the ignored
+`.CommitBook/local/commitbook_local_id.toml` with the key `commitbook_local_id`. Moving the
+app storage root or renaming a clone does not change its identity.
+
+For an imported direct-child clone, call `registerLocalCommitbook(relativePath)`
+to initialize local identity without Git publication. Listing is read-only;
+show broken-clone diagnostics for missing/invalid/duplicate IDs. Do not silently
+reset identities. After explicitly removing a copied clone's duplicate identity
+file, register that copy again and replace its saved UI selection.
+
+## Provider and storage contract
+
+The constructor takes `workspacesRoot`, the optional conflict resolver, and the
+optional Git credential callback;
+there is no database path. Map `StorageError` / `storageError` instead of
+`DatabaseError` / `databaseError`. GitHub discovery returns HTTPS clone URLs.
+Direct onboarding accepts HTTPS, SSH, and local Git URLs; the host supplies
+HTTPS/SSH credentials through `GitCredentialCallback`.
+Existing non-GitHub clones can use local registration. Display names and sync
+remote/branch settings remain configurable and separate from local identity.

@@ -7,18 +7,6 @@ fn test_plist_label_prefix() {
 }
 
 #[test]
-fn test_legacy_plist_label_uses_old_prefix_and_same_hash() {
-    let repo = Path::new("/tmp/my-repo");
-    let current = plist_label(repo);
-    let legacy = legacy_plist_label(repo);
-    assert!(legacy.starts_with("com.commitbook."));
-    assert_eq!(
-        current.strip_prefix("com.zaai.commitbook."),
-        legacy.strip_prefix("com.commitbook.")
-    );
-}
-
-#[test]
 fn test_plist_label_deterministic() {
     let a = plist_label(Path::new("/tmp/my-repo"));
     let b = plist_label(Path::new("/tmp/my-repo"));
@@ -41,11 +29,9 @@ fn test_plist_path_format() {
 }
 
 #[test]
-fn test_plist_paths_cover_current_and_legacy_labels() {
-    let current = plist_path_for_label(Path::new("/Users/test"), "com.zaai.commitbook.abc");
-    let legacy = plist_path_for_label(Path::new("/Users/test"), "com.commitbook.abc");
-    assert!(current.ends_with("Library/LaunchAgents/com.zaai.commitbook.abc.plist"));
-    assert!(legacy.ends_with("Library/LaunchAgents/com.commitbook.abc.plist"));
+fn test_plist_path_uses_supported_label() {
+    let path = plist_path_for_label(Path::new("/Users/test"), "com.zaai.commitbook.abc");
+    assert!(path.ends_with("Library/LaunchAgents/com.zaai.commitbook.abc.plist"));
 }
 
 #[test]
@@ -71,7 +57,7 @@ fn test_generate_plist_escapes_paths() {
 }
 
 #[test]
-fn test_generate_plist_uses_run_subcommand() {
+fn test_generate_plist_uses_sync_subcommand() {
     let plist = generate_plist(
         Path::new("/tmp/repo"),
         "0 * * * *",

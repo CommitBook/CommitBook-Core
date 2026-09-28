@@ -106,6 +106,7 @@ pub async fn sync_repository_locked(
     lock: &RepoLock,
 ) -> Result<SyncOutcome> {
     lock.ensure_matches(repo_root)?;
+    crate::commitbooks::identity::ensure_locked(repo_root, lock)?;
     // Safety net for clones that never ran `init` on this device: register
     // it with the default name so other devices can see it.
     if crate::devices::this_device_id(repo_root)?.is_none() {
@@ -166,6 +167,7 @@ pub async fn sync_with_resolver_locked(
     lock: &RepoLock,
 ) -> Result<SyncOutcome> {
     lock.ensure_matches(repo_root)?;
+    crate::commitbooks::identity::ensure_locked(repo_root, lock)?;
     // A merge can drop `/local/` from the committed `.CommitBook/.gitignore`;
     // restore it every cycle. `stage_all` also refuses `.CommitBook/local/`.
     LocalConfig::ensure_gitignore(repo_root)?;
@@ -255,6 +257,7 @@ async fn sync_cycle(
         );
     }
     ensure_no_user_operation(&repo, options)?;
+    crate::state::validate_metadata_layout(repo_root)?;
     crate::git::attributes::ensure_filters_supported(repo_root)?;
     crate::review::cleanup_locked(repo_root, lock)?;
     let mut outcome = SyncOutcome::default();

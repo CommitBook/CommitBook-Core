@@ -1,6 +1,8 @@
+<img src="BrandKit/commitbook-readme-banner.svg" width="1200" alt="CommitBook — Your notes. Saved and Synced with Git.">
+
 # CommitBook
 
-Automated git commits and sync for your markdown notebooks. Turn any git repository into a self-saving, self-syncing note-taking workspace.
+Automated git commits and sync for your markdown CommitBooks. Turn any git repository into a self-saving, self-syncing note-taking workspace.
 
 ## What It Does
 
@@ -14,7 +16,7 @@ Commit messages use a timestamp by default, or an AI CLI (GitHub Copilot, Claude
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/scripts/release/install.sh | bash
 
 # Navigate to your notes repo
 cd ~/my-notes
@@ -35,6 +37,13 @@ commitbook start
 | Guide | Description |
 |---|---|
 | [AI Agent Dotfiles](use-cases/DotFiles-with-AI-Agents.md) | Auto-sync config for Claude, Cursor, Codex, Copilot and other AI agents |
+
+## Short command
+
+`cobo` is installed alongside `commitbook` and accepts the same commands, for
+example `cobo sync` or `cobo status`. Schedulers always invoke `commitbook sync`;
+keep both executables installed together. Generate completions with
+`cobo completions <shell>` for the short name.
 
 ## Commands
 
@@ -193,7 +202,7 @@ name = "notes"                # display name
 
 [git]
 branch = "main"
-remote = "origin"             # provider, owner and repo are read from this remote's URL
+remote = "origin"             # provider and remote location are read from this remote's URL
 
 [sync]
 schedule = "1h"               # 5m | 15m | 30m | 1h | 2h | 4h | daily | 5-field cron expression
@@ -215,7 +224,7 @@ keep = "30d"                  # <N>d (e.g. 7d, 30d, 90d) | forever
 ```
 
 The web Config page edits every setting except the remote, which is chosen at
-`commitbook init` and shown read-only with its provider, owner, and repository.
+`commitbook init` and shown read-only with its provider and remote location.
 A new branch is accepted only once it is checked out, because sync refuses to
 run on any other branch.
 
@@ -313,7 +322,7 @@ All state is file-based (no database). The `.CommitBook/` directory is self-cont
 ### Install Script (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/scripts/release/install.sh | bash
 ```
 
 Detects your platform, downloads the latest release, verifies it against the
@@ -351,29 +360,40 @@ Every release publishes tarballs for:
 
 To install one by hand, download the tarball for your target plus `SHA256SUMS`
 from [GitHub Releases](https://github.com/CommitBook/CommitBook-Core/releases),
-verify it, and extract it onto your `PATH`:
+verify it, and extract it into your install prefix:
 
 ```bash
 TARGET=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
 shasum -a 256 -c <(grep "commitbook-${TARGET}.tar.gz" SHA256SUMS)
-mkdir -p ~/.local/bin
-tar xzf "commitbook-${TARGET}.tar.gz" -C ~/.local/bin
+mkdir -p ~/.local
+tar xzf "commitbook-${TARGET}.tar.gz" -C ~/.local
 ```
 
-Each tarball contains `commitbook`, `commitbook-tui`, and `commitbook-web`.
-The binaries bundle their own OpenSSL, so they run on any glibc-based Linux
-without a matching system OpenSSL; update CommitBook to pick up OpenSSL
-security fixes.
+Each tarball contains all four executables in `bin/`, including `cobo`,
+and license materials in `share/licenses/commitbook/`. Add `~/.local/bin` to `PATH`.
+The binaries bundle OpenSSL and libgit2, so matching system versions of those
+libraries are not required. Linux still needs a compatible glibc/runtime for
+the release build target. Update CommitBook to receive bundled-library fixes.
+
+### Homebrew
+
+After the release has been published to the CommitBook tap:
+
+```bash
+brew install CommitBook/tap/commitbook
+```
+
+The formula installs all four desktop executables and their license notices.
+See [workflow stages](workflows.md) for publishing setup and validation.
 
 ### Upgrading
 
-Run `commitbook stop` before replacing the binary, then `commitbook start`
-afterwards. Schedulers installed before 0.8.0 run the removed `commitbook run`
-command, and configs from those releases use the old format: delete
-`.CommitBook/config.toml`, run `commitbook init`, then `commitbook start`, on
-every device. Releases before 0.6.0 delete the repository lock file when they
-finish, so a scheduler from an older release running alongside a newer one can
-let two syncs mutate the same repository at the same time.
+Stop scheduled syncs before replacing an installed binary, then start them
+again using the new installation. Pre-launch development layouts have no
+migration support: preserve any local credentials/state you need and initialize
+a fresh clone. Do not run old and new development binaries against the same
+clone. Old LaunchAgent labels and crontab entries are not discovered or
+removed by current commands.
 
 ## Requirements
 
@@ -563,3 +583,85 @@ cycle; the additional `last_attempt_at`, `last_fetch_at`, and `last_push_at`
 fields distinguish attempts, remote checks, and publication. The web status
 API retains its existing fields and adds a `repository` object containing the
 shared detailed status. Unknown change counts are null rather than zero.
+
+## Pre-launch compatibility
+
+Only the current schema and `.CommitBook/local/` layout are supported. There
+are no upgrades for older development layouts or commands (`run` is removed;
+use `sync`). Old files are left untouched. Sync refuses unexpected top-level `.CommitBook/`
+entries so abandoned state cannot be accidentally published. For obsolete development setups,
+back up local credentials and state, stop old schedulers, and initialize a fresh
+clone with the current CLI. The current advisory lock is `local/.lock`; its file
+remains after unlocking and does not itself indicate a running process.
+
+## Local CommitBook ID (`commitbook_local_id`)
+
+Each local clone has its own eight-character lowercase hexadecimal
+`commitbook_local_id`, stored only in `.CommitBook/local/commitbook_local_id.toml`:
+
+```toml
+commitbook_local_id = "a7c39e2b"
+```
+
+Initialization or the first sync creates it under the repository lock, using
+fresh OS randomness. It is saved once, not recalculated when the folder,
+display name, or remote changes. Git never
+stages or synchronizes this file. Device IDs remain separate.
+
+IDs are probabilistically unique, not global identifiers. New SDK-managed
+clones check for local ID collisions before cloning; externally copied clones
+can still duplicate an ID. A workspace scan reports
+both clones if a copied folder or chance collision produces duplicate IDs;
+operations never silently choose one. To repair, remove **only the intended
+copy's** `local/commitbook_local_id.toml` and run `commitbook init` (which asks before
+publishing metadata), or use the SDK's local-only registration method.
+
+SDK consumers use `commitbook_local_id` returned by initialization/listing for all
+operations, not a remote URL or absolute path. Register an externally cloned
+workspace with `register_local_commitbook(relative_path)`; this writes only
+local identity, without committing or contacting the remote. Lists and status
+never create or repair IDs; missing, malformed, and unsafe identity files are
+reported for explicit repair. A Git remote URL identifies the remote repository,
+not this local clone. Native apps can select a discovered GitHub HTTPS URL or
+provide any Git URL directly; new clones use the local ID as their folder name.
+Repeated additions of the same remote reuse the existing clone. Native HTTPS
+and SSH credentials come from an app-provided callback, never from the URL.
+
+The UniFFI constructor accepts an optional `GitCredentialCallback` alongside
+the conflict resolver. `init_commitbook` takes a `CommitBookInput.remote_url`
+and `sync_commitbook` takes the local ID and sync mode; neither takes a token.
+The callback receives the credential-free remote URL, an optional username,
+and the credential types libgit2 accepts. It can return a username, HTTPS
+username/password, an in-memory SSH key with an optional passphrase, or a
+default credential when offered. The host app should retrieve secrets from
+its secure store. GitHub `validate_pat` and `discover_commitbooks` still take
+a token for GitHub API access; discovery returns HTTPS clone URLs.
+
+## Release artifacts
+
+Desktop archives contain `bin/commitbook`, `bin/cobo`, `bin/commitbook-tui`,
+and `bin/commitbook-web`, plus `share/licenses/commitbook/LICENSE` and
+`THIRD_PARTY_NOTICES.txt`. The installer defaults to `~/.local`; set
+`COMMITBOOK_INSTALL_PREFIX` to choose a different prefix. It verifies checksums
+and the archive layout before installing.
+
+Apple framework ZIPs include a `Licenses/` directory. Release builds use the
+committed lockfile, pinned cargo-about 0.9.2 (with its `cli` feature), and
+`scripts/release/notices.py` to collect Rust license texts and bundled libgit2,
+libssh2, zlib, and OpenSSL notices from the resolved source packages. Keep
+these materials with redistributed binaries; source archive links for the
+locked Rust dependency versions are included. License-generation failures
+block packaging.
+
+The S2 desktop and optional S5 XCFramework release pipelines resolve their
+input ref once, run the reusable full CI and audit workflows on that commit,
+and require the release tag to equal the workspace version and point to the
+same commit. No tool here automatically creates a tag, changes visibility,
+or publishes to crates.io.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](../.github/CONTRIBUTING.md), [SECURITY.md](../.github/SECURITY.md), and the
+[release-readiness checklist](release-readiness.md). Supported launch artifacts
+are the macOS/Linux desktop tools and Apple XCFramework. Android packaging and
+crates.io publication are deferred.

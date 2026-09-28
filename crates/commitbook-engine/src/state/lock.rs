@@ -32,7 +32,6 @@ impl std::error::Error for RepoLockContended {}
 pub struct RepoLock {
     repo_root: PathBuf,
     primary: File,
-    legacy: Option<File>,
 }
 
 impl RepoLock {
@@ -45,27 +44,10 @@ impl RepoLock {
         })?;
         crate::state::ensure_local_layout(&repo_root)?;
 
-        // Coordinate with releases that locked `.CommitBook/.lock` before
-        // taking the canonical `.CommitBook/local/.lock`.
-        let legacy_path = LocalConfig::commitbook_dir(&repo_root).join(".lock");
         let primary_path = LocalConfig::lock_path(&repo_root);
-        let legacy = if inspect_lock_path(&legacy_path)? {
-            Some(open_and_lock(&legacy_path, &repo_root)?)
-        } else {
-            None
-        };
         let _ = inspect_lock_path(&primary_path)?;
         let primary = open_and_lock(&primary_path, &repo_root)?;
-        let lock = Self {
-            repo_root: repo_root.clone(),
-            primary,
-            legacy,
-        };
-        crate::state::migrate_legacy_state(&repo_root)?;
-        // Retain the pathname: unlinking a held lock permits a second inode
-        // to be locked concurrently. Old schedulers must be stopped before
-        // upgrading because those binaries may themselves unlink this file.
-        Ok(lock)
+        Ok(Self { repo_root, primary })
     }
 
     pub(crate) fn ensure_matches(&self, repo_root: &Path) -> Result<()> {
@@ -131,9 +113,6 @@ fn open_and_lock(path: &Path, repo_root: &Path) -> Result<File> {
 
 impl Drop for RepoLock {
     fn drop(&mut self) {
-        if let Some(legacy) = &self.legacy {
-            let _ = fs2::FileExt::unlock(legacy);
-        }
         let _ = fs2::FileExt::unlock(&self.primary);
     }
 }

@@ -1,0 +1,164 @@
+name: S2 - Release GitHub
+
+on:
+  push:
+    tags:
+      # Bare semver tags, no 'v' prefix: 0.7.0, 0.7.1
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build from
+        required: true
+        default: main
+      tag_name:
+        description: Existing tag to publish
+        required: true
+
+# Resolve a manual ref once in verify; tag pushes use the triggering commit.
+env:
+  RELEASE_TAG: ${{ inputs.tag_name || github.ref_name }}
+
+# Read-only by default; only the job that publishes can write.
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  checks:
+    needs: resolve
+    uses: ./.github/workflows/S1-Test-CI.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+  audit:
+    needs: resolve
+    uses: ./.github/workflows/audit.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+  # Nothing is built for release until the exact commit passes the same
+  # checks CI runs, plus the dependency audit.
+  verify:
+    name: Verify
+    needs: [resolve, checks, audit]
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - name: Record verified commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Validate release version and tag
+        run: python3 scripts/release/validate-release.py "$RELEASE_TAG" --fetch
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            use_cross: true
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # Pinned: this job builds the shipped binaries, so it must not run
+      # whatever lands on cross's default branch. To update, pick a newer
+      # commit of https://github.com/cross-rs/cross and change the rev.
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --rev 74e99b2223de06166f8cdcc1af7f1308ec52baf4 --locked
+
+      - name: Build desktop binaries
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+          USE_CROSS: ${{ matrix.use_cross || false }}
+        run: bash scripts/release/build-desktop.sh "$BUILD_TARGET" "$USE_CROSS"
+
+      - name: Install pinned license generator
+        run: cargo install cargo-about --version 0.9.2 --features cli --locked
+      - name: Generate license materials
+        run: python3 scripts/release/notices.py target/licenses
+      - name: Package
+        run: python3 scripts/release/package-desktop.py "target/${{ matrix.target }}/release" target/licenses "commitbook-${{ matrix.target }}.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: commitbook-${{ matrix.target }}
+          path: commitbook-${{ matrix.target }}.tar.gz
+
+  release:
+    name: Create Release
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Environment policy restricts publication to main or version-shaped tags.
+    environment: release
+    steps:
+      # Checked out into a subdirectory so install.sh can be published as a
+      # release asset without the repo tree colliding with the artifacts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          path: repo
+
+      # A dispatch names a ref to build and a tag to publish to. Refuse to
+      # attach binaries built from anything but the commit that tag points at,
+      # so an existing release cannot be overwritten with other code.
+      - name: Check the tag matches the built commit
+        working-directory: repo
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+          BUILT_SHA: ${{ needs.verify.outputs.sha }}
+        run: python3 scripts/release/validate-release.py "$TAG" --sha "$BUILT_SHA" --fetch
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: commitbook-*
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          sha256sum commitbook-*.tar.gz > SHA256SUMS
+          cp repo/scripts/release/install.sh install.sh
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ needs.verify.outputs.sha }}
+          generate_release_notes: true
+          files: |
+            commitbook-*.tar.gz
+            SHA256SUMS
+            install.sh

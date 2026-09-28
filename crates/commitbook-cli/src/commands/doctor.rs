@@ -463,35 +463,15 @@ fn fix_plist_binary_path(_repo_root: &Path) -> Option<Check> {
 
 #[cfg(target_os = "macos")]
 fn fix_plist_binary_path(repo_root: &Path) -> Option<Check> {
-    let Ok(current_exe) = std::env::current_exe() else {
-        return None;
-    };
+    let current_exe = commitbook_engine::settings::current_binary();
 
-    let legacy_path = commitbook_engine::cron::macos::legacy_plist_path(repo_root);
-    let legacy_exists = legacy_path.exists();
-    let legacy_loaded = commitbook_engine::cron::macos::is_legacy_loaded(repo_root);
-    let binary_is_current = commitbook_engine::cron::macos::existing_plist_path(repo_root)
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .is_some_and(|contents| contents.contains(&current_exe.to_string_lossy().to_string()));
-    if !legacy_exists && !legacy_loaded && binary_is_current {
+    if !cron::is_loaded(repo_root) {
         return None;
     }
-
-    // A dormant legacy plist is stale state: `commitbook stop` removes both
-    // labels, and doctor must not unexpectedly start a stopped scheduler.
-    // Remove that file directly when neither label is loaded.
-    if !cron::is_loaded(repo_root) {
-        if legacy_exists {
-            return Some(match std::fs::remove_file(&legacy_path) {
-                Ok(()) => Check::new("Removing legacy scheduler plist", "applied", false, vec![]),
-                Err(error) => Check::new(
-                    "Removing legacy scheduler plist",
-                    "failed",
-                    true,
-                    vec![error.to_string()],
-                ),
-            });
-        }
+    let binary_is_current =
+        std::fs::read_to_string(commitbook_engine::cron::macos::plist_path(repo_root))
+            .is_ok_and(|contents| contents.contains(&current_exe.to_string_lossy().to_string()));
+    if binary_is_current {
         return None;
     }
 

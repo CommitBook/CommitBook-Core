@@ -59,7 +59,7 @@ resolution, and metadata publication.
 | Behavior on identical changes both sides | Auto-resolves | Auto-resolves |
 | Multi-device commits preserved | Yes (both lineages remain) | Yes (rewritten on top) |
 
-Notebook history granularity is not a product concern. CommitBook autogenerates commits whose content is the value users care about, not the layout of `git log --graph`. That collapses the rebase advantage to "subjectively cleaner log" which we're not buying.
+CommitBook history granularity is not a product concern. CommitBook autogenerates commits whose content is the value users care about, not the layout of `git log --graph`. That collapses the rebase advantage to "subjectively cleaner log" which we're not buying.
 
 The 2.5× LOC ratio matters more than it sounds: the rebase implementation needs to track an in-progress rebase across calls, handle resume after partial conflicts, and unwind cleanly on errors. The merge implementation is one function with two branches.
 
@@ -161,7 +161,7 @@ Apps' existing `ConflictListView` / `ConflictDetailView` activate when `Manual` 
 
 ## Keeping both versions (`both` mode)
 
-Notebook conflicts are most often two devices editing the same note while
+CommitBook conflicts are most often two devices editing the same note while
 apart. With `[conflicts] mode = "both"` (the default), `GitRepo::try_resolve_both`
 stages a libgit2 union merge of the three index stages for every conflicted
 Markdown or plain-text note: each conflicting hunk keeps this device's lines,
@@ -237,7 +237,7 @@ explicit deletion, or validated text and finishes the one merge commit.
 
 ## Compatibility with existing repos
 
-Notebooks already synced under v2-shellout-rebase have linear histories. After this change, future merges will produce merge commits. There is no migration step: git accepts both shapes coexisting in the same repo. Users who care about linearity can still `git rebase -i` manually if they want.
+CommitBooks already synced under v2-shellout-rebase have linear histories. After this change, future merges will produce merge commits. There is no migration step: git accepts both shapes coexisting in the same repo. Users who care about linearity can still `git rebase -i` manually if they want.
 
 ## Implementation pointers
 

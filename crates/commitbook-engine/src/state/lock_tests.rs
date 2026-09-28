@@ -68,38 +68,6 @@ fn concurrent_first_acquires_reach_the_repository_lock() {
 }
 
 #[test]
-fn coordinates_with_legacy_lock() {
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".CommitBook")).unwrap();
-    let legacy_path = tmp.path().join(".CommitBook/.lock");
-    let legacy_auth = tmp.path().join(".CommitBook/auth.toml");
-    std::fs::write(&legacy_auth, "token = \"legacy\"\n").unwrap();
-    let legacy = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&legacy_path)
-        .unwrap();
-    fs2::FileExt::try_lock_exclusive(&legacy).unwrap();
-
-    let error = RepoLock::acquire(tmp.path()).unwrap_err();
-    assert!(error.downcast_ref::<RepoLockContended>().is_some());
-    assert!(legacy_auth.exists());
-    assert!(!tmp.path().join(".CommitBook/local/auth.toml").exists());
-    fs2::FileExt::unlock(&legacy).unwrap();
-    drop(legacy);
-
-    let migrated = RepoLock::acquire(tmp.path()).unwrap();
-    assert!(legacy_path.exists());
-    assert!(LocalConfig::lock_path(tmp.path()).exists());
-    assert!(!legacy_auth.exists());
-    assert!(tmp.path().join(".CommitBook/local/auth.toml").exists());
-    drop(migrated);
-    assert!(legacy_path.exists());
-}
-
-#[test]
 fn rejects_a_lock_for_a_different_repository() {
     let first = tempfile::tempdir().unwrap();
     let second = tempfile::tempdir().unwrap();
@@ -107,21 +75,6 @@ fn rejects_a_lock_for_a_different_repository() {
 
     let error = lock.ensure_matches(second.path()).unwrap_err().to_string();
     assert!(error.contains("cannot guard operation"));
-}
-
-#[cfg(unix)]
-#[test]
-fn rejects_symlinked_legacy_lock_without_touching_target() {
-    use std::os::unix::fs::symlink;
-
-    let tmp = tempfile::tempdir().unwrap();
-    let outside = tempfile::NamedTempFile::new().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".CommitBook")).unwrap();
-    symlink(outside.path(), tmp.path().join(".CommitBook/.lock")).unwrap();
-
-    let error = RepoLock::acquire(tmp.path()).unwrap_err().to_string();
-    assert!(error.contains("not a regular file"));
-    assert!(std::fs::read(outside.path()).unwrap().is_empty());
 }
 
 #[cfg(unix)]
@@ -151,4 +104,38 @@ fn fresh_repository_creates_only_the_primary_lock_file() {
 
     assert!(LocalConfig::lock_path(tmp.path()).exists());
     assert!(!legacy_path.exists());
+}
+
+#[test]
+fn process_exit_releases_the_lock() {
+    const CHILD_ROOT: &str = "COMMITBOOK_LOCK_TEST_ROOT";
+    if let Some(root) = std::env::var_os(CHILD_ROOT) {
+        let root = PathBuf::from(root);
+        let _lock = RepoLock::acquire(&root).unwrap();
+        std::fs::write(root.join("ready"), "ready").unwrap();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "state::lock::tests::process_exit_releases_the_lock",
+        ])
+        .env(CHILD_ROOT, tmp.path())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !tmp.path().join("ready").exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let ready = tmp.path().join("ready").exists();
+    let contended = ready && RepoLock::acquire(tmp.path()).is_err();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(ready && contended);
+    assert!(LocalConfig::lock_path(tmp.path()).exists());
+    RepoLock::acquire(tmp.path()).unwrap();
 }

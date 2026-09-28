@@ -235,6 +235,10 @@ impl RepositoryStatus {
             }
             Err(e) => s.diagnostics.push(format!("Cannot load sync state: {e:#}")),
         }
+        if let Err(error) = crate::commitbooks::identity::load(root) {
+            s.diagnostics
+                .push(format!("Local commitbook_local_id: {error:#}"));
+        }
         match crate::devices::list(root) {
             Ok((devices, warnings)) => {
                 s.devices = devices;

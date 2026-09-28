@@ -15,21 +15,14 @@ use super::*;
 #[test]
 fn async_ffi_methods_run_without_ambient_tokio_runtime() {
     let tmp = tempfile::tempdir().unwrap();
-    let client = CommitBookEngineClient::new(
-        "unused-db-path".to_string(),
-        tmp.path().to_string_lossy().into_owned(),
-        None,
-    )
-    .unwrap();
+    let client =
+        CommitBookEngineClient::new(tmp.path().to_string_lossy().into_owned(), None, None).unwrap();
 
     // A bogus id resolves to NotFound before any network call is attempted.
     // Pre-fix this line panicked instead of returning.
-    let err = pollster::block_on(client.sync_commitbook(
-        "does-not-exist".to_string(),
-        SyncMode::Manual,
-        "token".to_string(),
-    ))
-    .expect_err("a bogus commitbook id should error, not succeed");
+    let err =
+        pollster::block_on(client.sync_commitbook("does-not-exist".to_string(), SyncMode::Manual))
+            .expect_err("a bogus commitbook id should error, not succeed");
 
     assert!(
         matches!(err, CommitBookError::NotFound { .. }),
@@ -38,11 +31,8 @@ fn async_ffi_methods_run_without_ambient_tokio_runtime() {
 
     // The shared runtime is a process-global OnceLock, so a second call must
     // reuse it rather than panic or deadlock.
-    let second = pollster::block_on(client.sync_commitbook(
-        "also-missing".to_string(),
-        SyncMode::Manual,
-        "token".to_string(),
-    ));
+    let second =
+        pollster::block_on(client.sync_commitbook("also-missing".to_string(), SyncMode::Manual));
     assert!(
         matches!(second, Err(CommitBookError::NotFound { .. })),
         "second call should also return NotFound, got: {second:?}"
@@ -69,16 +59,14 @@ fn delete_never_follows_workspace_symlink() {
         commitbook_engine::config::Auth::Pat,
     )
     .unwrap();
+    crate::test_support::set_identity(outside.path());
     symlink(outside.path(), root.path().join("owner__repo")).unwrap();
-    let client = CommitBookEngineClient::new(
-        "unused".to_string(),
-        root.path().to_string_lossy().into_owned(),
-        None,
-    )
-    .unwrap();
+    let client =
+        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
+            .unwrap();
 
     let error = client
-        .delete_commitbook("owner/repo".to_string(), false)
+        .delete_commitbook("a1b2c3d4".to_string(), false)
         .expect_err("symlinked clone must not be registered or deleted");
     assert!(matches!(error, CommitBookError::NotFound { .. }));
     assert!(outside.path().join(".CommitBook/config.toml").exists());
@@ -94,6 +82,7 @@ fn deletion_fixture() -> (tempfile::TempDir, CommitBookEngineClient, PathBuf) {
     commitbook_engine::config::LocalConfig::new("Notes", "main", "origin")
         .save(&clone)
         .unwrap();
+    crate::test_support::set_identity(&clone);
     commitbook_engine::config::LocalConfig::ensure_gitignore(&clone).unwrap();
     std::fs::write(clone.join("note.md"), "published\n").unwrap();
     let mut index = repo.index().unwrap();
@@ -127,18 +116,15 @@ fn deletion_fixture() -> (tempfile::TempDir, CommitBookEngineClient, PathBuf) {
             .unwrap(),
         "published fixture must start clean"
     );
-    let client = CommitBookEngineClient::new(
-        "unused".to_string(),
-        root.path().to_string_lossy().into_owned(),
-        None,
-    )
-    .unwrap();
+    let client =
+        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
+            .unwrap();
     (root, client, clone)
 }
 
 fn assert_delete_refused(client: &CommitBookEngineClient, clone: &std::path::Path, reason: &str) {
     let error = client
-        .delete_commitbook("owner/repo".to_string(), false)
+        .delete_commitbook("a1b2c3d4".to_string(), false)
         .expect_err("unsaved work must prevent deletion");
     assert!(
         matches!(error, CommitBookError::InvalidInput { .. }),
@@ -152,7 +138,7 @@ fn assert_delete_refused(client: &CommitBookEngineClient, clone: &std::path::Pat
 fn delete_clean_clone() {
     let (_root, client, clone) = deletion_fixture();
     client
-        .delete_commitbook("owner/repo".to_string(), false)
+        .delete_commitbook("a1b2c3d4".to_string(), false)
         .unwrap();
     assert!(!clone.exists());
 }
@@ -214,7 +200,7 @@ fn force_delete_discards_uncommitted_work() {
     let (_root, client, clone) = deletion_fixture();
     std::fs::write(clone.join("draft.md"), "uncommitted\n").unwrap();
     client
-        .delete_commitbook("owner/repo".to_string(), true)
+        .delete_commitbook("a1b2c3d4".to_string(), true)
         .unwrap();
     assert!(!clone.exists());
 }
@@ -228,12 +214,9 @@ fn constructor_rejects_symlink_workspace_root() {
     let outside = tempfile::tempdir().unwrap();
     let linked = parent.path().join("linked-root");
     symlink(outside.path(), &linked).unwrap();
-    assert!(CommitBookEngineClient::new(
-        "unused".to_string(),
-        linked.to_string_lossy().into_owned(),
-        None,
-    )
-    .is_err());
+    assert!(
+        CommitBookEngineClient::new(linked.to_string_lossy().into_owned(), None, None).is_err()
+    );
 }
 
 #[test]
@@ -248,6 +231,7 @@ fn a_broken_clone_is_listed_separately_and_does_not_hide_the_others() {
     commitbook_engine::config::LocalConfig::new("Notes", "main", "origin")
         .save(&good)
         .unwrap();
+    crate::test_support::set_identity(&good);
     let old = root.path().join("owner__old");
     std::fs::create_dir_all(old.join(".CommitBook")).unwrap();
     git2::Repository::init(&old).unwrap();
@@ -257,19 +241,16 @@ fn a_broken_clone_is_listed_separately_and_does_not_hide_the_others() {
     )
     .unwrap();
 
-    let client = CommitBookEngineClient::new(
-        "unused-db-path".to_string(),
-        root.path().to_string_lossy().into_owned(),
-        None,
-    )
-    .unwrap();
+    let client =
+        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
+            .unwrap();
     let listed: Vec<String> = client
         .list_commitbooks()
         .unwrap()
         .into_iter()
-        .map(|cb| cb.id)
+        .map(|cb| cb.commitbook_local_id)
         .collect();
-    assert_eq!(listed, ["owner/notes"]);
+    assert_eq!(listed, ["a1b2c3d4"]);
     let broken = client.list_broken_commitbooks().unwrap();
     assert_eq!(broken.len(), 1);
     assert!(broken[0].path.ends_with("owner__old"), "{:?}", broken[0]);
@@ -277,5 +258,52 @@ fn a_broken_clone_is_listed_separately_and_does_not_hide_the_others() {
         broken[0].error.contains("commitbook init"),
         "{:?}",
         broken[0]
+    );
+}
+
+#[test]
+fn registration_is_local_read_listing_is_pure_and_paths_are_constrained() {
+    let (root, client, clone) = deletion_fixture();
+    let id_path = commitbook_engine::commitbooks::identity::path(&clone);
+    std::fs::remove_file(&id_path).unwrap();
+    assert!(client.list_commitbooks().unwrap().is_empty());
+    assert_eq!(client.list_broken_commitbooks().unwrap().len(), 1);
+    assert!(!id_path.exists());
+    let before = git2::Repository::open(&clone)
+        .unwrap()
+        .head()
+        .unwrap()
+        .target();
+    let summary = client
+        .register_local_commitbook("owner__repo".into())
+        .unwrap();
+    assert_eq!(summary.commitbook_local_id.len(), 8);
+    assert_eq!(
+        before,
+        git2::Repository::open(&clone)
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+    );
+    assert_eq!(
+        summary.commitbook_local_id,
+        client
+            .register_local_commitbook("owner__repo".into())
+            .unwrap()
+            .commitbook_local_id
+    );
+    assert!(client.get_commitbook("owner/repo".into()).is_err());
+    for path in ["../outside", "/tmp", "owner__repo/../owner__repo", ".", ""] {
+        assert!(client.register_local_commitbook(path.into()).is_err());
+    }
+    let moved = root.path().join("renamed");
+    std::fs::rename(&clone, &moved).unwrap();
+    assert_eq!(
+        client
+            .get_commitbook(summary.commitbook_local_id.clone())
+            .unwrap()
+            .commitbook_local_id,
+        summary.commitbook_local_id
     );
 }

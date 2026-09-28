@@ -13,17 +13,13 @@ pub enum SyncMode {
     Manual,
 }
 
-/// Input for `init_commitbook`. App provides the GitHub repo it
-/// already picked from `discover_commitbooks`.
+/// Input for `init_commitbook`: a discovered or directly entered Git URL.
 #[derive(Debug, Clone)]
 pub struct CommitBookInput {
     pub name: String,
     /// Auth mode: "github_app" | "pat" | "ssh" | "existing_local_repo".
     pub mode: String,
-    /// Provider: "github" | "gitlab" | "codeberg" | "generic_git".
-    pub provider: String,
-    pub owner: String,
-    pub repo: String,
+    pub remote_url: String,
     pub branch: String,
     /// Name for this device in `.CommitBook/devices/`; `None` uses a default
     /// such as "iOS 7f3c".
@@ -33,9 +29,8 @@ pub struct CommitBookInput {
 /// Materialized view of a CommitBook clone on this device.
 #[derive(Debug, Clone)]
 pub struct CommitBookSummary {
-    pub id: String,
-    pub owner: String,
-    pub repo: String,
+    pub commitbook_local_id: String,
+    pub remote_url: String,
     pub name: String,
     pub mode: String,
     pub provider: String,
@@ -56,8 +51,8 @@ pub struct BrokenCommitBook {
 /// Result of `discover_commitbooks`, one entry per remote repo.
 #[derive(Debug, Clone)]
 pub struct DiscoveredCommitBook {
-    pub owner: String,
-    pub repo: String,
+    pub remote_url: String,
+    pub name: String,
     pub default_branch: String,
     pub is_private: bool,
     pub has_dot_commitbook: bool,
@@ -97,7 +92,7 @@ pub enum AiConflictResolutionAction {
 
 #[derive(Debug, Clone)]
 pub struct AiConflictRequest {
-    pub commitbook_id: String,
+    pub commitbook_local_id: String,
     pub path: String,
     pub conflict_type: String,
     pub binary: bool,
@@ -116,6 +111,39 @@ pub struct AiConflictResolution {
 pub struct AiConflictCallbackResult {
     pub resolution: Option<AiConflictResolution>,
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum GitCredentialKind {
+    Default,
+    Username,
+    UserPassword,
+    SshKey,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitCredentialRequest {
+    pub remote_url: String,
+    pub username_from_url: Option<String>,
+    pub allow_default: bool,
+    pub allow_username: bool,
+    pub allow_user_password: bool,
+    pub allow_ssh_key: bool,
+}
+
+// Intentionally not Debug: responses can contain secrets.
+pub struct GitCredentialResponse {
+    pub kind: GitCredentialKind,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub public_key: Option<String>,
+    pub private_key: Option<String>,
+    pub passphrase: Option<String>,
+    pub error_message: Option<String>,
+}
+
+pub trait GitCredentialCallback: Send + Sync {
+    fn provide(&self, request: GitCredentialRequest) -> GitCredentialResponse;
 }
 
 /// Implemented by the embedding Swift/Kotlin application. `resolve` starts an
@@ -143,9 +171,7 @@ impl ConflictResolutionContinuation {
         let sender = self
             .sender
             .lock()
-            .map_err(|_| {
-                crate::errors::CommitBookError::database("Resolver continuation poisoned")
-            })?
+            .map_err(|_| crate::errors::CommitBookError::storage("Resolver continuation poisoned"))?
             .take()
             .ok_or_else(|| {
                 crate::errors::CommitBookError::invalid_input(
@@ -181,7 +207,7 @@ pub struct ConflictSummary {
 
 #[derive(Debug, Clone)]
 pub struct ResolveConflictInput {
-    pub commitbook_id: String,
+    pub commitbook_local_id: String,
     pub conflict_id: String,
     pub resolution_type: String,
     pub manual_content: Option<String>,
@@ -191,7 +217,7 @@ pub struct ResolveConflictInput {
 
 #[derive(Debug, Clone)]
 pub struct RepoInfo {
-    pub owner: String,
+    pub remote_url: String,
     pub name: String,
     pub default_branch: String,
     pub is_private: bool,

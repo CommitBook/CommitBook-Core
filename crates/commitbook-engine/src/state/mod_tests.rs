@@ -142,92 +142,20 @@ fn test_gitignore_does_not_duplicate_entries() {
 }
 
 #[test]
-fn test_prepare_local_state_migrates_legacy_files_and_logs() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cb_dir = tmp.path().join(".CommitBook");
-    std::fs::create_dir_all(cb_dir.join("logs")).unwrap();
-    std::fs::write(cb_dir.join("auth.toml"), "token = \"secret\"\n").unwrap();
-    std::fs::write(cb_dir.join("state.toml"), "last_error = \"old\"\n").unwrap();
-    std::fs::write(cb_dir.join("logs/old.log"), "entry\n").unwrap();
-
+fn prepare_leaves_old_files_untouched() {
+    let tmp = tempdir().unwrap();
+    let cb = tmp.path().join(".CommitBook");
+    std::fs::create_dir_all(cb.join("logs")).unwrap();
+    for name in ["auth.toml", "state.toml", "logs/old.log", ".lock"] {
+        std::fs::write(cb.join(name), "old").unwrap();
+    }
+    let _lock = RepoLock::acquire(tmp.path()).unwrap();
     prepare_local_state(tmp.path()).unwrap();
-
-    assert!(cb_dir.join("local/auth.toml").exists());
-    assert!(cb_dir.join("local/state.toml").exists());
-    assert!(cb_dir.join("local/logs/old.log").exists());
-    assert!(!cb_dir.join("logs").exists());
-    assert!(!cb_dir.join("auth.toml").exists());
-    assert!(!cb_dir.join("state.toml").exists());
-}
-
-#[test]
-fn test_prepare_local_state_quarantines_legacy_collision() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cb_dir = tmp.path().join(".CommitBook");
-    std::fs::create_dir_all(cb_dir.join("local")).unwrap();
-    std::fs::write(cb_dir.join("auth.toml"), "legacy").unwrap();
-    std::fs::write(cb_dir.join("local/auth.toml"), "current").unwrap();
-
-    prepare_local_state(tmp.path()).unwrap();
-
-    assert!(!cb_dir.join("auth.toml").exists());
-    assert_eq!(
-        std::fs::read_to_string(cb_dir.join("local/legacy/auth.toml")).unwrap(),
-        "legacy"
-    );
-    assert_eq!(
-        std::fs::read_to_string(cb_dir.join("local/auth.toml")).unwrap(),
-        "current"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn test_prepare_local_state_quarantines_symlinked_log_without_following_it() {
-    use std::os::unix::fs::symlink;
-
-    let tmp = tempfile::tempdir().unwrap();
-    let outside = tempfile::NamedTempFile::new().unwrap();
-    let legacy_logs = tmp.path().join(".CommitBook/logs");
-    std::fs::create_dir_all(&legacy_logs).unwrap();
-    symlink(outside.path(), legacy_logs.join("escape.log")).unwrap();
-
-    prepare_local_state(tmp.path()).unwrap();
-
-    assert!(!legacy_logs.exists());
-    assert!(!tmp
-        .path()
-        .join(".CommitBook/local/logs/escape.log")
-        .exists());
-    assert!(tmp
-        .path()
-        .join(".CommitBook/local/legacy/logs/escape.log")
-        .is_symlink());
-    assert!(std::fs::read(outside.path()).unwrap().is_empty());
-}
-
-#[test]
-fn test_prepare_local_state_quarantines_colliding_log_uniquely() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cb_dir = tmp.path().join(".CommitBook");
-    std::fs::create_dir_all(cb_dir.join("logs")).unwrap();
-    std::fs::create_dir_all(cb_dir.join("local/logs")).unwrap();
-    std::fs::create_dir_all(cb_dir.join("local/legacy/logs")).unwrap();
-    std::fs::write(cb_dir.join("logs/old.log"), "legacy").unwrap();
-    std::fs::write(cb_dir.join("local/logs/old.log"), "current").unwrap();
-    std::fs::write(cb_dir.join("local/legacy/logs/old.log"), "older").unwrap();
-
-    prepare_local_state(tmp.path()).unwrap();
-
-    assert!(!cb_dir.join("logs").exists());
-    assert_eq!(
-        std::fs::read_to_string(cb_dir.join("local/logs/old.log")).unwrap(),
-        "current"
-    );
-    assert_eq!(
-        std::fs::read_to_string(cb_dir.join("local/legacy/logs/old.log.1")).unwrap(),
-        "legacy"
-    );
+    for name in ["auth.toml", "state.toml", "logs/old.log", ".lock"] {
+        assert_eq!(std::fs::read_to_string(cb.join(name)).unwrap(), "old");
+    }
+    assert!(!cb.join("local/legacy").exists());
+    assert!(!cb.join("local/auth.toml").exists());
 }
 
 #[test]
@@ -244,4 +172,22 @@ fn test_ensure_initialized_does_not_auto_init() {
 
     assert!(result.is_err());
     assert!(!repo.join(".CommitBook").exists());
+}
+
+#[test]
+fn unexpected_metadata_is_rejected_without_migrating_or_deleting_it() {
+    let tmp = tempdir().unwrap();
+    prepare_local_state(tmp.path()).unwrap();
+    validate_metadata_layout(tmp.path()).unwrap();
+    let abandoned = tmp.path().join(".CommitBook/auth.toml");
+    std::fs::write(&abandoned, "private fixture").unwrap();
+    assert!(validate_metadata_layout(tmp.path())
+        .unwrap_err()
+        .to_string()
+        .contains("refusing sync"));
+    assert_eq!(
+        std::fs::read_to_string(abandoned).unwrap(),
+        "private fixture"
+    );
+    assert!(!tmp.path().join(".CommitBook/local/auth.toml").exists());
 }

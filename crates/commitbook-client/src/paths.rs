@@ -8,7 +8,7 @@ use crate::errors::{CommitBookError, Result};
 
 pub fn canonicalize_workspaces_root(root: &Path) -> Result<PathBuf> {
     let metadata = std::fs::symlink_metadata(root).map_err(|error| {
-        CommitBookError::database(format!(
+        CommitBookError::storage(format!(
             "Inspect workspaces root {}: {error}",
             root.display()
         ))
@@ -20,7 +20,7 @@ pub fn canonicalize_workspaces_root(root: &Path) -> Result<PathBuf> {
         )));
     }
     root.canonicalize().map_err(|error| {
-        CommitBookError::database(format!(
+        CommitBookError::storage(format!(
             "Canonicalize workspaces root {}: {error}",
             root.display()
         ))
@@ -56,15 +56,36 @@ pub fn validate_branch(branch: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn validate_init_input(owner: &str, repo: &str, branch: &str) -> Result<()> {
-    validate_repo_component("owner", owner)?;
-    validate_repo_component("repository", repo)?;
+/// Discovery matches remote metadata, even if a clone's local identity needs repair.
+pub fn remote_is_local(root: &Path, remote_url: &str) -> bool {
+    let Ok(root) = canonicalize_workspaces_root(root) else {
+        return false;
+    };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let Ok(path) = validate_managed_clone(&root, &entry.path()) else {
+            return false;
+        };
+        let Ok(config) = commitbook_engine::config::LocalConfig::load(&path) else {
+            return false;
+        };
+        commitbook_engine::git::remote::get_remote_url(&path, &config.git.remote).is_ok_and(
+            |existing| commitbook_engine::git::remote::same_remote(&existing, remote_url),
+        )
+    })
+}
+
+pub fn validate_init_input(remote_url: &str, branch: &str) -> Result<()> {
+    commitbook_engine::git::remote::validate_clone_url(remote_url)
+        .map_err(|error| CommitBookError::invalid_input(format!("Invalid Git URL: {error:#}")))?;
     validate_branch(branch)
 }
 
 pub fn find_managed_commitbook(root: &Path, id: &str) -> Result<CommitBook> {
     let commitbook = commitbook_engine::commitbooks::registry::find_by_id(root, id)
-        .map_err(|error| CommitBookError::database(format!("Registry scan: {error}")))?
+        .map_err(|error| CommitBookError::storage(format!("Registry scan: {error}")))?
         .ok_or_else(|| CommitBookError::not_found(format!("CommitBook {id} not found")))?;
     validate_managed_clone(root, &commitbook.local_path)?;
     Ok(commitbook)
@@ -81,7 +102,7 @@ pub fn validate_managed_clone(root: &Path, clone_path: &Path) -> Result<PathBuf>
         )));
     }
     let metadata = std::fs::symlink_metadata(clone_path).map_err(|error| {
-        CommitBookError::database(format!("Inspect clone {}: {error}", clone_path.display()))
+        CommitBookError::storage(format!("Inspect clone {}: {error}", clone_path.display()))
     })?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(CommitBookError::invalid_input(format!(
@@ -90,7 +111,7 @@ pub fn validate_managed_clone(root: &Path, clone_path: &Path) -> Result<PathBuf>
         )));
     }
     let canonical = clone_path.canonicalize().map_err(|error| {
-        CommitBookError::database(format!(
+        CommitBookError::storage(format!(
             "Canonicalize clone {}: {error}",
             clone_path.display()
         ))
@@ -125,7 +146,7 @@ pub fn validate_clone_destination(root: &Path, destination: &Path) -> Result<()>
             Ok(())
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(CommitBookError::database(format!(
+        Err(error) => Err(CommitBookError::storage(format!(
             "Inspect clone destination {}: {error}",
             destination.display()
         ))),
@@ -180,7 +201,7 @@ pub fn validate_markdown_relative(path: &str) -> Result<PathBuf> {
 pub fn safe_document_path(base: &Path, path: &str, create_parents: bool) -> Result<PathBuf> {
     let relative = validate_markdown_relative(path)?;
     let base = base.canonicalize().map_err(|error| {
-        CommitBookError::database(format!("Canonicalize clone {}: {error}", base.display()))
+        CommitBookError::storage(format!("Canonicalize clone {}: {error}", base.display()))
     })?;
     let mut current = base.clone();
     let components: Vec<_> = relative.components().collect();
@@ -216,7 +237,7 @@ pub fn safe_document_path(base: &Path, path: &str, create_parents: bool) -> Resu
                         )));
                     }
                     std::fs::create_dir(&current).map_err(|error| {
-                        CommitBookError::database(format!(
+                        CommitBookError::storage(format!(
                             "Create document directory {}: {error}",
                             current.display()
                         ))
@@ -224,7 +245,7 @@ pub fn safe_document_path(base: &Path, path: &str, create_parents: bool) -> Resu
                 }
             }
             Err(error) => {
-                return Err(CommitBookError::database(format!(
+                return Err(CommitBookError::storage(format!(
                     "Inspect document path {}: {error}",
                     current.display()
                 )))
@@ -232,7 +253,7 @@ pub fn safe_document_path(base: &Path, path: &str, create_parents: bool) -> Resu
         }
         if current.exists() {
             let canonical = current.canonicalize().map_err(|error| {
-                CommitBookError::database(format!(
+                CommitBookError::storage(format!(
                     "Canonicalize document path {}: {error}",
                     current.display()
                 ))
