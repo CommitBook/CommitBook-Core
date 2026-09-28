@@ -1,0 +1,22 @@
+.github/workflows/S3-Publish-Homebrew.yml
+  s_6303a6d683fdc5::t_89ad204d402dc9 103-108
+  s_6303a6d683fdc5::t_fb912c226813b6 84
+docs/workflows.md
+  s_6303a6d683fdc5::t_43b0be6bed39d3 66-72,74-75,87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3316113e40abb83c4cc2c2ba19a77b2969a9ba0f",
+  "prompts": {},
+  "sessions": {
+    "s_6303a6d683fdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0fac1f5c-38ea-41af-8e67-24aedc30680b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
