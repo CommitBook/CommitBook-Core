@@ -1,0 +1,54 @@
+scripts/release/validate-release.py
+  s_891a4d49448d93::t_5a93b15c5d20a9 12
+docs/workflows.md
+  s_891a4d49448d93::t_3500bbdad72aff 1-14,16-46,61-112
+  s_891a4d49448d93::t_c31f86231ea950 15,47-60
+CONTRIBUTING.md
+  s_891a4d49448d93::t_3500bbdad72aff 30-31
+crates/commitbook-engine/Cargo.toml
+  s_891a4d49448d93::t_5a93b15c5d20a9 13
+scripts/release/commitbook.rb.tmpl
+  s_891a4d49448d93::t_ff1d5bb40cf0c0 31
+  s_891a4d49448d93::t_75518bd51e42f7 1-30,32-41
+scripts/release/build-desktop.sh
+  s_891a4d49448d93::t_5a93b15c5d20a9 1-14
+.github/workflows/S3-Publish-Homebrew.yml
+  s_891a4d49448d93::t_75518bd51e42f7 1-114
+scripts/release/homebrew.py
+  s_891a4d49448d93::t_4c08fac0b74d6f 62
+  s_891a4d49448d93::t_75518bd51e42f7 1-61,63-77
+scripts/release/test_release.py
+  s_891a4d49448d93::t_e4a930f9452008 34,41-51
+  s_891a4d49448d93::t_847e84104b1863 52
+docs/README.md
+  s_891a4d49448d93::t_3500bbdad72aff 378-388
+  s_891a4d49448d93::t_721dfe511d32f3 642
+  s_891a4d49448d93::t_e063322884d178 643-646
+docs/release-readiness.md
+  s_891a4d49448d93::t_3500bbdad72aff 8,54-55
+  s_891a4d49448d93::t_6c1d9ea160ae20 56
+scripts/release/test_homebrew.py
+  s_891a4d49448d93::t_e4a930f9452008 1-97
+.github/workflows/S5-Build-XCFramework.yml
+  s_891a4d49448d93::t_c31f86231ea950 1,32
+.github/workflows/S2-Release-GitHub.yml
+  s_891a4d49448d93::t_5a93b15c5d20a9 1-165
+.github/workflows/S1-Test-CI.yml
+  s_891a4d49448d93::t_5a93b15c5d20a9 1-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a91815ccfc4ace6df512d02df03e4b385cb3338",
+  "prompts": {},
+  "sessions": {
+    "s_891a4d49448d93": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e84a-8306-7511-ad75-cbc7da20fe58",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
