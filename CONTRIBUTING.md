@@ -27,6 +27,8 @@ tests use temporary local repositories and fake schedulers rather than installin
 real launchd/cron jobs. Tests belong in adjacent `*_tests.rs` files or integration
 test directories. Keep assertions about observable behavior and data preservation.
 
+See [workflow stages](docs/workflows.md) for CI, release, and Homebrew validation.
+
 ## Architecture and conventions
 
 - `commitbook-engine`: shared Git, config, identity, locking, sync, and review logic.

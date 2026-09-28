@@ -9,7 +9,7 @@ from pathlib import Path
 
 def validate(tag, sha, fetch=False):
     version = tomllib.loads(Path('Cargo.toml').read_text())['workspace']['package']['version']
-    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', tag) or tag != version:
+    if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', tag) or tag != version:
         raise ValueError(f'Release tag {tag!r} must equal workspace version {version!r}')
     if fetch:
         subprocess.run(['git', 'fetch', '--no-tags', '--depth=1', 'origin',

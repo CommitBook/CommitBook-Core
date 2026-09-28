@@ -1,0 +1,183 @@
+name: S1 - Test CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+        default: ''
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ inputs.ref || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  msrv:
+    name: MSRV (Rust 1.91.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # 1.91.0 (workspace rust-version)
+        with:
+          toolchain: 1.91.0
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - run: cargo +1.91.0 check --workspace --all-targets --locked
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Check whitespace
+        run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+      - run: python3 -m unittest discover -s scripts/release -p "test_*.py"
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - run: cargo test --workspace --locked
+
+  # Desktop jobs do not compile iOS-only cfg paths, so check the SDK for iOS.
+  mobile:
+    name: Mobile SDK (iOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+          components: clippy
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - run: cargo clippy --locked -p commitbook-client -p commitbook-engine --target aarch64-apple-ios -- -D warnings
+      - run: cargo check --locked -p commitbook-client --target aarch64-apple-ios-sim
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: [fmt, clippy, test, msrv]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            use_cross: true
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # Pinned: this job builds the shipped binaries, so it must not run
+      # whatever lands on cross's default branch. To update, pick a newer
+      # commit of https://github.com/cross-rs/cross and change the rev.
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --rev 74e99b2223de06166f8cdcc1af7f1308ec52baf4 --locked
+
+      - name: Build desktop binaries
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+          USE_CROSS: ${{ matrix.use_cross || false }}
+        run: bash scripts/release/build-desktop.sh "$BUILD_TARGET" "$USE_CROSS"
+
+  beta:
+    name: Beta canary (Linux, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: beta
+          components: clippy
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - run: cargo +beta clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo +beta test --workspace --locked --no-fail-fast
+
+  coverage:
+    name: Code coverage
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - name: Install coverage tool
+        run: cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Run instrumented tests and generate reports
+        run: |
+          cargo llvm-cov --workspace --locked --lcov --output-path target/coverage/lcov.info
+          cargo llvm-cov report --html --output-dir target/coverage
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/coverage
+          if-no-files-found: error

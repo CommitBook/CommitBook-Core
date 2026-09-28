@@ -375,6 +375,17 @@ The binaries bundle OpenSSL and libgit2, so matching system versions of those
 libraries are not required. Linux still needs a compatible glibc/runtime for
 the release build target. Update CommitBook to receive bundled-library fixes.
 
+### Homebrew
+
+After the release has been published to the CommitBook tap:
+
+```bash
+brew install CommitBook/tap/commitbook
+```
+
+The formula installs all four desktop executables and their license notices.
+See [workflow stages](workflows.md) for publishing setup and validation.
+
 ### Upgrading
 
 Stop scheduled syncs before replacing an installed binary, then start them
@@ -628,10 +639,11 @@ these materials with redistributed binaries; source archive links for the
 locked Rust dependency versions are included. License-generation failures
 block packaging.
 
-Both release pipelines resolve their input ref once, run the reusable full CI
-and audit workflows on that commit, and require the release tag to equal the
-workspace version and point to the same commit. No tool here automatically
-creates a tag, changes visibility, or publishes to crates.io.
+The S2 desktop and optional S5 XCFramework release pipelines resolve their
+input ref once, run the reusable full CI and audit workflows on that commit,
+and require the release tag to equal the workspace version and point to the
+same commit. No tool here automatically creates a tag, changes visibility,
+or publishes to crates.io.
 
 ## Contributing and security
 

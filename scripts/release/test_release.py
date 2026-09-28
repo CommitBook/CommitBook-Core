@@ -31,12 +31,24 @@ class ReleaseTests(unittest.TestCase):
             git('tag', '0.10.0')
             command = ['python3', str(ROOT / 'scripts/release/validate-release.py')]
             self.assertEqual(subprocess.run(command + ['0.10.0'], cwd=root, capture_output=True).returncode, 0)
-            for tag in ['0.11.0', 'v0.10.0', '../bad']:
+            for tag in ['0.11.0', 'v0.10.0', '../bad', '0.10.0-beta', '0.10.0+build', '0.10.0\n']:
                 self.assertNotEqual(subprocess.run(command + [tag], cwd=root, capture_output=True).returncode, 0)
             (root / 'other').write_text('second commit')
             git('add', '.')
             git('commit', '-m', 'second')
             self.assertNotEqual(subprocess.run(command + ['0.10.0'], cwd=root, capture_output=True).returncode, 0)
+
+    def test_leading_zero_tags_fail_even_when_manifest_matches(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for tag in ('00.10.0', '0.010.0', '0.10.00'):
+                with self.subTest(tag=tag):
+                    (root / 'Cargo.toml').write_text(f'[workspace.package]\nversion = "{tag}"\n')
+                    result = subprocess.run(
+                        ['python3', str(ROOT / 'scripts/release/validate-release.py'), tag],
+                        cwd=root, capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('must equal workspace version', result.stderr)
 
     def test_archive_installation_and_checksum_rejection(self):
         packager = load('package-desktop')

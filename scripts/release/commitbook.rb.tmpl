@@ -1,0 +1,41 @@
+class Commitbook < Formula
+  desc "Automated Git commits and sync for markdown notebooks"
+  homepage "https://github.com/CommitBook/CommitBook-Core"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "${macos_arm_url}"
+      sha256 "${macos_arm_sha}"
+    end
+    on_intel do
+      url "${macos_intel_url}"
+      sha256 "${macos_intel_sha}"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "${linux_arm_url}"
+      sha256 "${linux_arm_sha}"
+    end
+    on_intel do
+      url "${linux_intel_url}"
+      sha256 "${linux_intel_sha}"
+    end
+  end
+
+  def install
+    bin.install "bin/commitbook", "bin/cobo", "bin/commitbook-tui", "bin/commitbook-web"
+    (share/"licenses/commitbook").install "share/licenses/commitbook/LICENSE",
+                                          "share/licenses/commitbook/THIRD_PARTY_NOTICES.txt"
+  end
+
+  test do
+    %w[commitbook cobo commitbook-tui commitbook-web].each do |executable|
+      assert_match version.to_s, shell_output("#{bin}/#{executable} --version")
+    end
+    assert_path_exists share/"licenses/commitbook/LICENSE"
+    assert_path_exists share/"licenses/commitbook/THIRD_PARTY_NOTICES.txt"
+  end
+end

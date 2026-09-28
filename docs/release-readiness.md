@@ -5,6 +5,7 @@
 | Surface | Launch status |
 |---|---|
 | CLI (`commitbook`, `cobo`), TUI, local web | macOS and Linux, arm64 and x86_64 artifacts |
+| Homebrew | Formula for desktop tools; requires S3 publication and tap token setup |
 | Native SDK | Apple XCFramework, with Swift compile/link/runtime smoke test |
 | Android | Bindings/integration work exists; no supported packaged release yet |
 | crates.io | Deferred; use GitHub releases or documented source installation |
@@ -49,6 +50,9 @@ Therefore these gates cannot all be verified while this repository is private:
 first make it public, then immediately configure and verify them **before
 tagging, releasing, or announcing the launch**. Do not claim full readiness
 until they are verified.
+
+See [workflow stages and Homebrew setup](workflows.md) for S1/S2/S3 dispatch
+commands, required credentials, coverage artifacts, and publication checks.
 
 ## Recorded verification
 

@@ -1,0 +1,114 @@
+name: S3 - Publish Homebrew
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (e.g., 1.2.3, no v prefix)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-homebrew
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+  HOMEBREW_NO_ANALYTICS: '1'
+
+jobs:
+  verify:
+    name: Verify release and test formula
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require a bare version tag
+        run: |
+          if ! [[ "$RELEASE_TAG" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo 'Expected a release tag such as 1.2.3, without a v prefix' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          path: release-source
+          persist-credentials: false
+      - name: Verify workspace version and tagged commit
+        working-directory: release-source
+        run: python3 ../scripts/release/validate-release.py "$RELEASE_TAG"
+      - name: Download existing release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --repo CommitBook/CommitBook-Core --json isDraft,isPrerelease \
+            --jq 'if .isDraft or .isPrerelease then error("Expected a published stable release") else empty end'
+          mkdir -p assets
+          gh release download "$RELEASE_TAG" --repo CommitBook/CommitBook-Core --dir assets \
+            --pattern SHA256SUMS --pattern 'commitbook-*.tar.gz'
+      - name: Verify all archives and render formula
+        run: python3 scripts/release/homebrew.py "$RELEASE_TAG" assets rendered/commitbook.rb
+      - name: Validate and smoke-test in a temporary tap
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          brew tap-new --no-git commitbook/ci
+          cp rendered/commitbook.rb "$(brew --repo commitbook/ci)/Formula/commitbook.rb"
+          ruby -c rendered/commitbook.rb
+          brew style commitbook/ci/commitbook
+          brew audit commitbook/ci/commitbook
+          # Download through the formula's public URL, just as users will.
+          brew install --formula commitbook/ci/commitbook
+          brew test commitbook/ci/commitbook
+      - name: Upload verified formula
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: homebrew-formula
+          path: rendered/commitbook.rb
+          if-no-files-found: error
+
+  publish:
+    name: Publish verified formula to tap
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: homebrew-formula
+          path: rendered
+      - name: Checkout tap repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CommitBook/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_REPO_COMMIT_TOKEN }}
+          path: tap
+          fetch-depth: 0
+      - name: Commit and push changed formula
+        run: |
+          set -euo pipefail
+          mkdir -p tap/Formula
+          cp rendered/commitbook.rb tap/Formula/commitbook.rb
+          cd tap
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add Formula/commitbook.rb
+          if git diff --cached --quiet; then
+            echo 'Formula unchanged; nothing to publish'
+          else
+            git commit -m "Update CommitBook to ${RELEASE_TAG} to distribute the release"
+            git push origin HEAD
+          fi
