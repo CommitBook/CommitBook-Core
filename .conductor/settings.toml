@@ -1,7 +1,7 @@
 "$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
 
 [scripts]
-run_mode = "concurrent"
+run_mode = "nonconcurrent"
 
 [scripts.run.web]
 available_in = [ "local" ]
