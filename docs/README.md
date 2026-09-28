@@ -381,7 +381,8 @@ Stop scheduled syncs before replacing an installed binary, then start them
 again using the new installation. Pre-launch development layouts have no
 migration support: preserve any local credentials/state you need and initialize
 a fresh clone. Do not run old and new development binaries against the same
-clone. Old LaunchAgent labels are not discovered or removed by current commands.
+clone. Old LaunchAgent labels and crontab entries are not discovered or
+removed by current commands.
 
 ## Requirements
 

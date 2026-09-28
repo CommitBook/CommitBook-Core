@@ -63,13 +63,15 @@ fn filter_removes_our_entry_and_its_marker() {
 }
 
 #[test]
-fn filter_removes_entries_written_by_older_releases() {
+fn filter_keeps_entries_written_by_older_releases() {
     let crontab = concat!(
         "# CommitBook: /tmp/repo\n",
         "0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" run\n",
         "5 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" sync\n",
     );
-    assert!(filter_crontab_lines(crontab, Path::new("/tmp/repo")).is_empty());
+    // Lines are joined without the trailing newline, like every kept crontab.
+    let kept = crontab.trim_end_matches('\n');
+    assert_eq!(filter_crontab_lines(crontab, Path::new("/tmp/repo")), kept);
 }
 
 #[test]
@@ -119,7 +121,7 @@ fn filter_empty_input() {
 }
 
 #[test]
-fn crontab_binary_reads_new_and_old_entries() {
+fn crontab_binary_reads_only_current_entries() {
     let repo = Path::new("/tmp/repo");
     let (comment, line) = entry("/tmp/repo", "/opt/cb/target/debug/commitbook");
     let crontab = format!("0 1 * * * other-job\n{comment}\n{line}\n");
@@ -130,10 +132,7 @@ fn crontab_binary_reads_new_and_old_entries() {
     assert_eq!(crontab_binary(&crontab, Path::new("/tmp/other")), None);
 
     let old = "0 * * * * cd \"/tmp/repo\" && \"/usr/bin/commitbook\" run\n";
-    assert_eq!(
-        crontab_binary(old, repo),
-        Some(PathBuf::from("/usr/bin/commitbook"))
-    );
+    assert_eq!(crontab_binary(old, repo), None);
 }
 
 #[cfg(unix)]

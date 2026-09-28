@@ -57,7 +57,7 @@ fn test_generate_plist_escapes_paths() {
 }
 
 #[test]
-fn test_generate_plist_uses_run_subcommand() {
+fn test_generate_plist_uses_sync_subcommand() {
     let plist = generate_plist(
         Path::new("/tmp/repo"),
         "0 * * * *",

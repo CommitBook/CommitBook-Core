@@ -11,14 +11,9 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
-/// Read one quoted word at the start of `input`: a single-quoted word as
-/// written by `shell_quote`, or the double-quoted form older releases wrote.
-/// Returns the value and the rest of the input.
+/// Read one single-quoted word at the start of `input`, as written by
+/// `shell_quote`. Returns the value and the rest of the input.
 fn shell_unquote(input: &str) -> Option<(String, &str)> {
-    if let Some(rest) = input.strip_prefix('"') {
-        let end = rest.find('"')?;
-        return Some((rest[..end].to_string(), &rest[end + 1..]));
-    }
     let mut rest = input.strip_prefix('\'')?;
     let mut value = String::new();
     loop {
@@ -141,8 +136,8 @@ fn skip_assignments(mut rest: &str) -> Option<&str> {
 }
 
 /// The repository and binary of a crontab line CommitBook wrote:
-/// `<schedule> cd <repo> && <bin> sync` (`run` in older releases). Any other
-/// line, including a user's own job that mentions the repository, is `None`.
+/// `<schedule> cd <repo> && <bin> sync`. Any other line, including a user's
+/// own job that mentions the repository, is `None`.
 fn parse_entry(line: &str) -> Option<(String, String)> {
     if line.trim_start().starts_with('#') {
         return None;
@@ -155,7 +150,7 @@ fn parse_entry(line: &str) -> Option<(String, String)> {
     if !binary.is_absolute() || binary.file_name()? != "commitbook" {
         return None;
     }
-    matches!(rest.trim_end(), " sync" | " run").then_some((repo, bin))
+    (rest.trim_end() == " sync").then_some((repo, bin))
 }
 
 /// Remove this repo's CommitBook entries, and each marker comment directly
