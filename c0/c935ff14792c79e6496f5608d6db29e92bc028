@@ -1,0 +1,35 @@
+.conductor/run.sh
+  s_c9f56dd1c65eeb::t_d643cafaa5a16f 1-58
+Cargo.toml
+  s_f07539f3250376::t_902cb1acc226bd 13
+.conductor/setup.sh
+  s_c9f56dd1c65eeb::t_d643cafaa5a16f 1-79
+.conductor/archive.sh
+  s_c9f56dd1c65eeb::t_d643cafaa5a16f 1-32
+Cargo.lock
+  s_f07539f3250376::t_f6f5c53acd4a58 543,563,585,610,625
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c0c935ff14792c79e6496f5608d6db29e92bc028",
+  "prompts": {},
+  "sessions": {
+    "s_c9f56dd1c65eeb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6096489-0346-4d92-8b92-bd7f1c503114",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_f07539f3250376": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "09644799-f005-4a7d-85aa-e7269c5604b1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
