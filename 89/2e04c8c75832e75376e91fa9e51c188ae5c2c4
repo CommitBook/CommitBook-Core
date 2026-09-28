@@ -1,0 +1,27 @@
+.github/CONTRIBUTING.md
+  s_570db49b5297ab::t_e9ef4b68824faa 1-61
+scripts/release/install.sh
+  s_570db49b5297ab::t_e9ef4b68824faa 1-163
+scripts/release/test_release.py
+  s_570db49b5297ab::t_e9ef4b68824faa 71,112
+.github/workflows/S2-Release-GitHub.yml
+  s_570db49b5297ab::t_e9ef4b68824faa 153
+docs/README.md
+  s_570db49b5297ab::t_e9ef4b68824faa 19,325,664
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "892e04c8c75832e75376e91fa9e51c188ae5c2c4",
+  "prompts": {},
+  "sessions": {
+    "s_570db49b5297ab": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e8b4-2bb8-7253-9704-668d2983cf30",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
