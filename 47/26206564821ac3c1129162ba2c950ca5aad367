@@ -1,0 +1,23 @@
+.conductor/archive.sh
+  s_c9f56dd1c65eeb::t_d8402ec8c94e0c 8,31
+.conductor/run.sh
+  s_c9f56dd1c65eeb::t_b8ceacc298016b 8
+.conductor/setup.sh
+  s_c9f56dd1c65eeb::t_1c89004ab9adf9 8,77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4726206564821ac3c1129162ba2c950ca5aad367",
+  "prompts": {},
+  "sessions": {
+    "s_c9f56dd1c65eeb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c6096489-0346-4d92-8b92-bd7f1c503114",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
