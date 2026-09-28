@@ -9,9 +9,6 @@ use crate::errors::{CommitBookError, Result};
 use crate::types::*;
 
 pub struct CommitBookEngineClient {
-    /// Reserved for future per-app state (currently unused).
-    #[allow(dead_code)]
-    pub(crate) db_path: PathBuf,
     pub(crate) workspaces_root: PathBuf,
     pub(crate) conflict_resolver: Option<Arc<dyn ConflictResolverCallback>>,
 }
@@ -19,21 +16,18 @@ pub struct CommitBookEngineClient {
 impl CommitBookEngineClient {
     /// UniFFI-exposed constructor. UniFFI wraps the return in `Arc<>` itself.
     pub fn new(
-        db_path: String,
         workspaces_root: String,
         conflict_resolver: Option<Box<dyn ConflictResolverCallback>>,
     ) -> Result<Self> {
-        let db_path = PathBuf::from(db_path);
         let workspaces_root = PathBuf::from(workspaces_root);
         std::fs::create_dir_all(&workspaces_root).map_err(|e| {
-            CommitBookError::database(format!(
+            CommitBookError::storage(format!(
                 "Failed to create workspaces root {}: {e}",
                 workspaces_root.display()
             ))
         })?;
         let workspaces_root = crate::paths::canonicalize_workspaces_root(&workspaces_root)?;
         Ok(Self {
-            db_path,
             workspaces_root,
             conflict_resolver: conflict_resolver.map(Arc::from),
         })
@@ -46,7 +40,7 @@ impl CommitBookEngineClient {
         crate::runtime::runtime()
             .spawn(async move { crate::auth::fetch_user_repos(&token).await })
             .await
-            .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
+            .map_err(|e| CommitBookError::storage(format!("Task join: {e}")))?
     }
 
     pub async fn discover_commitbooks(&self, token: String) -> Result<Vec<DiscoveredCommitBook>> {
@@ -90,13 +84,11 @@ impl CommitBookEngineClient {
                         )
                         .await
                         .unwrap_or(false);
-                        let slug =
-                            commitbook_engine::commitbooks::slug_for(&repo.owner, &repo.name);
-                        let clone_path = workspaces_root.join(&slug);
-                        let already_local =
-                            crate::paths::validate_managed_clone(&workspaces_root, &clone_path)
-                                .map(|path| path.join(".CommitBook/config.toml").is_file())
-                                .unwrap_or(false);
+                        let already_local = crate::paths::github_remote_is_local(
+                            &workspaces_root,
+                            &repo.owner,
+                            &repo.name,
+                        );
                         DiscoveredCommitBook {
                             owner: repo.owner,
                             repo: repo.name,
@@ -130,7 +122,7 @@ impl CommitBookEngineClient {
                 Ok(out)
             })
             .await
-            .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
+            .map_err(|e| CommitBookError::storage(format!("Task join: {e}")))?
     }
 
     pub async fn init_commitbook(
@@ -138,6 +130,7 @@ impl CommitBookEngineClient {
         input: CommitBookInput,
         token: String,
     ) -> Result<CommitBookSummary> {
+        crate::paths::validate_provider(&input.provider)?;
         crate::paths::validate_init_input(&input.owner, &input.repo, &input.branch)?;
         let workspaces_root = self.workspaces_root.clone();
         // Clone + init are blocking libgit2 calls; run them via spawn_blocking
@@ -148,10 +141,10 @@ impl CommitBookEngineClient {
                     crate::commitbooks_ops::init_local_commitbook(&workspaces_root, &input, &token)
                 })
                 .await
-                .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
+                .map_err(|e| CommitBookError::storage(format!("Task join: {e}")))?
             })
             .await
-            .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
+            .map_err(|e| CommitBookError::storage(format!("Task join: {e}")))?
     }
 
     /// Clones that `list_commitbooks` leaves out because their config could
@@ -201,7 +194,7 @@ impl CommitBookEngineClient {
         let path = self.workspaces_root.join(relative_path);
         crate::paths::validate_managed_clone(&self.workspaces_root, &path)?;
         let lock = commitbook_engine::state::RepoLock::acquire(&path)
-            .map_err(|e| CommitBookError::database(format!("Lock clone: {e:#}")))?;
+            .map_err(|e| CommitBookError::storage(format!("Lock clone: {e:#}")))?;
         let config = commitbook_engine::config::LocalConfig::load(&path)?;
         commitbook_engine::git::remote::remote_identity(&path, &config.git.remote)?;
         let id = commitbook_engine::commitbooks::identity::ensure_locked(&path, &lock)?;
@@ -240,7 +233,7 @@ impl CommitBookEngineClient {
             }
         }
         std::fs::remove_dir_all(&cb.local_path).map_err(|e| {
-            CommitBookError::database(format!(
+            CommitBookError::storage(format!(
                 "Failed to delete clone at {}: {e}",
                 cb.local_path.display()
             ))
@@ -294,10 +287,10 @@ impl CommitBookEngineClient {
                     )
                 })
                 .await
-                .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
+                .map_err(|e| CommitBookError::storage(format!("Task join: {e}")))?
             })
             .await
-            .map_err(|e| CommitBookError::database(format!("Task join: {e}")))?
+            .map_err(|e| CommitBookError::storage(format!("Task join: {e}")))?
     }
 
     pub fn list_conflicts(&self, commitbook_id: String) -> Result<Vec<ConflictSummary>> {
@@ -313,7 +306,7 @@ impl CommitBookEngineClient {
 /// when everything is committed and pushed to the configured remote branch.
 fn unsaved_work(clone: &std::path::Path, branch: &str) -> Result<Option<String>> {
     let repo = commitbook_engine::git::GitRepo::open(clone)
-        .map_err(|error| CommitBookError::database(format!("Open repo: {error:#}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Open repo: {error:#}")))?;
     if repo.repository_state() != git2::RepositoryState::Clean {
         return Ok(Some(
             "a merge or other git operation in progress".to_string(),
@@ -321,15 +314,15 @@ fn unsaved_work(clone: &std::path::Path, branch: &str) -> Result<Option<String>>
     }
     if repo
         .has_dirty_changes()
-        .map_err(|error| CommitBookError::database(format!("Check clone changes: {error:#}")))?
+        .map_err(|error| CommitBookError::storage(format!("Check clone changes: {error:#}")))?
     {
         return Ok(Some("changes that were never committed".to_string()));
     }
     let config = commitbook_engine::config::LocalConfig::load(clone)
-        .map_err(|error| CommitBookError::database(format!("Load clone config: {error:#}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Load clone config: {error:#}")))?;
     let current_branch = repo
         .current_branch()
-        .map_err(|error| CommitBookError::database(format!("Check clone branch: {error:#}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Check clone branch: {error:#}")))?;
     if current_branch != branch {
         return Ok(Some(format!(
             "a different branch checked out ({current_branch}, expected {branch})"
@@ -346,7 +339,7 @@ fn unsaved_work(clone: &std::path::Path, branch: &str) -> Result<Option<String>>
     };
     let (ahead, _) = repo
         .ahead_behind("HEAD", &tracking_ref)
-        .map_err(|error| CommitBookError::database(format!("Check unpushed commits: {error:#}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Check unpushed commits: {error:#}")))?;
     Ok((ahead > 0).then(|| format!("{ahead} commit(s) not pushed yet")))
 }
 

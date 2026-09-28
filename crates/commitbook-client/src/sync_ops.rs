@@ -154,7 +154,7 @@ pub fn sync_one_commitbook(
     let lock = RepoLock::acquire(&commitbook.local_path)
         .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
     let config = LocalConfig::load(&commitbook.local_path)
-        .map_err(|error| CommitBookError::database(format!("Load config: {error}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Load config: {error}")))?;
     let mut options = SyncOptions::from(&config.git);
     // An explicit manual call overrides shared automatic conflict modes.
     // Existing proposals still block sync through the engine's review guard.
@@ -180,7 +180,7 @@ pub fn sync_one_commitbook(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|error| CommitBookError::database(format!("Tokio runtime: {error}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Tokio runtime: {error}")))?;
     let mut outcome = runtime
         .block_on(sync_with_resolver_locked(
             &commitbook.local_path,

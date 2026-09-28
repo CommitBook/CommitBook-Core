@@ -52,8 +52,7 @@ The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `Workspace
 ## 4. Implement `RealEngine.swift` against the new FFI
 
 - [ ] Replace the body of every method in `RealEngine.swift` with a call into the UniFFI-generated `CommitBookEngineClient`. Most methods are thin pass-throughs.
-- [ ] `RealEngine.makeDefault()` should construct `CommitBookEngineClient(dbPath:, workspacesRoot:, conflictResolver:)` with paths under the app's `Application Support` directory:
-  - `dbPath` → `<AppSupport>/CommitBook/db/`
+- [ ] `RealEngine.makeDefault()` should construct `CommitBookEngineClient(workspacesRoot:, conflictResolver:)` with paths under the app's `Application Support` directory:
   - `workspacesRoot` → `<AppSupport>/CommitBook/repos/`
   - Create both directories if missing.
 - [ ] Implement `ConflictResolverCallback` in the app. Its synchronous entry point receives structured conflict sides plus a continuation: start the app's async HTTPS request, return immediately, then call `continuation.complete(...)` with explicit content, deletion, or an error within 120 seconds. It does not call a CommitBook desktop app. Pass `nil` until an AI service is configured; conflict-free `aiResolve` syncs still work, while a conflict returns an actionable configuration error and remains available for manual review.
@@ -64,7 +63,7 @@ The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `Workspace
 
 - [ ] `FFIMapper.swift`: rename `FFIWorkspaceInput`/`FFIWorkspaceSummary` typealiases. Update field names in mappers to match the new contract (`owner`, `repo`, `docCount`, `conflictCount` etc.).
 - [ ] Add mappers for `DiscoveredCommitBook`, `RepoInfo`, `SyncMode`, the callback request/response, and nullable conflict sides.
-- [ ] `FFIErrorAdapter.swift`: error variants are unchanged (`databaseError`, `transportError`, `mergeError`, `authError`, `notFound`, `invalidInput`), but each variant now has an associated `message: String`. Update extraction to use `message`.
+- [ ] `FFIErrorAdapter.swift`: rename `databaseError` to `storageError`; current variants are (`storageError`, `transportError`, `mergeError`, `authError`, `notFound`, `invalidInput`), but each variant now has an associated `message: String`. Update extraction to use `message`.
 
 ## 6. Update `MockEngine.swift` to match the new protocol
 
@@ -129,3 +128,12 @@ to initialize local identity without Git publication. Listing is read-only;
 show broken-clone diagnostics for missing/invalid/duplicate IDs. Do not silently
 reset identities. After explicitly removing a copied clone's duplicate identity
 file, register that copy again and replace its saved UI selection.
+
+## Provider and storage contract
+
+The constructor takes only `workspacesRoot` and the optional resolver callback;
+there is no database path. Map `StorageError` / `storageError` instead of
+`DatabaseError` / `databaseError`. Native remote discovery and cloning support
+GitHub only; non-GitHub provider input fails before cloning or publication.
+Existing non-GitHub clones can use local registration. Display names and sync
+remote/branch settings remain configurable and separate from local identity.

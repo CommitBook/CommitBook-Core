@@ -190,8 +190,15 @@ fn existing_clone_without_config_infers_and_persists_sole_remote() {
     repo.push_with("upstream", &branch, &TokenCredentials::new("unused"))
         .unwrap();
 
-    let summary = init_local_commitbook(root.path(), &input(&branch), "unused").unwrap();
-    assert_eq!(summary.branch, branch);
+    let (remote_name, _) = configured_or_inferred_target(&clone, &branch).unwrap();
+    ensure_commitbook_initialized(
+        &clone,
+        &input(&branch),
+        &remote_name,
+        &TokenCredentials::new("unused"),
+    )
+    .unwrap();
+    assert_eq!(LocalConfig::load(&clone).unwrap().git.branch, branch);
     assert_eq!(LocalConfig::load(&clone).unwrap().git.remote, "upstream");
 }
 
@@ -241,7 +248,7 @@ fn fresh_clone_preserves_explicit_configured_remote_name() {
     drop(repository);
 
     let _lock = RepoLock::acquire(&clone_path).unwrap();
-    validate_existing_identity(&clone_path, &input(&branch)).unwrap();
+    assert!(validate_existing_identity(&clone_path, &input(&branch)).is_err());
     let (configured_remote, configured_branch) =
         configure_fresh_clone_target(&clone_path, &branch).unwrap();
     assert_eq!(configured_remote, "upstream");
@@ -490,8 +497,15 @@ fn existing_clone_bootstraps_metadata_to_empty_bare_remote() {
         .remote("upstream", remote_path(&remote).to_str().unwrap())
         .unwrap();
 
-    let summary = init_local_commitbook(root.path(), &input(&branch), "unused").unwrap();
-    assert_eq!(summary.branch, branch);
+    let (remote_name, _) = configured_or_inferred_target(&clone, &branch).unwrap();
+    ensure_commitbook_initialized(
+        &clone,
+        &input(&branch),
+        &remote_name,
+        &TokenCredentials::new("unused"),
+    )
+    .unwrap();
+    assert_eq!(LocalConfig::load(&clone).unwrap().git.branch, branch);
     let local_head = git2::Repository::open(&clone)
         .unwrap()
         .head()
@@ -501,7 +515,7 @@ fn existing_clone_bootstraps_metadata_to_empty_bare_remote() {
     assert_eq!(
         git2::Repository::open_bare(remote_path(&remote))
             .unwrap()
-            .refname_to_id(&format!("refs/heads/{}", summary.branch))
+            .refname_to_id(&format!("refs/heads/{branch}"))
             .unwrap(),
         local_head
     );
@@ -694,7 +708,12 @@ fn existing_clone_summary_uses_config_name_remote_identity_and_device_auth() {
     let mut request = input(&branch);
     request.name = "Ignored input name".to_string();
     request.mode = "pat".to_string();
-    let summary = init_local_commitbook(root.path(), &request, "unused").unwrap();
+    let client =
+        crate::CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None)
+            .unwrap();
+    let summary = client
+        .register_local_commitbook("owner__notes".into())
+        .unwrap();
     assert_eq!(
         summary.commitbook_id,
         commitbook_engine::commitbooks::identity::load(&clone).unwrap()
@@ -768,4 +787,32 @@ fn invalid_auth_mode_is_rejected() {
         "{error}"
     );
     assert!(error.to_string().contains("github_app"), "{error}");
+}
+
+#[test]
+fn unsupported_provider_is_rejected_before_filesystem_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let nonexistent = root.path().join("not-created");
+    let mut request = input("main");
+    request.provider = "gitlab".into();
+    let error = init_local_commitbook(&nonexistent, &request, "unused").unwrap_err();
+    assert!(matches!(error, CommitBookError::InvalidInput { .. }));
+    assert!(error.to_string().contains("only provider github"));
+    assert!(!nonexistent.exists());
+}
+
+#[test]
+fn same_owner_repo_on_another_host_is_not_the_requested_clone() {
+    let root = tempfile::tempdir().unwrap();
+    let clone = root.path().join("owner__notes");
+    let repo = git2::Repository::init(&clone).unwrap();
+    repo.remote("origin", "https://gitlab.com/owner/notes.git")
+        .unwrap();
+    let error = init_local_commitbook(root.path(), &input("main"), "unused").unwrap_err();
+    assert!(matches!(error, CommitBookError::InvalidInput { .. }));
+    assert!(error.to_string().contains("gitlab.com"));
+    assert!(!LocalConfig::config_path(&clone).exists());
+    repo.remote_set_url("origin", "git@github.com:owner/notes.git")
+        .unwrap();
+    validate_existing_identity(&clone, &input("main")).unwrap();
 }

@@ -2,7 +2,7 @@ namespace commitbook {};
 
 [Error]
 enum CommitBookError {
-    "DatabaseError",
+    "StorageError",
     "TransportError",
     "MergeError",
     "AuthError",
@@ -147,7 +147,7 @@ dictionary RepoInfo {
 
 interface CommitBookEngineClient {
     [Throws=CommitBookError]
-    constructor(string db_path, string workspaces_root, ConflictResolverCallback? conflict_resolver);
+    constructor(string workspaces_root, ConflictResolverCallback? conflict_resolver);
 
     [Throws=CommitBookError, Async]
     sequence<RepoInfo> validate_pat(string token);

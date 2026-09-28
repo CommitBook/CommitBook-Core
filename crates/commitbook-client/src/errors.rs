@@ -4,8 +4,8 @@ use thiserror::Error;
 /// the Apple/Android engine-protocol error cases.
 #[derive(Debug, Error)]
 pub enum CommitBookError {
-    #[error("Database error: {message}")]
-    DatabaseError { message: String },
+    #[error("Storage error: {message}")]
+    StorageError { message: String },
     #[error("Transport error: {message}")]
     TransportError { message: String },
     #[error("Merge error: {message}")]
@@ -31,8 +31,8 @@ impl CommitBookError {
         }
     }
 
-    pub fn database(msg: impl Into<String>) -> Self {
-        Self::DatabaseError {
+    pub fn storage(msg: impl Into<String>) -> Self {
+        Self::StorageError {
             message: msg.into(),
         }
     }
@@ -58,7 +58,7 @@ impl CommitBookError {
 
 impl From<anyhow::Error> for CommitBookError {
     fn from(e: anyhow::Error) -> Self {
-        Self::DatabaseError {
+        Self::StorageError {
             message: format!("{e:#}"),
         }
     }

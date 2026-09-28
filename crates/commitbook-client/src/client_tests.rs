@@ -15,12 +15,8 @@ use super::*;
 #[test]
 fn async_ffi_methods_run_without_ambient_tokio_runtime() {
     let tmp = tempfile::tempdir().unwrap();
-    let client = CommitBookEngineClient::new(
-        "unused-db-path".to_string(),
-        tmp.path().to_string_lossy().into_owned(),
-        None,
-    )
-    .unwrap();
+    let client =
+        CommitBookEngineClient::new(tmp.path().to_string_lossy().into_owned(), None).unwrap();
 
     // A bogus id resolves to NotFound before any network call is attempted.
     // Pre-fix this line panicked instead of returning.
@@ -71,12 +67,8 @@ fn delete_never_follows_workspace_symlink() {
     .unwrap();
     crate::test_support::set_identity(outside.path());
     symlink(outside.path(), root.path().join("owner__repo")).unwrap();
-    let client = CommitBookEngineClient::new(
-        "unused".to_string(),
-        root.path().to_string_lossy().into_owned(),
-        None,
-    )
-    .unwrap();
+    let client =
+        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None).unwrap();
 
     let error = client
         .delete_commitbook("a1b2c3d4".to_string(), false)
@@ -129,12 +121,8 @@ fn deletion_fixture() -> (tempfile::TempDir, CommitBookEngineClient, PathBuf) {
             .unwrap(),
         "published fixture must start clean"
     );
-    let client = CommitBookEngineClient::new(
-        "unused".to_string(),
-        root.path().to_string_lossy().into_owned(),
-        None,
-    )
-    .unwrap();
+    let client =
+        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None).unwrap();
     (root, client, clone)
 }
 
@@ -230,12 +218,7 @@ fn constructor_rejects_symlink_workspace_root() {
     let outside = tempfile::tempdir().unwrap();
     let linked = parent.path().join("linked-root");
     symlink(outside.path(), &linked).unwrap();
-    assert!(CommitBookEngineClient::new(
-        "unused".to_string(),
-        linked.to_string_lossy().into_owned(),
-        None,
-    )
-    .is_err());
+    assert!(CommitBookEngineClient::new(linked.to_string_lossy().into_owned(), None,).is_err());
 }
 
 #[test]
@@ -260,12 +243,8 @@ fn a_broken_clone_is_listed_separately_and_does_not_hide_the_others() {
     )
     .unwrap();
 
-    let client = CommitBookEngineClient::new(
-        "unused-db-path".to_string(),
-        root.path().to_string_lossy().into_owned(),
-        None,
-    )
-    .unwrap();
+    let client =
+        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None).unwrap();
     let listed: Vec<String> = client
         .list_commitbooks()
         .unwrap()

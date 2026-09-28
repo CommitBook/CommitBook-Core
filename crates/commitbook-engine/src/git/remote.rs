@@ -29,6 +29,8 @@ impl Provider {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteIdentity {
     pub provider: Provider,
+    /// Actual hostname, lowercased and without credentials; None for local paths.
+    pub host: Option<String>,
     /// Everything before the repository name on a host (`user`, or
     /// `group/sub` on GitLab); the parent folder for a local path. Empty when
     /// there is none.
@@ -52,7 +54,11 @@ pub fn parse_remote_url(url: &str) -> Result<RemoteIdentity> {
         let scheme = scheme.to_ascii_lowercase();
         let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
         let host = authority.rsplit('@').next().unwrap_or(authority);
-        let host = host.split(':').next().unwrap_or(host);
+        let host = if let Some(ipv6) = host.strip_prefix('[') {
+            ipv6.split(']').next().unwrap_or(ipv6)
+        } else {
+            host.split(':').next().unwrap_or(host)
+        };
         (
             Some(host),
             path,
@@ -89,6 +95,7 @@ pub fn parse_remote_url(url: &str) -> Result<RemoteIdentity> {
     };
     Ok(RemoteIdentity {
         provider,
+        host: host.map(str::to_ascii_lowercase),
         owner,
         repo: repo.to_string(),
         ssh,

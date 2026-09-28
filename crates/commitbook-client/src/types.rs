@@ -20,7 +20,7 @@ pub struct CommitBookInput {
     pub name: String,
     /// Auth mode: "github_app" | "pat" | "ssh" | "existing_local_repo".
     pub mode: String,
-    /// Provider: "github" | "gitlab" | "codeberg" | "generic_git".
+    /// Native cloning accepts only "github". Existing clones can be registered locally.
     pub provider: String,
     pub owner: String,
     pub repo: String,
@@ -143,9 +143,7 @@ impl ConflictResolutionContinuation {
         let sender = self
             .sender
             .lock()
-            .map_err(|_| {
-                crate::errors::CommitBookError::database("Resolver continuation poisoned")
-            })?
+            .map_err(|_| crate::errors::CommitBookError::storage("Resolver continuation poisoned"))?
             .take()
             .ok_or_else(|| {
                 crate::errors::CommitBookError::invalid_input(

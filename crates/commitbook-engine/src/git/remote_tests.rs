@@ -150,3 +150,12 @@ fn local_path_normalization_preserves_scp_and_posix_paths() {
         assert_eq!(identity.repo, "notes");
     }
 }
+
+#[test]
+fn retains_actual_hostname_without_credentials() {
+    let identity =
+        parse_remote_url("https://user:secret@Git.Example.org:8443/team/notes.git").unwrap();
+    assert_eq!(identity.host.as_deref(), Some("git.example.org"));
+    assert!(!format!("{identity:?}").contains("secret"));
+    assert_eq!(parse_remote_url("/srv/git/notes.git").unwrap().host, None);
+}

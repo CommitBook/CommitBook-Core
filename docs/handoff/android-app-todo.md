@@ -43,8 +43,7 @@ Track that work upstream. The remaining items here only become actionable once t
 ## 3. Implement `RealEngine.kt` (mirror of Apple's RealEngine.swift)
 
 - [ ] New file `app/src/main/java/com/commitbook/app/data/engine/RealEngine.kt`. Wraps the UniFFI-generated `CommitBookEngineClient`.
-- [ ] Construct `CommitBookEngineClient(dbPath, workspacesRoot, conflictResolver)` using:
-  - `dbPath` = `context.filesDir / "commitbook" / "db"` (private app data, not on `getExternalFilesDir`).
+- [ ] Construct `CommitBookEngineClient(workspacesRoot, conflictResolver)` using:
   - `workspacesRoot` = `context.filesDir / "commitbook" / "repos"`.
   - Create both directories on first run.
 - [ ] Implement `ConflictResolverCallback` in Kotlin. Its synchronous entry point starts the app's async HTTPS request and returns immediately; complete the supplied continuation with explicit content, deletion, or an error within 120 seconds. It never calls a desktop app. Pass `null` until configured and surface the engine's actionable error if an `AiResolve` sync encounters a conflict without it.
@@ -112,3 +111,12 @@ to initialize local identity without Git publication. Listing is read-only;
 show broken-clone diagnostics for missing/invalid/duplicate IDs. Do not silently
 reset identities. After explicitly removing a copied clone's duplicate identity
 file, register that copy again and replace its saved UI selection.
+
+## Provider and storage contract
+
+The constructor takes only `workspacesRoot` and the optional resolver callback;
+there is no database path. Map `StorageError` / `storageError` instead of
+`DatabaseError` / `databaseError`. Native remote discovery and cloning support
+GitHub only; non-GitHub provider input fails before cloning or publication.
+Existing non-GitHub clones can use local registration. Display names and sync
+remote/branch settings remain configurable and separate from local identity.

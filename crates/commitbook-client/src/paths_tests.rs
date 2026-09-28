@@ -69,3 +69,21 @@ fn managed_clone_must_not_be_a_symlink() {
     symlink(outside.path(), root.path().join("owner__repo")).unwrap();
     assert!(validate_managed_clone(root.path(), &root.path().join("owner__repo")).is_err());
 }
+
+#[test]
+fn discovery_uses_host_and_remote_not_folder_name_or_local_id() {
+    let root = tempfile::tempdir().unwrap();
+    let clone = root.path().join("renamed-folder");
+    let repo = git2::Repository::init(&clone).unwrap();
+    repo.remote("upstream", "https://gitlab.com/owner/notes.git")
+        .unwrap();
+    commitbook_engine::config::LocalConfig::new("Notes", "main", "upstream")
+        .save(&clone)
+        .unwrap();
+    assert!(!github_remote_is_local(root.path(), "owner", "notes"));
+    repo.remote_set_url("upstream", "git@github.com:Owner/Notes.git")
+        .unwrap();
+    assert!(github_remote_is_local(root.path(), "owner", "notes"));
+    assert!(!github_remote_is_local(root.path(), "other", "notes"));
+    assert!(!commitbook_engine::commitbooks::identity::path(&clone).exists());
+}

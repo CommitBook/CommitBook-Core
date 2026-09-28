@@ -20,6 +20,7 @@ pub fn init_local_commitbook(
     input: &CommitBookInput,
     token: &str,
 ) -> Result<CommitBookSummary> {
+    crate::paths::validate_provider(&input.provider)?;
     crate::paths::validate_init_input(&input.owner, &input.repo, &input.branch)?;
     let workspaces_root = crate::paths::canonicalize_workspaces_root(workspaces_root)?;
     let slug = slug_for(&input.owner, &input.repo);
@@ -52,7 +53,7 @@ pub fn init_local_commitbook(
     }
 
     let config = LocalConfig::load(&clone_path)
-        .map_err(|e| CommitBookError::database(format!("Failed to load config: {e}")))?;
+        .map_err(|e| CommitBookError::storage(format!("Failed to load config: {e}")))?;
 
     // Identity comes from the remote URL; a remote without an owner (a bare
     // local path) falls back to the requested repository.
@@ -69,13 +70,13 @@ pub fn init_local_commitbook(
         ),
     };
     let mode = commitbook_engine::devices::this_device(&clone_path)
-        .map_err(|e| CommitBookError::database(format!("Read this device: {e:#}")))?
+        .map_err(|e| CommitBookError::storage(format!("Read this device: {e:#}")))?
         .map(|(_, device)| device.auth.as_str().to_string())
         .unwrap_or_else(|| input.mode.clone());
 
     Ok(CommitBookSummary {
         commitbook_id: commitbook_engine::commitbooks::identity::load(&clone_path)
-            .map_err(|e| CommitBookError::database(format!("Read identity: {e:#}")))?,
+            .map_err(|e| CommitBookError::storage(format!("Read identity: {e:#}")))?,
         owner,
         repo,
         name: config.commitbook.name,
@@ -99,7 +100,7 @@ fn configure_fresh_clone_target(
     let (remote, branch) = configured_or_inferred_target(clone_path, fallback_branch)?;
     crate::paths::validate_branch(&branch)?;
     let repository = git2::Repository::open(clone_path)
-        .map_err(|error| CommitBookError::database(format!("Open fresh clone: {error}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Open fresh clone: {error}")))?;
     let cloned_remote = if remote == "origin" {
         remote.as_str()
     } else {
@@ -110,7 +111,7 @@ fn configure_fresh_clone_target(
         let unrenamed_refspecs = repository
             .remote_rename("origin", &remote)
             .map_err(|error| {
-                CommitBookError::database(format!(
+                CommitBookError::storage(format!(
                     "Rename fresh clone remote from origin to {remote:?}: {error}"
                 ))
             })?;
@@ -120,20 +121,20 @@ fn configure_fresh_clone_target(
                 .map(|refspec| {
                     refspec
                         .map_err(|error| {
-                            CommitBookError::database(format!(
+                            CommitBookError::storage(format!(
                                 "Read unrenamed remote refspec as UTF-8: {error}"
                             ))
                         })?
                         .map(str::to_string)
                         .ok_or_else(|| {
-                            CommitBookError::database(
+                            CommitBookError::storage(
                                 "An unrenamed remote refspec disappeared while reading it",
                             )
                         })
                 })
                 .collect::<Result<Vec<_>>>()?
                 .join(", ");
-            return Err(CommitBookError::database(format!(
+            return Err(CommitBookError::storage(format!(
                 "Renamed fresh clone remote to {remote:?}, but could not update non-default refspecs: {refspecs}"
             )));
         }
@@ -155,7 +156,7 @@ fn ensure_fresh_remote_branch_available(
     match repository.refname_to_id(&reference) {
         Ok(oid) => {
             repository.find_commit(oid).map_err(|error| {
-                CommitBookError::database(format!(
+                CommitBookError::storage(format!(
                     "Configured remote branch {configured_remote}/{branch} does not point to a commit: {error}"
                 ))
             })?;
@@ -167,7 +168,7 @@ fn ensure_fresh_remote_branch_available(
                 clone_path.display()
             )))
         }
-        Err(error) => Err(CommitBookError::database(format!(
+        Err(error) => Err(CommitBookError::storage(format!(
             "Resolve configured remote branch {configured_remote}/{branch}: {error}"
         ))),
     }
@@ -188,13 +189,13 @@ fn checkout_fresh_clone_branch(
             )))
         }
         Err(error) => {
-            return Err(CommitBookError::database(format!(
+            return Err(CommitBookError::storage(format!(
                 "Resolve configured remote branch {remote_reference}: {error}"
             )))
         }
     };
     let remote_commit = repository.find_commit(remote_oid).map_err(|error| {
-        CommitBookError::database(format!(
+        CommitBookError::storage(format!(
             "Load configured remote branch {remote}/{branch}: {error}"
         ))
     })?;
@@ -212,12 +213,12 @@ fn checkout_fresh_clone_branch(
         Err(error) if error.code() == git2::ErrorCode::NotFound => repository
             .branch(branch, &remote_commit, false)
             .map_err(|error| {
-                CommitBookError::database(format!(
+                CommitBookError::storage(format!(
                     "Create local branch {branch:?} from {remote}/{branch}: {error}"
                 ))
             })?,
         Err(error) => {
-            return Err(CommitBookError::database(format!(
+            return Err(CommitBookError::storage(format!(
                 "Inspect fresh clone branch {branch:?}: {error}"
             )))
         }
@@ -225,10 +226,10 @@ fn checkout_fresh_clone_branch(
 
     let current_reference = repository
         .find_reference("HEAD")
-        .map_err(|error| CommitBookError::database(format!("Read fresh clone HEAD: {error}")))?
+        .map_err(|error| CommitBookError::storage(format!("Read fresh clone HEAD: {error}")))?
         .symbolic_target()
         .map_err(|error| {
-            CommitBookError::database(format!(
+            CommitBookError::storage(format!(
                 "Read fresh clone HEAD symbolic target as UTF-8: {error}"
             ))
         })?
@@ -239,7 +240,7 @@ fn checkout_fresh_clone_branch(
             .head()
             .and_then(|head| head.peel_to_commit())
             .map_err(|error| {
-                CommitBookError::database(format!("Load fresh clone current branch: {error}"))
+                CommitBookError::storage(format!("Load fresh clone current branch: {error}"))
             })?;
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.safe();
@@ -257,7 +258,7 @@ fn checkout_fresh_clone_branch(
         }
         if let Err(error) = repository.set_head(&local_reference) {
             let rollback = rollback_fresh_clone_checkout(repository, &current_commit);
-            return Err(CommitBookError::database(match rollback {
+            return Err(CommitBookError::storage(match rollback {
                 Ok(()) => format!("Set fresh clone HEAD to {local_reference}: {error}"),
                 Err(rollback_error) => format!(
                     "Set fresh clone HEAD to {local_reference}: {error}; rollback also failed: {rollback_error}"
@@ -269,7 +270,7 @@ fn checkout_fresh_clone_branch(
     local_branch
         .set_upstream(Some(&format!("{remote}/{branch}")))
         .map_err(|error| {
-            CommitBookError::database(format!(
+            CommitBookError::storage(format!(
                 "Track configured remote branch {remote}/{branch}: {error}"
             ))
         })?;
@@ -292,7 +293,7 @@ fn clone_repo_with_creds(
     creds: &dyn CredentialProvider,
 ) -> Result<()> {
     let config = git2::Config::open_default()
-        .map_err(|error| CommitBookError::database(format!("Open Git config: {error}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Open Git config: {error}")))?;
     let mut callbacks = git2::RemoteCallbacks::new();
     callbacks.credentials(|url, username_from_url, allowed| {
         creds
@@ -324,7 +325,7 @@ fn ensure_commitbook_initialized(
     creds: &dyn CredentialProvider,
 ) -> Result<()> {
     let repo = GitRepo::open(clone_path)
-        .map_err(|e| CommitBookError::database(format!("Open clone: {e}")))?;
+        .map_err(|e| CommitBookError::storage(format!("Open clone: {e}")))?;
     if repo.merge_in_progress() {
         return Err(CommitBookError::merge(
             "Cannot initialize CommitBook while a merge is in progress; resolve or abort the merge first",
@@ -332,7 +333,7 @@ fn ensure_commitbook_initialized(
     }
     let expected_branch = if LocalConfig::exists(clone_path) {
         LocalConfig::load(clone_path)
-            .map_err(|error| CommitBookError::database(format!("Load config: {error}")))?
+            .map_err(|error| CommitBookError::storage(format!("Load config: {error}")))?
             .git
             .branch
     } else {
@@ -358,15 +359,15 @@ fn ensure_commitbook_initialized(
         input.device_name.as_deref(),
         auth,
     )
-    .map_err(|e| CommitBookError::database(format!("init_dot_commitbook: {e}")))?;
+    .map_err(|e| CommitBookError::storage(format!("init_dot_commitbook: {e}")))?;
 
     let mut config = LocalConfig::load(clone_path)
-        .map_err(|e| CommitBookError::database(format!("Load config: {e}")))?;
+        .map_err(|e| CommitBookError::storage(format!("Load config: {e}")))?;
     if config.git.remote != remote {
         config.git.remote = remote.to_string();
         config
             .save(clone_path)
-            .map_err(|e| CommitBookError::database(format!("Save remote: {e}")))?;
+            .map_err(|e| CommitBookError::storage(format!("Save remote: {e}")))?;
     }
     commitbook_engine::commitbooks::publication::publish_metadata(
         &repo,
@@ -380,10 +381,10 @@ fn ensure_commitbook_initialized(
             "Metadata was committed locally, but push failed: {error}. The local metadata commit remains intact; run sync to reconcile a non-fast-forward remote, or fix the remote, authentication, or connectivity and retry initialization"
         )),
         PublicationError::Commit(_) => {
-            CommitBookError::database(format!("Commit metadata: {error}"))
+            CommitBookError::storage(format!("Commit metadata: {error}"))
         }
         PublicationError::State(_) => {
-            CommitBookError::database(format!("Record metadata publication: {error}"))
+            CommitBookError::storage(format!("Record metadata publication: {error}"))
         }
     })?;
     Ok(())
@@ -400,38 +401,40 @@ fn prepare_fresh_clone(clone_path: &Path, input: &CommitBookInput) -> Result<(St
 }
 
 fn validate_existing_identity(clone_path: &Path, input: &CommitBookInput) -> Result<()> {
-    if !LocalConfig::exists(clone_path) {
-        return Ok(());
-    }
-    // Surface an unreadable config before touching anything.
-    LocalConfig::load(clone_path)
-        .map_err(|error| CommitBookError::database(format!("Load config: {error:#}")))?;
-    // The clone's remote URLs say what it actually syncs with (committed
-    // files could name anything). A fresh clone's remote may not be renamed
-    // to the configured name yet, so every remote with an owner is checked.
+    // Existing clones must match the selected remote, including its host.
+    // Fresh clones can temporarily name the configured remote `origin`.
     let repository = git2::Repository::open(clone_path)
-        .map_err(|error| CommitBookError::database(format!("Open clone: {error}")))?;
-    let remotes = repository
-        .remotes()
-        .map_err(|error| CommitBookError::database(format!("List remotes: {error}")))?;
-    let identities: Vec<_> = remotes
-        .iter()
-        .flatten()
-        .flatten()
-        .filter_map(|name| remote_identity(clone_path, name).ok())
-        .filter(|identity| !identity.owner.is_empty())
-        .collect();
-    let matches = |identity: &commitbook_engine::git::remote::RemoteIdentity| {
-        identity.owner.eq_ignore_ascii_case(&input.owner)
-            && identity.repo.eq_ignore_ascii_case(&input.repo)
+        .map_err(|error| CommitBookError::storage(format!("Open clone: {error}")))?;
+    let configured = if LocalConfig::exists(clone_path) {
+        Some(LocalConfig::load(clone_path)?.git.remote)
+    } else {
+        None
     };
-    if let Some(other) = identities.iter().find(|identity| !matches(identity)) {
-        if !identities.iter().any(matches) {
-            return Err(CommitBookError::invalid_input(format!(
-                "Existing clone syncs with {}/{} but initialization requested {}/{}; move the clone to the correct managed directory or fix its remote URL",
-                other.owner, other.repo, input.owner, input.repo
-            )));
+    let remote = match configured {
+        Some(name) if repository.find_remote(&name).is_ok() => name,
+        _ => {
+            let names = repository
+                .remotes()
+                .map_err(|e| CommitBookError::storage(format!("List remotes: {e}")))?;
+            let names: Vec<_> = names.iter().flatten().flatten().collect();
+            if names.len() != 1 {
+                return Err(CommitBookError::invalid_input(
+                    "Existing clone must have exactly one remote or a valid configured remote",
+                ));
+            }
+            names[0].to_string()
         }
+    };
+    let identity = remote_identity(clone_path, &remote)?;
+    if !matches!(
+        identity.host.as_deref(),
+        Some("github.com" | "www.github.com")
+    ) || !identity.owner.eq_ignore_ascii_case(&input.owner)
+        || !identity.repo.eq_ignore_ascii_case(&input.repo)
+    {
+        return Err(CommitBookError::invalid_input(format!(
+            "Existing clone syncs with {}/{}/{} but initialization requested github.com/{}/{}; use local registration for an existing non-GitHub clone",
+            identity.host.as_deref().unwrap_or("local"), identity.owner, identity.repo, input.owner, input.repo)));
     }
     Ok(())
 }
@@ -444,7 +447,7 @@ fn configured_or_inferred_target(
     match std::fs::symlink_metadata(&config_path) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
             let config = LocalConfig::load(clone_path)
-                .map_err(|error| CommitBookError::database(format!("Load config: {error}")))?;
+                .map_err(|error| CommitBookError::storage(format!("Load config: {error}")))?;
             return Ok((config.git.remote, config.git.branch));
         }
         Ok(_) => {
@@ -455,7 +458,7 @@ fn configured_or_inferred_target(
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
-            return Err(CommitBookError::database(format!(
+            return Err(CommitBookError::storage(format!(
                 "Inspect config {}: {error}",
                 config_path.display()
             )))
@@ -463,10 +466,10 @@ fn configured_or_inferred_target(
     }
 
     let repository = git2::Repository::open(clone_path)
-        .map_err(|error| CommitBookError::database(format!("Open clone: {error}")))?;
+        .map_err(|error| CommitBookError::storage(format!("Open clone: {error}")))?;
     let remotes = repository
         .remotes()
-        .map_err(|error| CommitBookError::database(format!("List remotes: {error}")))?;
+        .map_err(|error| CommitBookError::storage(format!("List remotes: {error}")))?;
     let remote = match remotes.len() {
         1 => remotes
             .get(0)
