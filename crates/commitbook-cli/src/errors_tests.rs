@@ -39,3 +39,22 @@ fn test_humanize_falls_back_to_top_context() {
     assert!(msg.contains("Could not push"), "unexpected: {msg}");
     assert!(!msg.contains("libgit2"), "leaked internals: {msg}");
 }
+
+#[test]
+fn verbose_hint_only_when_it_adds_detail() {
+    let single = anyhow!("Cannot sync while checked out on branch \"x\"");
+    assert!(!verbose_adds_detail(&single));
+    let chained = anyhow!("low-level libgit2 error 0x42").context("Could not push origin/main");
+    assert!(verbose_adds_detail(&chained));
+}
+
+#[test]
+fn reported_error_displays_the_full_chain() {
+    let inner = anyhow!("low-level libgit2 error 0x42").context("Could not push origin/main");
+    let reported: anyhow::Error = Reported(inner).into();
+    assert!(reported.downcast_ref::<Reported>().is_some());
+    assert_eq!(
+        reported.to_string(),
+        "Could not push origin/main: low-level libgit2 error 0x42"
+    );
+}
