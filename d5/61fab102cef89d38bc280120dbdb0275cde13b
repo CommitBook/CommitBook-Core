@@ -1,0 +1,26 @@
+.github/workflows/ci.yml
+  s_5e303680607837::t_7345f2152c71cf 26,38,49
+  s_5e303680607837::t_ea3e9204483bae 64,76
+.github/workflows/release.yml
+  s_5e303680607837::t_406fe9424c5de2 41,74
+.github/workflows/xcframework.yml
+  s_5e303680607837::t_bc290864e56319 36
+Cargo.lock
+  s_5e303680607837::t_c8d38dfbb1c98e 401,403,1016,1018,1639,1641,2878,2880,2890,2892,3214,3216,3620,3622,3633,3635,3638,3644,3646,3654,3656,3667,3669,3676,3678
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d561fab102cef89d38bc280120dbdb0275cde13b",
+  "prompts": {},
+  "sessions": {
+    "s_5e303680607837": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e81c-1fc6-7043-b2d9-b8a01da41277",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
