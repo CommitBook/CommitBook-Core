@@ -215,7 +215,7 @@ fn scheduled_environment_has_a_usable_path() {
 fn unrelated_and_commented_jobs_are_neither_removed_nor_reported() {
     let repo = Path::new("/tmp/notes");
     for binary in [
-        "/usr/local/bin/notebook-backup",
+        "/usr/local/bin/commitbook-backup",
         "/opt/commitbook-helper",
         "commitbook",
         "./commitbook",

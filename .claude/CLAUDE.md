@@ -1,6 +1,6 @@
 # CommitBook
 
-Automated git commits and sync for markdown notebooks.
+Automated git commits and sync for markdown CommitBooks.
 
 ## Build & Test
 

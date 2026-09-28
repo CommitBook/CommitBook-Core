@@ -8,7 +8,7 @@ compatibility or migration guarantee.
 
 The intended reporting channel is GitHub private vulnerability reporting:
 [Report a vulnerability](https://github.com/CommitBook/CommitBook-Core/security/advisories/new).
-Do not include credentials, private notebook contents, or exploit details in a
+Do not include credentials, private CommitBook contents, or exploit details in a
 public issue. Share a minimal reproduction using synthetic data through the
 private reporting channel.
 
@@ -32,7 +32,7 @@ substitute a public issue if private reporting is unavailable.
   Review that provider's settings and data handling before enabling AI.
 - The web dashboard is loopback-only and has no login. Host/origin checks protect
   against browser-driven cross-site requests; it is not intended for public
-  hosting and does not isolate the notebook from other processes on the device.
+  hosting and does not isolate the CommitBook from other processes on the device.
 - CommitBook-Ids are short local selectors, not secrets or authorization tokens.
   Filesystem containment and the host application's permissions remain required.
 - Advisory locks coordinate CommitBook writers, not unrelated editors or Git

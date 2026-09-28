@@ -50,5 +50,5 @@ visibility change; never label the launch fully ready until verified.
 
 See `docs/verification.md` for the execution results and remaining gates. Scanner
 reports must be fully redacted; never commit credentials, raw secret matches,
-local machine paths, or private notebook contents. A clean scanner result is
+local machine paths, or private CommitBook contents. A clean scanner result is
 bounded by the scanned refs and detector rules, not proof that no secret exists.

@@ -38,7 +38,7 @@ State is TOML plus Git; there is no database or global registry. Shared settings
 live in `.CommitBook/config.toml`. Device-local identity, credentials, proposals,
 and logs live in ignored `local/`. Never stage this directory or perform repairs
 from status/list/preview operations. Serialize mutations with the repository lock.
-Keep subprocesses bounded and avoid logging credentials or notebook contents.
+Keep subprocesses bounded and avoid logging credentials or CommitBook contents.
 
 Native cloning/discovery is GitHub-only; desktop sync supports existing Git
 remotes. Apple artifacts are shipped separately from desktop binaries. Android
@@ -49,7 +49,7 @@ packaging and crates.io publication are not supported launch channels.
 Describe the user-visible outcome, relevant tests, and any API/format changes.
 Split unrelated features into separate commits, each with its tests and docs.
 Use imperative titles under 72 characters that explain what and why, such as:
-`Add local CommitBook-Ids to distinguish notebook clones`.
+`Add local CommitBook-Ids to distinguish CommitBook clones`.
 Avoid unrelated formatting, generated artifacts, and dependency upgrades.
 
 Follow the repository's agent approval rule: propose exact commit messages and
