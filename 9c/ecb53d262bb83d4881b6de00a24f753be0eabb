@@ -1,0 +1,30 @@
+docs/release-readiness.md
+  s_f4434f139eefd8::t_82c556e6875ddf 35,37,44-48
+  s_f4434f139eefd8::t_4088e654fea2c6 36,38
+.github/workflows/S2-Release-GitHub.yml
+  s_f4434f139eefd8::t_82c556e6875ddf 124
+docs/workflows.md
+  s_f4434f139eefd8::t_4088e654fea2c6 71
+  s_f4434f139eefd8::t_82c556e6875ddf 70
+.github/workflows/S1-Test-CI.yml
+  s_f4434f139eefd8::t_1b12f411c8f231 177
+docs/verification.md
+  s_f4434f139eefd8::t_82c556e6875ddf 3,27-29,37-38
+  s_f4434f139eefd8::t_4088e654fea2c6 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9cecb53d262bb83d4881b6de00a24f753be0eabb",
+  "prompts": {},
+  "sessions": {
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
