@@ -1,0 +1,156 @@
+crates/commitbook-client/src/client_tests.rs
+  s_e7c3afdc06bcee::t_f486bfe7c375b0 19,251,280,290,294,304,306-307
+  s_e7c3afdc06bcee::t_9942182e30d960 23-25,34-35,65-66,120-121,217-219,245-246
+CONTRIBUTING.md
+  s_f4434f139eefd8::t_dbebde109de557 54
+crates/commitbook-engine/src/commitbooks/registry.rs
+  s_e7c3afdc06bcee::t_89010d95781536 5,31-32,94,105-111,123-124,136-138,141,143-144,148,156,164
+crates/commitbook-client/src/lib.rs
+  s_e7c3afdc06bcee::t_722d40104362e5 34
+  s_e7c3afdc06bcee::t_9942182e30d960 14
+crates/commitbook-client/src/auth.rs
+  s_e7c3afdc06bcee::t_510a2ca63e5bff 83
+crates/commitbook-client/src/types.rs
+  s_e7c3afdc06bcee::t_1fcda884082fb4 142
+  s_e7c3afdc06bcee::t_f1f046e81d5408 116-118,120-128,130-141,143-147
+  s_e7c3afdc06bcee::t_5aa2aeae4fd9b8 16,22,32-33,54-55,95,210,220
+  s_e7c3afdc06bcee::t_0734817ed1f030 119,129
+  s_e7c3afdc06bcee::t_1381eeb3d79d5f 148
+docs/handoff/apple-app-todo.md
+  s_e7c3afdc06bcee::t_99c7779b847cd2 35-37,43,47,50,55,65,95,120,124
+  s_e7c3afdc06bcee::t_e9dc00abed5442 59
+  s_e7c3afdc06bcee::t_27f775ceca9277 135-136,138-141
+crates/commitbook-engine/src/inspection_tests.rs
+  s_f4434f139eefd8::t_dbebde109de557 91
+crates/commitbook-client/src/paths.rs
+  s_e7c3afdc06bcee::t_9942182e30d960 74-75
+  s_e7c3afdc06bcee::t_c2137a4623ec59 80-82
+  s_e7c3afdc06bcee::t_510a2ca63e5bff 60
+crates/commitbook-engine/src/git/remote_tests.rs
+  s_e7c3afdc06bcee::t_c4bab2bb76c6f5 26-52,57-59
+  s_e7c3afdc06bcee::t_9942182e30d960 53-56
+crates/commitbook-client/src/sync_ops.rs
+  s_e7c3afdc06bcee::t_71963bbe4cf59e 11,18,39,69,148,150,153,166,178
+crates/commitbook-client/src/commitbooks_ops.rs
+  s_e7c3afdc06bcee::t_2b71911f64e6b1 99-130,132-134,167-168
+  s_e7c3afdc06bcee::t_9942182e30d960 11-13,73-75,95-98,135-137
+  s_e7c3afdc06bcee::t_94ed5312e16508 373-377,379-383,417-419
+  s_e7c3afdc06bcee::t_a7b23c7c6ca9c2 144-146
+  s_e7c3afdc06bcee::t_989ccda62c9777 131,138-140,142-143,152,154
+  s_e7c3afdc06bcee::t_ed4916a175eb96 533-534,536-537
+  s_e7c3afdc06bcee::t_005c97c6ed7c63 147-151
+  s_e7c3afdc06bcee::t_e534b0c25e1570 372,378,384,403-409,416,420
+  s_e7c3afdc06bcee::t_755fe45a9c5430 55,153,155-166
+  s_e7c3afdc06bcee::t_1c402c74c6e802 410-415
+  s_e7c3afdc06bcee::t_3c5d405909a63a 6,8,15,19,24,26,28-35,38,50,58-62,68-72,82,84
+  s_e7c3afdc06bcee::t_afdfa256c103c8 141
+crates/commitbook-client/src/paths_tests.rs
+  s_e7c3afdc06bcee::t_9942182e30d960 5-9,100-103,106-113
+  s_e7c3afdc06bcee::t_91459aaba8bebb 37-48
+  s_e7c3afdc06bcee::t_f8832548991852 36
+crates/commitbook-engine/src/commitbooks/identity.rs
+  s_e7c3afdc06bcee::t_61352adaffd1d0 10,15,28,51,53-55,92,97,100
+  s_e7c3afdc06bcee::t_9942182e30d960 106-109
+  s_e7c3afdc06bcee::t_a67b940e84c5b6 66-69,84-90
+  s_e7c3afdc06bcee::t_f03a2160f6fdce 49,70-82,94-95,101-105,110-111
+crates/commitbook-client/src/commitbooks_ops_tests.rs
+  s_e7c3afdc06bcee::t_25942e99eb9ab6 849-857,864-870
+  s_e7c3afdc06bcee::t_0275e8b7b0f828 758,792,796,799,810
+  s_e7c3afdc06bcee::t_295797c835c3bb 723,818-848
+  s_e7c3afdc06bcee::t_9942182e30d960 2,720-722
+  s_e7c3afdc06bcee::t_f486bfe7c375b0 711,717,797
+  s_e7c3afdc06bcee::t_18f17e810b12a9 871-876,882-886
+  s_e7c3afdc06bcee::t_94ed5312e16508 877-881
+  s_e7c3afdc06bcee::t_a1ec362c38b9a2 858-863
+  s_e7c3afdc06bcee::t_069a68918c74e9 8,731,736,740
+docs/README.md
+  s_f4434f139eefd8::t_dbebde109de557 597
+  s_e7c3afdc06bcee::t_27f775ceca9277 606-608,611-613
+  s_e7c3afdc06bcee::t_99c7779b847cd2 205,227,600,616,619-620,624-628
+  s_e7c3afdc06bcee::t_85a9365f6f1799 630-638
+  s_e7c3afdc06bcee::t_0a780fe5cd8086 603,629
+crates/commitbook-engine/src/commitbooks/identity_tests.rs
+  s_e7c3afdc06bcee::t_80451ecb4facdb 17,31,53-54,83
+  s_e7c3afdc06bcee::t_c12f98ebd99782 63-73
+.claude/CLAUDE.md
+  s_e7c3afdc06bcee::t_29dbfc6ccc41ad 167
+  s_e7c3afdc06bcee::t_85a9365f6f1799 166
+  s_e7c3afdc06bcee::t_99c7779b847cd2 144,165
+crates/commitbook-engine/src/git/remote.rs
+  s_e7c3afdc06bcee::t_5412801a9dd104 165-166,178-179,191-198,203-218,228-230,232
+  s_e7c3afdc06bcee::t_9942182e30d960 158-160,162-164,199-202,220-227
+  s_e7c3afdc06bcee::t_16f839040b3ecf 5,149-157,161,167-177,180-190,231,233
+  s_e7c3afdc06bcee::t_1ef01b223effa7 219
+  s_e7c3afdc06bcee::t_b81b8fa4a1c8c9 234
+crates/commitbook-engine/src/inspection.rs
+  s_f4434f139eefd8::t_dbebde109de557 240
+SECURITY.md
+  s_f4434f139eefd8::t_dbebde109de557 37
+crates/commitbook-engine/Cargo.toml
+  s_e7c3afdc06bcee::t_16f839040b3ecf 36
+crates/commitbook-client/src/client.rs
+  s_e7c3afdc06bcee::t_9942182e30d960 67-69,73-76,94-95,131,140-144
+  s_e7c3afdc06bcee::t_d339790ebbfc17 134,173,211,282,292
+  s_e7c3afdc06bcee::t_722d40104362e5 14,22,35,172,206-208,210,226-228,234,247-248,251-256,261,268,277,290,303-304
+  s_e7c3afdc06bcee::t_d85d7e374431e5 71-72,89-90,97-98,123,132
+  s_e7c3afdc06bcee::t_ea00ef8ec847be 70
+crates/commitbook-client/src/commitbook.udl
+  s_e7c3afdc06bcee::t_280b9c6d37ab21 54,85,91-92,111-112,160,169,177,186,195,205,208,211,217,220,223
+  s_e7c3afdc06bcee::t_0734817ed1f030 20-29
+  s_e7c3afdc06bcee::t_1fcda884082fb4 41
+  s_e7c3afdc06bcee::t_d60c45eaff1182 18-19,30-40,42-47
+docs/handoff/android-app-todo.md
+  s_e7c3afdc06bcee::t_e9dc00abed5442 50
+  s_e7c3afdc06bcee::t_27f775ceca9277 118-119,121-123
+  s_e7c3afdc06bcee::t_99c7779b847cd2 31-32,39,41,46,103,107
+crates/commitbook-client/scripts/smoke-swift.sh
+  s_e7c3afdc06bcee::t_f345b8ec3fc19c 59,102-104,113-114
+  s_e7c3afdc06bcee::t_72c4c8c059eb51 51-57,60
+crates/commitbook-client/src/credentials.rs
+  s_e7c3afdc06bcee::t_e62b085e80babc 4,6,49-63
+  s_e7c3afdc06bcee::t_1fcda884082fb4 64-66,140,169
+  s_e7c3afdc06bcee::t_0734817ed1f030 45,70-77
+  s_e7c3afdc06bcee::t_9942182e30d960 82-89,181-189
+  s_e7c3afdc06bcee::t_c4c6d80eca48c2 1-3,5,7-13,16-30,36-44,46-48,67-69,78-81,90-107
+  s_e7c3afdc06bcee::t_f2c90be297e4fa 114-115,117-119,122-126,130-139,141-155,159-168,170-180
+  s_e7c3afdc06bcee::t_368bf1ca52af50 31-35
+crates/commitbook-engine/src/commitbooks/registry_tests.rs
+  s_e7c3afdc06bcee::t_80451ecb4facdb 7,70,73,89,134,179,204
+crates/commitbook-engine/src/commitbooks/mod.rs
+  s_e7c3afdc06bcee::t_89010d95781536 28-29,35
+crates/commitbook-client/src/sync_ops_tests.rs
+  s_e7c3afdc06bcee::t_f486bfe7c375b0 47,82,108,175,210,236,304,323,358,382,434,461,480,502,579
+  s_e7c3afdc06bcee::t_9942182e30d960 3
+Cargo.lock
+  s_e7c3afdc06bcee::t_3d2373a089bb3a 604
+crates/commitbook-client/src/conflicts.rs
+  s_f4434f139eefd8::t_fb06af3aec6af0 11-15,43-44,69
+crates/commitbook-client/src/conflicts_tests.rs
+  s_f4434f139eefd8::t_0ff48aafd375e4 77,101
+crates/commitbook-client/src/documents.rs
+  s_f4434f139eefd8::t_8a3fef563bf5e8 15-19,69,72,99,104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "85fa00599d72923deceefba69999be59959e8ea8",
+  "prompts": {},
+  "sessions": {
+    "s_e7c3afdc06bcee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e845-e41d-7020-8487-e4c33f9b9c26",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_f4434f139eefd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7a2-0661-7011-9c5f-0847a12e8359",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
