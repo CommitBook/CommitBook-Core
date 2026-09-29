@@ -142,11 +142,16 @@ pub async fn entry() {
     let verbose = cli.verbose;
 
     if let Err(e) = run(cli).await {
+        if e.downcast_ref::<errors::Reported>().is_some() {
+            std::process::exit(1);
+        }
         if verbose {
             eprintln!("{} {:#}", "ERROR".red().bold(), e);
         } else {
             eprintln!("{} {}", "ERROR".red().bold(), errors::humanize(&e));
-            eprintln!("  {}", "Run with --verbose for the full error.".dimmed());
+            if errors::verbose_adds_detail(&e) {
+                eprintln!("  {}", "Run with --verbose for the full error.".dimmed());
+            }
         }
         std::process::exit(1);
     }
@@ -204,7 +209,7 @@ async fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Commands::Preview => commands::preview::run(&repo_root, cli.json)?,
-        Commands::Sync => commands::sync_cmd::run_sync(&repo_root).await?,
+        Commands::Sync => commands::sync_cmd::run_sync(&repo_root, cli.verbose).await?,
         Commands::Start => commands::start::run(&cb_dir, &repo_root)?,
         Commands::Stop => commands::stop::run(&cb_dir, &repo_root)?,
         Commands::Status => commands::status::run(&cb_dir, &repo_root, cli.json)?,

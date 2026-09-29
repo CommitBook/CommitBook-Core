@@ -1,7 +1,8 @@
 use super::*;
 use crate::ai::{ConflictResolution, ConflictResolver};
 use crate::git::test_support::{
-    clone_second_workdir, commit_and_push_from, setup_repo_with_bare_remote, RepoFixture,
+    clone_second_workdir, commit_and_push_from, set_repo_excludes, setup_repo_with_bare_remote,
+    RepoFixture,
 };
 use crate::git::GitConflict;
 use crate::logger::FileLogger;
@@ -1759,34 +1760,185 @@ async fn both_mode_preserves_pending_rejected_and_stale_reviews() {
     }
 }
 
-#[tokio::test]
-async fn abandoned_metadata_cannot_be_snapshotted_or_pushed() {
-    let (fx, logger) = setup_with_state();
-    let root = fx.repo_dir.path();
-    let repository = git2::Repository::open(root).unwrap();
-    let before = repository.head().unwrap().target();
-    let index_before = std::fs::read(repository.path().join("index")).unwrap();
-    let abandoned = root.join(".CommitBook/auth.toml");
-    std::fs::write(&abandoned, "private fixture").unwrap();
-    std::fs::write(root.join("draft.md"), "pending notes").unwrap();
-    let error = sync_with_resolver(
-        root,
+/// Paths in the remote branch tip's tree.
+fn remote_paths(fx: &RepoFixture) -> Vec<String> {
+    let remote = git2::Repository::open_bare(fx.remote_dir.path()).unwrap();
+    let tree = remote
+        .find_reference(&format!("refs/heads/{}", fx.branch))
+        .unwrap()
+        .peel_to_tree()
+        .unwrap();
+    let mut paths = Vec::new();
+    tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
+        if entry.kind() == Some(git2::ObjectType::Blob) {
+            paths.push(format!("{dir}{}", entry.name().unwrap()));
+        }
+        git2::TreeWalkResult::Ok
+    })
+    .unwrap();
+    paths
+}
+
+async fn sync_default(fx: &RepoFixture, logger: &FileLogger) -> Result<SyncOutcome> {
+    sync_with_resolver(
+        fx.repo_dir.path(),
         &SyncOptions::new("origin", &fx.branch, true),
         None,
         &SystemCredentials,
-        &logger,
+        logger,
         None,
     )
     .await
-    .unwrap_err();
-    assert!(error.to_string().contains("refusing sync"));
-    assert_eq!(repository.head().unwrap().target(), before);
+}
+
+#[tokio::test]
+async fn finder_ds_store_ignored_by_excludes_file_does_not_block_sync() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    set_repo_excludes(root, ".DS_Store\n");
+    std::fs::write(root.join(".CommitBook/.DS_Store"), "\0\0\0\x01Bud1").unwrap();
+    std::fs::write(root.join("draft.md"), "pending notes\n").unwrap();
+
+    let outcome = sync_default(&fx, &logger).await.unwrap();
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert!(outcome.committed && outcome.pushed >= 1, "{outcome:?}");
+    let remote = remote_paths(&fx);
+    assert!(remote.contains(&"draft.md".to_string()), "{remote:?}");
+    assert!(
+        !remote.iter().any(|p| p.ends_with(".DS_Store")),
+        "{remote:?}"
+    );
     assert_eq!(
-        std::fs::read(repository.path().join("index")).unwrap(),
-        index_before
+        std::fs::read(root.join(".CommitBook/.DS_Store")).unwrap(),
+        b"\0\0\0\x01Bud1"
+    );
+    assert!(SyncState::load(&cb_dir_of(&fx))
+        .unwrap()
+        .last_error
+        .is_none());
+}
+
+#[tokio::test]
+async fn unignored_os_and_editor_files_in_metadata_are_never_published() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    set_repo_excludes(root, "");
+    let mut junk = vec![
+        ".DS_Store",
+        "._config.toml",
+        "Thumbs.db",
+        ".config.toml.swp",
+        "config.toml~",
+        ".config.toml.abc123.tmp",
+        "config 2.toml",
+    ];
+    if cfg!(unix) {
+        junk.push("Icon\r");
+    }
+    for name in &junk {
+        std::fs::write(root.join(".CommitBook").join(name), "junk").unwrap();
+    }
+    std::fs::write(root.join("draft.md"), "pending notes\n").unwrap();
+
+    let outcome = sync_default(&fx, &logger).await.unwrap();
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    let remote = remote_paths(&fx);
+    assert!(remote.contains(&"draft.md".to_string()), "{remote:?}");
+    for name in &junk {
+        let path = format!(".CommitBook/{name}");
+        assert!(!remote.contains(&path), "{path:?} in {remote:?}");
+        assert!(root.join(&path).exists(), "{path:?}");
+    }
+
+    // The junk alone is not a change: the next cycle commits nothing.
+    let head = fx.repo.rev_parse("HEAD").unwrap();
+    let outcome = sync_default(&fx, &logger).await.unwrap();
+    assert!(!outcome.committed, "{outcome:?}");
+    assert_eq!(fx.repo.rev_parse("HEAD").unwrap(), head);
+    assert!(SyncState::load(&cb_dir_of(&fx))
+        .unwrap()
+        .last_error
+        .is_none());
+}
+
+#[tokio::test]
+async fn legacy_metadata_is_never_published_and_does_not_block_sync() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    set_repo_excludes(root, "");
+    let abandoned = root.join(".CommitBook/auth.toml");
+    std::fs::write(&abandoned, "private fixture").unwrap();
+    std::fs::create_dir(root.join(".CommitBook/logs")).unwrap();
+    std::fs::write(root.join(".CommitBook/logs/launchd-stdout.log"), "old").unwrap();
+    std::fs::write(root.join("draft.md"), "pending notes\n").unwrap();
+
+    let outcome = sync_default(&fx, &logger).await.unwrap();
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    let remote = remote_paths(&fx);
+    assert!(remote.contains(&"draft.md".to_string()), "{remote:?}");
+    assert!(
+        !remote
+            .iter()
+            .any(|p| p == ".CommitBook/auth.toml" || p.starts_with(".CommitBook/logs/")),
+        "{remote:?}"
     );
     assert_eq!(
         std::fs::read_to_string(abandoned).unwrap(),
         "private fixture"
     );
+}
+
+#[tokio::test]
+async fn metadata_file_committed_elsewhere_follows_git() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    set_repo_excludes(root, "");
+    let other = clone_second_workdir(fx.remote_dir.path(), &fx.branch);
+    std::fs::write(other.path().join(".CommitBook/.DS_Store"), "v1").unwrap();
+    assert!(git_in(
+        other.path(),
+        &["add", "-f", ".CommitBook/.DS_Store"]
+    ));
+    assert!(git_in(other.path(), &["commit", "-q", "-m", "finder file"]));
+    assert!(git_in(other.path(), &["push", "-q", "origin", &fx.branch]));
+
+    sync_default(&fx, &logger).await.unwrap();
+    let outcome = sync_default(&fx, &logger).await.unwrap();
+    assert!(outcome.errors.is_empty(), "{outcome:?}");
+    assert!(!outcome.committed, "{outcome:?}");
+
+    // Once tracked, edits and deletions are published like any other file.
+    std::fs::write(root.join(".CommitBook/.DS_Store"), "v2").unwrap();
+    assert!(sync_default(&fx, &logger).await.unwrap().committed);
+    std::fs::remove_file(root.join(".CommitBook/.DS_Store")).unwrap();
+    assert!(sync_default(&fx, &logger).await.unwrap().committed);
+    assert!(!remote_paths(&fx).contains(&".CommitBook/.DS_Store".to_string()));
+}
+
+#[tokio::test]
+async fn sync_writes_only_known_top_level_metadata() {
+    let (fx, logger) = setup_with_state();
+    let root = fx.repo_dir.path();
+    crate::commitbooks::init::init_dot_commitbook(
+        root,
+        "notes",
+        &fx.branch,
+        "origin",
+        None,
+        crate::config::Auth::Pat,
+    )
+    .unwrap();
+    sync_default(&fx, &logger).await.unwrap();
+    LocalConfig::load(root).unwrap().save(root).unwrap();
+
+    for entry in std::fs::read_dir(root.join(".CommitBook")).unwrap() {
+        let name = entry.unwrap().file_name();
+        assert!(
+            matches!(
+                name.to_str(),
+                Some("config.toml" | ".gitignore" | "devices" | "local")
+            ),
+            "CommitBook wrote an unexpected top-level entry: {name:?}"
+        );
+    }
 }

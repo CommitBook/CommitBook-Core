@@ -54,6 +54,43 @@ fn doctor_fails_when_git_filters_cannot_run() {
     assert!(run(&cb_dir, tmp.path(), false, false).is_err());
 }
 
+fn contents_check(report: &DoctorReport) -> &Check {
+    report
+        .checks
+        .iter()
+        .find(|check| check.name == ".CommitBook/ contents")
+        .unwrap()
+}
+
+#[test]
+fn doctor_warns_about_pre_release_metadata_without_failing() {
+    let tmp = healthy_repo();
+    let cb_dir = LocalConfig::commitbook_dir(tmp.path());
+    std::fs::write(cb_dir.join("auth.toml"), "private fixture").unwrap();
+
+    let report = diagnose(&cb_dir, tmp.path());
+    let check = contents_check(&report);
+    assert_eq!(check.status, "old files");
+    assert!(!check.failed);
+    assert!(
+        check.details[0].contains(".CommitBook/auth.toml"),
+        "{:?}",
+        check.details
+    );
+    run(&cb_dir, tmp.path(), false, false).unwrap();
+}
+
+#[test]
+fn doctor_passes_with_finder_files_in_metadata() {
+    let tmp = healthy_repo();
+    let cb_dir = LocalConfig::commitbook_dir(tmp.path());
+    std::fs::write(cb_dir.join(".DS_Store"), "finder").unwrap();
+
+    let report = diagnose(&cb_dir, tmp.path());
+    assert_eq!(contents_check(&report).status, "ok");
+    run(&cb_dir, tmp.path(), false, false).unwrap();
+}
+
 #[test]
 fn doctor_json_reports_failed_checks_without_text_formatting() {
     let tmp = healthy_repo();

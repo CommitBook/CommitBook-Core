@@ -15,8 +15,9 @@ use commitbook_engine::sync::sync_repository_locked;
 /// Returns an error if the sync surfaced any errors or unresolved manual
 /// conflicts, or if another operation holds the repository lock, so
 /// `commitbook sync && next-step` chains correctly and a failed scheduled run
-/// exits non-zero.
-pub async fn run_sync(repo_root: &Path) -> Result<()> {
+/// exits non-zero. A failed cycle is printed here and returned as
+/// `errors::Reported`, so it appears once; `verbose` prints the full chain.
+pub async fn run_sync(repo_root: &Path, verbose: bool) -> Result<()> {
     let lock = match RepoLock::acquire(repo_root) {
         Ok(lock) => lock,
         Err(error) => {
@@ -26,7 +27,7 @@ pub async fn run_sync(repo_root: &Path) -> Result<()> {
             return Err(error);
         }
     };
-    run_sync_locked(repo_root, &lock).await
+    run_sync_locked(repo_root, &lock, verbose).await
 }
 
 /// Record a sync skipped because the lock was taken, so skipped scheduled
@@ -58,7 +59,7 @@ fn record_config_failure(repo_root: &Path, error: &anyhow::Error) {
     }
 }
 
-async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
+async fn run_sync_locked(repo_root: &Path, lock: &RepoLock, verbose: bool) -> Result<()> {
     let config = match LocalConfig::load(repo_root) {
         Ok(config) => config,
         Err(error) => {
@@ -137,13 +138,20 @@ async fn run_sync_locked(repo_root: &Path, lock: &RepoLock) -> Result<()> {
         }
         Err(e) if e.downcast_ref::<RepoLockContended>().is_some() => Some(e),
         Err(e) => {
-            let _ = logger.error(&format!("Sync failed: {e}"));
-            println!("  {} Sync failed: {}", "ERROR".red().bold(), e);
-            println!(
-                "{}",
-                "  Working tree preserved. Will retry on next sync.".dimmed()
-            );
-            Some(e)
+            let _ = logger.error(&format!("Sync failed: {e:#}"));
+            let message = if verbose {
+                format!("{e:#}")
+            } else {
+                crate::errors::humanize(&e)
+            };
+            // The returned error is `Reported`, so these stderr lines are the
+            // only place the failure is shown; callers read diagnostics there.
+            eprintln!("  {} Sync failed: {message}", "ERROR".red().bold());
+            eprintln!("{}", "  Working tree preserved.".dimmed());
+            if !verbose && crate::errors::verbose_adds_detail(&e) {
+                eprintln!("{}", "  Run with --verbose for the full error.".dimmed());
+            }
+            Some(crate::errors::Reported(e).into())
         }
     };
 

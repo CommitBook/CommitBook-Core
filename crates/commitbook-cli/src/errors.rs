@@ -50,6 +50,25 @@ pub fn humanize(e: &anyhow::Error) -> String {
         .unwrap_or_else(|| "Unknown error.".into())
 }
 
+/// True when `--verbose` would print more than `humanize` does, so the
+/// "Run with --verbose" hint is only shown when it helps.
+pub fn verbose_adds_detail(e: &anyhow::Error) -> bool {
+    format!("{e:#}") != humanize(e)
+}
+
+/// An error the command already printed. `entry` exits non-zero without
+/// printing it a second time; `Display` still shows the full chain.
+#[derive(Debug)]
+pub struct Reported(pub anyhow::Error);
+
+impl std::fmt::Display for Reported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+
+impl std::error::Error for Reported {}
+
 #[cfg(test)]
 #[path = "errors_tests.rs"]
 mod tests;

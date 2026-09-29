@@ -1,6 +1,7 @@
 use super::*;
 use crate::git::test_support::{
-    clone_second_workdir, commit_and_push_from, setup_repo_with_bare_remote, setup_repo_with_base,
+    clone_second_workdir, commit_and_push_from, set_repo_excludes, setup_repo_with_bare_remote,
+    setup_repo_with_base,
 };
 use std::fs;
 
@@ -1413,6 +1414,116 @@ fn stage_all_untracks_local_state_that_was_committed_before() {
 }
 
 #[test]
+fn unpublished_metadata_path_covers_everything_but_published_entries() {
+    for path in [
+        ".CommitBook/.DS_Store",
+        ".CommitBook/._config.toml",
+        ".CommitBook/auth.toml",
+        ".CommitBook/logs/2026-09-25.log",
+        ".CommitBook/local",
+        ".CommitBook/local/auth.toml",
+        ".CommitBook/.config.toml.abc123.tmp",
+        ".CommitBook/config.toml~",
+        ".CommitBook/devices/.DS_Store",
+        ".CommitBook/devices/nested/abcd1234.toml",
+    ] {
+        assert!(is_unpublished_metadata_path(path), "{path}");
+    }
+    for path in [
+        ".CommitBook/config.toml",
+        ".CommitBook/.gitignore",
+        ".CommitBook/devices/abcd1234.toml",
+        ".CommitBook",
+        "notes/.CommitBook/.DS_Store",
+        ".CommitBookx/.DS_Store",
+        ".DS_Store",
+    ] {
+        assert!(!is_unpublished_metadata_path(path), "{path}");
+    }
+}
+
+#[test]
+fn stage_all_never_adds_untracked_metadata_even_when_not_ignored() {
+    let (tmp, _repo) = create_temp_repo();
+    let root = tmp.path();
+    set_repo_excludes(root, "");
+    for (path, content) in [
+        (".CommitBook/.DS_Store", "\0\0\0\x01Bud1"),
+        (".CommitBook/._config.toml", "appledouble"),
+        (".CommitBook/auth.toml", "token = \"x\"\n"),
+        (".CommitBook/logs/2026-04-07.log", "{}\n"),
+        (".CommitBook/devices/.DS_Store", "finder"),
+        (".CommitBook/config.toml", "[config]\n"),
+        (".CommitBook/devices/abcd1234.toml", "name = \"Mac\"\n"),
+        ("note.md", "hi\n"),
+        ("notes/.DS_Store", "finder"),
+    ] {
+        fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+        fs::write(root.join(path), content).unwrap();
+    }
+    let git_repo = GitRepo::open(root).unwrap();
+    assert!(!git_repo
+        .repo
+        .status_should_ignore(Path::new(".CommitBook/.DS_Store"))
+        .unwrap());
+
+    git_repo.stage_all().unwrap();
+    git_repo.commit("snapshot").unwrap();
+
+    let tree = git_repo.repo.head().unwrap().peel_to_tree().unwrap();
+    for published in [
+        "note.md",
+        "notes/.DS_Store",
+        ".CommitBook/config.toml",
+        ".CommitBook/devices/abcd1234.toml",
+    ] {
+        assert!(tree.get_path(Path::new(published)).is_ok(), "{published}");
+    }
+    for unpublished in [
+        ".CommitBook/.DS_Store",
+        ".CommitBook/._config.toml",
+        ".CommitBook/auth.toml",
+        ".CommitBook/logs",
+        ".CommitBook/devices/.DS_Store",
+    ] {
+        assert!(
+            tree.get_path(Path::new(unpublished)).is_err(),
+            "{unpublished}"
+        );
+    }
+    // Files sync never adds are not pending changes either.
+    assert!(!git_repo.has_dirty_changes().unwrap());
+    assert!(git_repo.changes_summary().unwrap().new_files.is_empty());
+    assert!(root.join(".CommitBook/.DS_Store").exists());
+}
+
+#[test]
+fn stage_all_follows_git_for_tracked_unpublished_metadata() {
+    let (tmp, repo) = create_temp_repo();
+    let root = tmp.path();
+    set_repo_excludes(root, "");
+    fs::create_dir_all(root.join(".CommitBook")).unwrap();
+    fs::write(root.join(".CommitBook/.DS_Store"), "v1").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new(".CommitBook/.DS_Store")).unwrap();
+    index.write().unwrap();
+    let git_repo = GitRepo::open(root).unwrap();
+    git_repo.commit("committed elsewhere").unwrap();
+
+    fs::write(root.join(".CommitBook/.DS_Store"), "v2").unwrap();
+    assert!(git_repo.has_dirty_changes().unwrap());
+    git_repo.stage_all().unwrap();
+    assert!(git_repo.has_real_staged_changes().unwrap());
+    git_repo.commit("edit").unwrap();
+
+    fs::remove_file(root.join(".CommitBook/.DS_Store")).unwrap();
+    git_repo.stage_all().unwrap();
+    git_repo.commit("delete").unwrap();
+    let tree = git_repo.repo.head().unwrap().peel_to_tree().unwrap();
+    assert!(tree.get_path(Path::new(".CommitBook/.DS_Store")).is_err());
+}
+
+#[test]
 fn stage_paths_refuses_local_state() {
     let (tmp, _repo) = create_temp_repo();
     let git_repo = GitRepo::open(tmp.path()).unwrap();
@@ -1421,4 +1532,56 @@ fn stage_paths_refuses_local_state() {
     assert!(git_repo
         .stage_paths(&[".CommitBook/local/auth.toml".to_string()])
         .is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn undecodable_commitbook_names_default_to_unpublished() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let undecodable = Path::new(OsStr::from_bytes(b".CommitBook/pre\xffrelease.toml"));
+    assert!(is_unpublished_metadata_path_os(undecodable));
+    let undecodable_local = Path::new(OsStr::from_bytes(b".CommitBook/local/au\xffth.toml"));
+    assert!(is_unpublished_metadata_path_os(undecodable_local));
+    let undecodable_outside = Path::new(OsStr::from_bytes(b"notes/fe\xffnote.md"));
+    assert!(!is_unpublished_metadata_path_os(undecodable_outside));
+    assert!(!is_unpublished_metadata_path_os(Path::new(
+        ".CommitBook/config.toml"
+    )));
+}
+
+// Linux filesystems allow names that are not valid UTF-8; macOS APFS rejects
+// them at creation, so the end-to-end staging check runs on Linux only.
+#[cfg(target_os = "linux")]
+#[test]
+fn stage_all_skips_undecodable_untracked_commitbook_names() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let (tmp, _repo) = create_temp_repo();
+    let root = tmp.path();
+    set_repo_excludes(root, "");
+    fs::create_dir_all(root.join(".CommitBook")).unwrap();
+    let opaque = root
+        .join(".CommitBook")
+        .join(OsStr::from_bytes(b"pre\xffrelease.toml"));
+    fs::write(&opaque, "device-local\n").unwrap();
+    let user_note = root.join(OsStr::from_bytes(b"no\xffte.md"));
+    fs::write(&user_note, "hi\n").unwrap();
+
+    let git_repo = GitRepo::open(root).unwrap();
+    git_repo.stage_all().unwrap();
+    git_repo.commit("snapshot").unwrap();
+
+    let tree = git_repo.repo.head().unwrap().peel_to_tree().unwrap();
+    assert!(tree
+        .get_path(Path::new(OsStr::from_bytes(b"no\xffte.md")))
+        .is_ok());
+    assert!(tree
+        .get_path(Path::new(OsStr::from_bytes(
+            b".CommitBook/pre\xffrelease.toml"
+        )))
+        .is_err());
+    assert!(opaque.exists());
 }

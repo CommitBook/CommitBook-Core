@@ -246,11 +246,10 @@ impl App {
                     self.preview_scroll = self.preview_scroll.saturating_sub(1)
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    self.preview_scroll = (self.preview_scroll + 1).min(
-                        self.preview
-                            .as_ref()
-                            .map_or(0, |p| p.entries.len() + p.blockers.len() + 8),
-                    )
+                    self.preview_scroll =
+                        (self.preview_scroll + 1).min(self.preview.as_ref().map_or(0, |p| {
+                            p.entries.len() + p.blockers.len() + p.warnings.len() + 8
+                        }))
                 }
                 KeyCode::Char('r') => self.refresh(),
                 KeyCode::Char('q') => self.quit = true,

@@ -81,20 +81,61 @@ pub fn initialize(repo_root: &Path, remote_name: &str, branch: &str) -> Result<(
     Ok(())
 }
 
-/// Reject unknown metadata before sync can stage or publish abandoned state.
-/// This validates the current layout only; it never moves or removes anything.
-pub fn validate_metadata_layout(repo_root: &Path) -> Result<()> {
+/// Top-level `.CommitBook/` names written only by pre-release builds, before
+/// device-local state moved under `local/`: a Git token, sync state,
+/// merge-base copies of notes, logs, a lock file, and the Go build's config.
+/// Matched ASCII case-insensitively (the Go build wrote `Logs/`). Never list
+/// a current name; when a top-level name is retired, add it here.
+const LEGACY_METADATA_ENTRIES: &[&str] = &[
+    "auth.toml",
+    "state.toml",
+    "base",
+    "logs",
+    ".lock",
+    "config.json",
+];
+
+/// Pre-release entries at the top of `.CommitBook/`, as sorted repo-relative
+/// names (`.CommitBook/logs/` for directories). Sync never adds them
+/// (`git::operations::is_unpublished_metadata_path`); doctor and preview
+/// report them. Read-only: never moves or removes anything.
+pub fn legacy_metadata_entries(repo_root: &Path) -> Result<Vec<String>> {
     let directory = crate::config::LocalConfig::commitbook_dir(repo_root);
-    for entry in fs::read_dir(&directory)? {
-        let entry = entry?;
-        if !matches!(
-            entry.file_name().to_str(),
-            Some("config.toml" | ".gitignore" | "devices" | "local")
-        ) {
-            bail!("Unexpected CommitBook metadata entry {}; refusing sync to avoid publishing local state. Back up the development layout and initialize a fresh clone", entry.path().display());
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("Failed to read {}", directory.display()))
+        }
+    };
+    let mut found = Vec::new();
+    for entry in entries {
+        let entry = entry.with_context(|| format!("Failed to read {}", directory.display()))?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if LEGACY_METADATA_ENTRIES
+            .iter()
+            .any(|legacy| legacy.eq_ignore_ascii_case(&name))
+        {
+            let slash = if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                "/"
+            } else {
+                ""
+            };
+            found.push(format!(".CommitBook/{name}{slash}"));
         }
     }
-    Ok(())
+    found.sort();
+    Ok(found)
+}
+
+/// One-line warning for `legacy_metadata_entries`, shared by doctor and preview.
+pub fn legacy_metadata_warning(entries: &[String]) -> String {
+    format!(
+        "Old pre-release CommitBook files: {}. Sync never adds untracked copies, but a copy already tracked in Git follows normal Git: its edits and deletions publish. They may hold a Git token or device state. Stop any old CommitBook scheduler, then delete them or move them into .CommitBook/local/.",
+        entries.join(", ")
+    )
 }
 
 /// Prepare only the current device-local layout. Never migrates old files.

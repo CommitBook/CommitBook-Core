@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const INCLUSION_POLICY: &str = "Sync commits all tracked and non-ignored files, including non-Markdown files and deletions. Preview is a snapshot; files may change before sync.";
+pub const INCLUSION_POLICY: &str = "Sync commits all tracked and non-ignored files, including non-Markdown files and deletions, but never adds new files inside .CommitBook/ other than config.toml, .gitignore, and devices/*.toml. Preview is a snapshot; files may change before sync.";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreviewEntry {
     pub path: String,
@@ -20,6 +20,9 @@ pub struct CommitPreview {
     pub policy: String,
     pub entries: Vec<PreviewEntry>,
     pub blockers: Vec<String>,
+    /// Problems that do not stop sync, such as pre-release files in `.CommitBook/`.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 /// Inspect files even before initialization, for the init inclusion summary.
 pub fn preview_files(root: &Path) -> Result<Vec<PreviewEntry>> {
@@ -55,6 +58,10 @@ pub fn preview_files(root: &Path) -> Result<Vec<PreviewEntry>> {
             .context("Change has no path")?;
         let path_str = path.to_str().context("Change path is not valid UTF-8")?;
         let status = repo.status_file(path)?;
+        // Sync never adds these (see `GitRepo::stage_all`).
+        if crate::git::operations::is_unadded_metadata(path_str, status) {
+            continue;
+        }
         let change = match delta.status() {
             git2::Delta::Added | git2::Delta::Untracked => "added",
             git2::Delta::Deleted => "deleted",
@@ -141,6 +148,7 @@ pub fn preview(root: &Path) -> CommitPreview {
         policy: INCLUSION_POLICY.into(),
         entries: vec![],
         blockers: vec![],
+        warnings: vec![],
     };
     match LocalConfig::load_read_only(root) {
         Ok(c) => {
@@ -177,6 +185,15 @@ pub fn preview(root: &Path) -> CommitPreview {
         Err(e) => result
             .blockers
             .push(format!("Cannot preview changes: {e:#}")),
+    }
+    match crate::state::legacy_metadata_entries(root) {
+        Ok(entries) if entries.is_empty() => (),
+        Ok(entries) => result
+            .warnings
+            .push(crate::state::legacy_metadata_warning(&entries)),
+        Err(e) => result
+            .warnings
+            .push(format!("Cannot inspect .CommitBook/: {e:#}")),
     }
     result
 }
@@ -302,7 +319,17 @@ impl RepositoryStatus {
             .recurse_untracked_dirs(true)
             .include_ignored(false)
             .update_index(false);
-        self.changes_total = Some(repo.statuses(Some(&mut options))?.len());
+        // Count what sync would act on (see `GitRepo::has_dirty_changes`).
+        self.changes_total = Some(
+            repo.statuses(Some(&mut options))?
+                .iter()
+                .filter(|entry| {
+                    !entry.path().is_ok_and(|path| {
+                        crate::git::operations::is_unadded_metadata(path, entry.status())
+                    })
+                })
+                .count(),
+        );
         match repo.head() {
             Ok(head) => {
                 self.current_branch = Some(head.shorthand()?.to_owned());

@@ -202,3 +202,18 @@ pub fn commit_and_push_from(workdir: &Path, branch: &str, path: &str, content: &
         String::from_utf8_lossy(&push.stderr)
     );
 }
+
+/// Point the repository's `core.excludesFile` at a private file holding
+/// `content`, so tests never depend on the developer's global ignore rules
+/// (many Macs ignore `.DS_Store` there). Open repository handles after this
+/// call: libgit2 reads the setting when a handle first checks ignores.
+pub fn set_repo_excludes(repo_root: &Path, content: &str) {
+    let path = repo_root.join(".git/commitbook-test-excludes");
+    std::fs::write(&path, content).unwrap();
+    Repository::open(repo_root)
+        .unwrap()
+        .config()
+        .unwrap()
+        .set_str("core.excludesFile", path.to_str().unwrap())
+        .unwrap();
+}
