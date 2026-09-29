@@ -23,6 +23,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Default is 3; extra retries ride out brief runner network blips.
+  CARGO_NET_RETRY: 10
 
 jobs:
   msrv:
@@ -98,8 +100,23 @@ jobs:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
           components: clippy
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
-      - run: cargo clippy --locked -p commitbook-client -p commitbook-engine --target aarch64-apple-ios -- -D warnings
-      - run: cargo check --locked -p commitbook-client --target aarch64-apple-ios-sim
+      # macOS runners intermittently lose DNS for index.crates.io; one
+      # delayed retry survives outages that outlast cargo's own backoff.
+      # Only the download is retried, so real lint or build errors fail once.
+      - name: Fetch dependencies
+        run: |
+          for attempt in 1 2; do
+            if cargo fetch --locked; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 2 ]; then
+              echo "attempt $attempt failed, retrying in 60s" >&2
+              sleep 60
+            fi
+          done
+          exit 1
+      - run: cargo clippy --frozen -p commitbook-client -p commitbook-engine --target aarch64-apple-ios -- -D warnings
+      - run: cargo check --frozen -p commitbook-client --target aarch64-apple-ios-sim
 
   build:
     name: Build (${{ matrix.target }})

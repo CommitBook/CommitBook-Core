@@ -1,4 +1,4 @@
-<img src="BrandKit/commitbook-readme-banner.svg" width="1200" alt="CommitBook — Your notes. Saved and Synced with Git.">
+<img src="BrandKit/commitbook-readme-banner.svg" width="1200" alt="CommitBook: Your notes. Saved and Synced with Git.">
 
 # CommitBook
 
@@ -17,6 +17,7 @@ Commit messages use a timestamp by default, or an AI CLI (GitHub Copilot, Claude
 ```bash
 # Install
 curl -fsSL https://raw.githubusercontent.com/CommitBook/CommitBook-Core/main/scripts/release/install.sh | bash
+# or: brew install commitbook/tap/commitbook
 
 # Navigate to your notes repo
 cd ~/my-notes
@@ -383,14 +384,16 @@ the release build target. Update CommitBook to receive bundled-library fixes.
 
 ### Homebrew
 
-After the release has been published to the CommitBook tap:
+macOS and Linux:
 
 ```bash
-brew install CommitBook/tap/commitbook
+brew install commitbook/tap/commitbook
 ```
 
 The formula installs all four desktop executables and their license notices.
-See [workflow stages](workflows.md) for publishing setup and validation.
+Installing does not start a scheduler: run `commitbook start` in each notes
+repository. See [workflow stages](workflows.md) for publishing setup and
+validation.
 
 ### Upgrading
 
@@ -399,6 +402,14 @@ again using the new installation. Pre-launch development layouts have no
 migration support; see [Pre-launch compatibility](#pre-launch-compatibility).
 Do not run old and new development binaries against the same clone. Old LaunchAgent labels and crontab entries are not discovered or
 removed by current commands.
+
+With Homebrew:
+
+```bash
+commitbook stop           # in each scheduled notes repository
+brew update && brew upgrade commitbook
+commitbook start          # in each of those repositories again
+```
 
 ## Requirements
 

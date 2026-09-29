@@ -86,10 +86,10 @@ it does not build or publish this Core artifact.
   A failed push fails the job rather than overwriting concurrent tap changes.
   S3 refuses to publish a version older than the one already in the tap.
 
-Once S3 has published the first formula, users can install with:
+Users install with:
 
 ```sh
-brew install CommitBook/tap/commitbook
+brew install commitbook/tap/commitbook
 ```
 
 This installs `commitbook`, `cobo`, `commitbook-tui`, `commitbook-web`, and the
