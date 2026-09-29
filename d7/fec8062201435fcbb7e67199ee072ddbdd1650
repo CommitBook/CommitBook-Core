@@ -1,0 +1,20 @@
+.github/workflows/S1-Test-CI.yml
+  s_55bee48e536543::t_815856fc4d707a 26-27
+  s_55bee48e536543::t_700e21a342b7f1 103-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d7fec8062201435fcbb7e67199ee072ddbdd1650",
+  "prompts": {},
+  "sessions": {
+    "s_55bee48e536543": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f154ebc9cffeWsvJFLiYD2OpE9",
+        "model": "unknown"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
