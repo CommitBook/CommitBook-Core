@@ -5,7 +5,7 @@
 | Surface | Launch status |
 |---|---|
 | CLI (`commitbook`, `cobo`), TUI, local web | macOS and Linux, arm64 and x86_64 artifacts |
-| Homebrew | Formula for desktop tools; requires S3 publication and tap token setup |
+| Homebrew | Published to `CommitBook/homebrew-tap` by S3 (1.0.0 onward) |
 | Native SDK | Apple XCFramework, with Swift compile/link/runtime smoke test |
 | Android | Bindings/integration work exists; no supported packaged release yet |
 | crates.io | Deferred; use GitHub releases or documented source installation |
@@ -39,13 +39,15 @@ Before launch, maintainers must verify:
 - Private vulnerability reporting is enabled and its reporting link works.
 - Secret scanning/push protection are enabled where available, in addition to
   the checked-in full-history scanner.
+- Release tags (`*.*.*`) cannot be deleted or moved (ruleset "Protect release
+  tags", with admin bypass).
 - No unresolved dependency advisories, credential findings, or license gaps.
 
 The repository is now public. Private vulnerability reporting, secret scanning,
 push protection, branch protection, and release-environment ref restrictions
-have been enabled. The remaining gate is a clean hosted PR check run, followed
-by a published release and live Homebrew formula installation. Do not claim
-full release readiness until those checks pass.
+have been enabled. Hosted PR checks, the published 1.0.0 and 1.0.1 releases,
+and a live Homebrew installation have passed. The authenticated Git flow
+through the real iOS app is still unverified; no release so far has checked it.
 
 See [workflow stages and Homebrew setup](workflows.md) for S1/S2/S3 dispatch
 commands, required credentials, coverage artifacts, and publication checks.
