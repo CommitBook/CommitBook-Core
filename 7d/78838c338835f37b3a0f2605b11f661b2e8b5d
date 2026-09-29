@@ -1,0 +1,19 @@
+.github/workflows/S1-Test-CI.yml
+  s_21f104ea9c9bcf::t_8c77ef24e3ff61 105-106,109,112-114,118-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d78838c338835f37b3a0f2605b11f661b2e8b5d",
+  "prompts": {},
+  "sessions": {
+    "s_21f104ea9c9bcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "22d4637b-2b47-44ff-a6ba-7a94b410faa7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
