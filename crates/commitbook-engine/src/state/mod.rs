@@ -133,7 +133,7 @@ pub fn legacy_metadata_entries(repo_root: &Path) -> Result<Vec<String>> {
 /// One-line warning for `legacy_metadata_entries`, shared by doctor and preview.
 pub fn legacy_metadata_warning(entries: &[String]) -> String {
     format!(
-        "Old pre-release CommitBook files: {}. Sync never publishes them, but they may hold a Git token or device state. Stop any old CommitBook scheduler, then delete them or move them into .CommitBook/local/.",
+        "Old pre-release CommitBook files: {}. Sync never adds untracked copies, but a copy already tracked in Git follows normal Git: its edits and deletions publish. They may hold a Git token or device state. Stop any old CommitBook scheduler, then delete them or move them into .CommitBook/local/.",
         entries.join(", ")
     )
 }

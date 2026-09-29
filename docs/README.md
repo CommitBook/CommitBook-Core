@@ -595,9 +595,10 @@ shared detailed status. Unknown change counts are null rather than zero.
 
 Only the current schema and `.CommitBook/local/` layout are supported. There
 are no upgrades for older development layouts or commands (`run` is removed;
-use `sync`). Old files are left untouched, and sync never publishes them:
-it never adds new files inside `.CommitBook/` other than `config.toml`,
-`.gitignore`, and `devices/*.toml`. `commitbook doctor` and `commitbook preview`
+use `sync`). Old files are left untouched, and sync never adds them while
+they are untracked: it never adds new files inside `.CommitBook/` other than
+`config.toml`, `.gitignore`, and `devices/*.toml`. A copy already tracked in
+Git follows normal Git: its edits and deletions publish. `commitbook doctor` and `commitbook preview`
 warn when pre-release files remain at the top of `.CommitBook/` (`auth.toml`,
 `state.toml`, `base/`, `logs/`, `.lock`, or the Go build's `config.json` and
 `Logs/`); they may hold a Git token or device state. Stop any old scheduler,

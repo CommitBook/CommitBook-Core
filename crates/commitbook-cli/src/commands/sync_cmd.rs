@@ -144,10 +144,12 @@ async fn run_sync_locked(repo_root: &Path, lock: &RepoLock, verbose: bool) -> Re
             } else {
                 crate::errors::humanize(&e)
             };
-            println!("  {} Sync failed: {message}", "ERROR".red().bold());
-            println!("{}", "  Working tree preserved.".dimmed());
+            // The returned error is `Reported`, so these stderr lines are the
+            // only place the failure is shown; callers read diagnostics there.
+            eprintln!("  {} Sync failed: {message}", "ERROR".red().bold());
+            eprintln!("{}", "  Working tree preserved.".dimmed());
             if !verbose && crate::errors::verbose_adds_detail(&e) {
-                println!("{}", "  Run with --verbose for the full error.".dimmed());
+                eprintln!("{}", "  Run with --verbose for the full error.".dimmed());
             }
             Some(crate::errors::Reported(e).into())
         }

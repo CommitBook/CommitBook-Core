@@ -30,6 +30,19 @@ pub fn is_unpublished_metadata_path(path: &str) -> bool {
     }
 }
 
+/// `is_unpublished_metadata_path` for a `&Path` that may not be valid UTF-8.
+/// A name Git cannot decode to UTF-8 cannot be published metadata, so under
+/// `.CommitBook/` it counts as unpublished; outside, it stays stageable.
+fn is_unpublished_metadata_path_os(path: &Path) -> bool {
+    match path.to_str() {
+        Some(utf8) => is_unpublished_metadata_path(utf8),
+        None => matches!(
+            path.components().next(),
+            Some(Component::Normal(first)) if first == ".CommitBook"
+        ),
+    }
+}
+
 /// An untracked path that `stage_all` never adds. The dirty check, change
 /// summary, preview, and status skip exactly these so they agree with sync.
 pub fn is_unadded_metadata(path: &str, status: git2::Status) -> bool {
@@ -410,10 +423,10 @@ impl GitRepo {
     pub fn stage_all(&self) -> Result<()> {
         let mut index = self.repo.index().context("Failed to get index")?;
         // A positive return skips the path; tracked edits and deletions are
-        // still staged by `update_all` below.
-        let mut skip_unpublished = |path: &Path, _: &[u8]| {
-            i32::from(path.to_str().is_some_and(is_unpublished_metadata_path))
-        };
+        // still staged by `update_all` below. Undecodable names under
+        // `.CommitBook/` cannot be published metadata, so they are skipped.
+        let mut skip_unpublished =
+            |path: &Path, _: &[u8]| i32::from(is_unpublished_metadata_path_os(path));
         index
             .add_all(
                 ["*"].iter(),

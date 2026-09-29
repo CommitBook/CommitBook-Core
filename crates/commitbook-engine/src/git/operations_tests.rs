@@ -1533,3 +1533,55 @@ fn stage_paths_refuses_local_state() {
         .stage_paths(&[".CommitBook/local/auth.toml".to_string()])
         .is_err());
 }
+
+#[cfg(unix)]
+#[test]
+fn undecodable_commitbook_names_default_to_unpublished() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let undecodable = Path::new(OsStr::from_bytes(b".CommitBook/pre\xffrelease.toml"));
+    assert!(is_unpublished_metadata_path_os(undecodable));
+    let undecodable_local = Path::new(OsStr::from_bytes(b".CommitBook/local/au\xffth.toml"));
+    assert!(is_unpublished_metadata_path_os(undecodable_local));
+    let undecodable_outside = Path::new(OsStr::from_bytes(b"notes/fe\xffnote.md"));
+    assert!(!is_unpublished_metadata_path_os(undecodable_outside));
+    assert!(!is_unpublished_metadata_path_os(Path::new(
+        ".CommitBook/config.toml"
+    )));
+}
+
+// Linux filesystems allow names that are not valid UTF-8; macOS APFS rejects
+// them at creation, so the end-to-end staging check runs on Linux only.
+#[cfg(target_os = "linux")]
+#[test]
+fn stage_all_skips_undecodable_untracked_commitbook_names() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let (tmp, _repo) = create_temp_repo();
+    let root = tmp.path();
+    set_repo_excludes(root, "");
+    fs::create_dir_all(root.join(".CommitBook")).unwrap();
+    let opaque = root
+        .join(".CommitBook")
+        .join(OsStr::from_bytes(b"pre\xffrelease.toml"));
+    fs::write(&opaque, "device-local\n").unwrap();
+    let user_note = root.join(OsStr::from_bytes(b"no\xffte.md"));
+    fs::write(&user_note, "hi\n").unwrap();
+
+    let git_repo = GitRepo::open(root).unwrap();
+    git_repo.stage_all().unwrap();
+    git_repo.commit("snapshot").unwrap();
+
+    let tree = git_repo.repo.head().unwrap().peel_to_tree().unwrap();
+    assert!(tree
+        .get_path(Path::new(OsStr::from_bytes(b"no\xffte.md")))
+        .is_ok());
+    assert!(tree
+        .get_path(Path::new(OsStr::from_bytes(
+            b".CommitBook/pre\xffrelease.toml"
+        )))
+        .is_err());
+    assert!(opaque.exists());
+}
