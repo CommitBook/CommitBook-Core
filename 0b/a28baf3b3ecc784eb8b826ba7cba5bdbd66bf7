@@ -1,0 +1,30 @@
+crates/commitbook-cli/src/commands/sync_cmd.rs
+  s_f54791174c120f::t_4543b4c4c2f3c9 147-150,152
+crates/commitbook-engine/src/git/operations.rs
+  s_f54791174c120f::t_aa56f8ccef3d9b 33-45
+  s_f54791174c120f::t_c405ffeae1ad2d 426-429
+crates/commitbook-engine/src/state/mod.rs
+  s_f54791174c120f::t_874f69f24cb394 136
+crates/commitbook-engine/src/git/operations_tests.rs
+  s_f54791174c120f::t_66f4deefe6e5c9 1554-1556
+  s_f54791174c120f::t_f23bb60d0cf017 1578-1580
+  s_f54791174c120f::t_801eb3d02655f7 1536-1553,1557-1577,1581-1587
+docs/README.md
+  s_f54791174c120f::t_27da9d66ab5f02 598-601
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0ba28baf3b3ecc784eb8b826ba7cba5bdbd66bf7",
+  "prompts": {},
+  "sessions": {
+    "s_f54791174c120f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f15a6f4ceffeYow5z9iq1zfAxR",
+        "model": "unknown"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
