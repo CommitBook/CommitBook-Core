@@ -1,0 +1,30 @@
+docs/verification.md
+  s_8f52bcdbd217d8::t_7d77f159faa1e4 20,36,44
+  s_8f52bcdbd217d8::t_fec86020e709ad 21-23
+  s_8f52bcdbd217d8::t_16c203bc5f5cc6 1,3,5-6,8-19,25,41-43
+  s_8f52bcdbd217d8::t_9a88e7bac40137 24
+docs/release-readiness.md
+  s_8f52bcdbd217d8::t_12c0ad46e9d118 8,42-43,48-50
+docs/README.md
+  s_8f52bcdbd217d8::t_fec86020e709ad 1
+  s_8f52bcdbd217d8::t_12c0ad46e9d118 20,387,390,394-396,406-412
+  s_8f52bcdbd217d8::t_351b00f7cd4190 413
+docs/workflows.md
+  s_8f52bcdbd217d8::t_12c0ad46e9d118 89,92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ddc50421e6bf67162ef67d96a1dea48f50756ee4",
+  "prompts": {},
+  "sessions": {
+    "s_8f52bcdbd217d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0c7a1aeb-40ce-4ffb-b981-3129d3c79862",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
