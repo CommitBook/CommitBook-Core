@@ -114,6 +114,6 @@ jobs:
           if git diff --cached --quiet; then
             echo 'Formula unchanged; nothing to publish'
           else
-            git commit -m "Update CommitBook to ${RELEASE_TAG} to distribute the release"
+            git commit -m "Update CommitBook to ${RELEASE_TAG}"
             git push origin HEAD
           fi
