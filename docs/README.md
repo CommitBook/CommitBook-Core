@@ -39,12 +39,13 @@ commitbook start
 |---|---|
 | [AI Agent Dotfiles](use-cases/DotFiles-with-AI-Agents.md) | Auto-sync config for Claude, Cursor, Codex, Copilot and other AI agents |
 
-## Short command
+## Short commands
 
-`cobo` is installed alongside `commitbook` and accepts the same commands, for
-example `cobo sync` or `cobo status`. Schedulers always invoke `commitbook sync`;
-keep both executables installed together. Generate completions with
-`cobo completions <shell>` for the short name.
+`cobo` and `cbook` are installed alongside `commitbook` and accept the same
+commands, for example `cobo sync` or `cbook status`. Schedulers always invoke
+`commitbook sync`; keep the canonical executable installed alongside the aliases.
+Generate completions with `cobo completions <shell>` or
+`cbook completions <shell>` for the corresponding short name.
 
 ## Commands
 
@@ -376,7 +377,7 @@ mkdir -p ~/.local
 tar xzf "commitbook-${TARGET}.tar.gz" -C ~/.local
 ```
 
-Each tarball contains all four executables in `bin/`, including `cobo`,
+Each tarball contains all five executables in `bin/`, including `cobo` and `cbook`,
 and license materials in `share/licenses/commitbook/`. Add `~/.local/bin` to `PATH`.
 The binaries bundle OpenSSL and libgit2, so matching system versions of those
 libraries are not required. Linux still needs a compatible glibc/runtime for
@@ -390,7 +391,7 @@ macOS and Linux:
 brew install commitbook/tap/commitbook
 ```
 
-The formula installs all four desktop executables and their license notices.
+The formula installs all five desktop executables and their license notices.
 Installing does not start a scheduler: run `commitbook start` in each notes
 repository. See [workflow stages](workflows.md) for publishing setup and
 validation.
@@ -663,7 +664,7 @@ a token for GitHub API access; discovery returns HTTPS clone URLs.
 
 ## Release artifacts
 
-Desktop archives contain `bin/commitbook`, `bin/cobo`, `bin/commitbook-tui`,
+Desktop archives contain `bin/commitbook`, `bin/cobo`, `bin/cbook`, `bin/commitbook-tui`,
 and `bin/commitbook-web`, plus `share/licenses/commitbook/LICENSE` and
 `THIRD_PARTY_NOTICES.txt`. The installer defaults to `~/.local`; set
 `COMMITBOOK_INSTALL_PREFIX` to choose a different prefix. It verifies checksums

@@ -56,7 +56,7 @@ install_archive() {
     listing="$(tar tzf "$archive")"
     while IFS= read -r name; do
         case "$name" in
-            bin/commitbook|bin/cobo|bin/commitbook-tui|bin/commitbook-web|share/licenses/commitbook/LICENSE|share/licenses/commitbook/THIRD_PARTY_NOTICES.txt) ;;
+            bin/commitbook|bin/cobo|bin/cbook|bin/commitbook-tui|bin/commitbook-web|share/licenses/commitbook/LICENSE|share/licenses/commitbook/THIRD_PARTY_NOTICES.txt) ;;
             *) echo "Unexpected archive entry: $name" >&2; return 1 ;;
         esac
     done <<< "$listing"
@@ -66,14 +66,14 @@ install_archive() {
     fi
     mkdir -p "$staging"
     tar xzf "$archive" -C "$staging"
-    for name in commitbook cobo commitbook-tui commitbook-web; do
+    for name in commitbook cobo cbook commitbook-tui commitbook-web; do
         [ -f "$staging/bin/$name" ] && [ ! -L "$staging/bin/$name" ] || return 1
     done
     for name in LICENSE THIRD_PARTY_NOTICES.txt; do
         [ -f "$staging/share/licenses/commitbook/$name" ] && [ ! -L "$staging/share/licenses/commitbook/$name" ] || return 1
     done
     mkdir -p "$INSTALL_DIR" "$INSTALL_PREFIX/share/licenses/commitbook"
-    for name in commitbook cobo commitbook-tui commitbook-web; do
+    for name in commitbook cobo cbook commitbook-tui commitbook-web; do
         install -m 755 "$staging/bin/$name" "$INSTALL_DIR/$name"
     done
     for name in LICENSE THIRD_PARTY_NOTICES.txt; do

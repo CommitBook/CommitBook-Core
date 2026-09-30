@@ -32,7 +32,7 @@ See [workflow stages](../docs/workflows.md) for CI, release, and Homebrew valida
 ## Architecture and conventions
 
 - `commitbook-engine`: shared Git, config, identity, locking, sync, and review logic.
-- `commitbook-cli`: shared implementation for `commitbook` and `cobo`.
+- `commitbook-cli`: shared implementation for `commitbook`, `cobo`, and `cbook`.
 - `commitbook-tui` / `commitbook-web`: local dashboards using the engine.
 - `commitbook-client`: UniFFI SDK for app-hosted operations.
 

@@ -4,7 +4,7 @@
 
 | Surface | Launch status |
 |---|---|
-| CLI (`commitbook`, `cobo`), TUI, local web | macOS and Linux, arm64 and x86_64 artifacts |
+| CLI (`commitbook`, `cobo`, `cbook`), TUI, local web | macOS and Linux, arm64 and x86_64 artifacts |
 | Homebrew | Published to `CommitBook/homebrew-tap` by S3 (1.0.0 onward) |
 | Native SDK | Apple XCFramework, with Swift compile/link/runtime smoke test |
 | Android | Bindings/integration work exists; no supported packaged release yet |
@@ -19,7 +19,7 @@ part of preparation. Pre-launch breaking API changes have no migration promise.
 - Linux/macOS CI and Apple target checks; XCFramework Swift smoke test.
 - Locked dependency audit and full-history redacted secret scan.
 - Matching workspace version, release tag, and exact checked/tested commit.
-- All desktop executables including `cobo`; project and third-party license texts.
+- All desktop executables including `cobo` and `cbook`; project and third-party license texts.
 - Installer checksums/layout checks and release-tool fixture tests.
 
 Use `cargo install cargo-about --version 0.9.2 --features cli --locked` for license

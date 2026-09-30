@@ -72,14 +72,41 @@ class ReleaseTests(unittest.TestCase):
             result = subprocess.run(command, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / 'prefix/bin/cobo').is_file())
+            self.assertTrue((root / 'prefix/bin/cbook').is_file())
             self.assertTrue((root / 'prefix/share/licenses/commitbook/LICENSE').is_file())
             archive.write_bytes(archive.read_bytes() + b'corruption')
             result = subprocess.run(command, env=env, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Checksum mismatch', result.stderr)
-            (binaries / 'cobo').unlink()
-            with self.assertRaises(ValueError):
-                packager.package(binaries, licenses, root / 'incomplete.tar.gz')
+            for name in ('cobo', 'cbook'):
+                with self.subTest(missing_binary=name):
+                    binary = binaries / name
+                    contents = binary.read_bytes()
+                    binary.unlink()
+                    with self.assertRaises(ValueError):
+                        packager.package(binaries, licenses, root / 'incomplete.tar.gz')
+                    binary.write_bytes(contents)
+
+    def test_installer_rejects_archive_missing_cbook(self):
+        packager = load('package-desktop')
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / 'incomplete.tar.gz'
+            with tarfile.open(archive, 'w:gz') as tar:
+                for name in packager.BINARIES:
+                    if name != 'cbook':
+                        binary = root / name
+                        binary.write_text('#!/bin/sh\necho fixture\n')
+                        tar.add(binary, arcname=f'bin/{name}')
+                for name in packager.LICENSES:
+                    license_file = root / name
+                    license_file.write_text('fixture license text\n')
+                    tar.add(license_file, arcname=f'share/licenses/commitbook/{name}')
+            env = dict(os.environ, COMMITBOOK_INSTALL_PREFIX=str(root / 'prefix'))
+            command = ['bash', '-c', 'source "$1"; install_archive "$2/incomplete.tar.gz" "$2/unpacked"', 'fixture', str(ROOT / 'scripts/release/install.sh'), str(root)]
+            result = subprocess.run(command, env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((root / 'prefix/bin').exists())
 
     def test_piped_installer_runs_with_fixture_downloads(self):
         packager = load('package-desktop')
@@ -113,6 +140,7 @@ else:
                                     env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / 'installed/bin/cobo').exists())
+            self.assertTrue((root / 'installed/bin/cbook').exists())
             self.assertTrue((root / 'installed/share/licenses/commitbook/LICENSE').exists())
 
 
