@@ -1,0 +1,25 @@
+.github/workflows/S5-Build-XCFramework.yml
+  s_40f7510aeef510::t_b0ac1301430304 57
+.github/workflows/S1-Test-CI.yml
+  s_40f7510aeef510::t_b0ac1301430304 37,51,65,83,97,144,170,185
+.github/workflows/S2-Release-GitHub.yml
+  s_40f7510aeef510::t_b0ac1301430304 87
+Cargo.lock
+  s_40f7510aeef510::t_bd675c8d364df4 1669,1671,1793,1795,1797-1798,1857-1868,2224,2226,2247,2249,3087,4013,4015
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "29f8cb9b2ba3d4ff10e61b39b878104873f709a9",
+  "prompts": {},
+  "sessions": {
+    "s_40f7510aeef510": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0f6f0-c19b-7fa1-b104-7db405175308",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
