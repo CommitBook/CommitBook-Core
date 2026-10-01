@@ -1,0 +1,23 @@
+docs/README.md
+  s_8d689e9469c3fa::t_ac9a762624e0ad 527
+LICENSE
+  s_8d689e9469c3fa::t_ac9a762624e0ad 3
+Cargo.toml
+  s_8d689e9469c3fa::t_ac9a762624e0ad 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b311b5817426e080bd8bc8192b56a4bc9ff403d7",
+  "prompts": {},
+  "sessions": {
+    "s_8d689e9469c3fa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0f349-5b83-7681-974a-f8d7ec0f1fbd",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
