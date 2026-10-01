@@ -524,7 +524,7 @@ commitbook sync
 
 ## License
 
-MIT License - Copyright (c) 2026 ZAAI
+MIT License - Copyright (c) 2026 Manuel Gruber
 
 ## Inspect saving and synchronization
 
