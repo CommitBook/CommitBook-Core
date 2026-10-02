@@ -1,5 +1,5 @@
 [package]
-name = "commitbook-client"
+name = "commitbook-ffi"
 description = "Platform-agnostic UniFFI SDK exposing CommitBookEngineClient on top of commitbook-engine"
 version.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 authors.workspace = true
 
 [lib]
-name = "commitbook_client"
+name = "commitbook_ffi"
 crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]

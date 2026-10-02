@@ -94,7 +94,7 @@ Track that work upstream. The remaining items here only become actionable once t
 
 ## Reminders for the engine repo
 
-- [ ] Add `scripts/build-android-aar.sh` analogous to `scripts/build-xcframework.sh` (lives in `crates/commitbook-client/scripts/`).
+- [ ] Add `scripts/build-android-aar.sh` analogous to `scripts/build-xcframework.sh` (lives in `crates/commitbook-ffi/scripts/`).
 - [ ] Tag conventions match iOS: `0.5.1`, `0.6.0`, no `v` prefix.
 - [ ] Both artifacts (xcframework + AAR) attached to the same release tag, so `.core-version` in both app repos can pin to the same number.
 

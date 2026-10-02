@@ -304,10 +304,24 @@ crates/
   commitbook-cli/     # Command-line interface
   commitbook-tui/     # Terminal dashboard (ratatui)
   commitbook-web/     # Web dashboard (axum + htmx)
-  commitbook-client/  # iOS/Android FFI SDK (UniFFI)
+  commitbook-ffi/     # iOS/Android FFI SDK (UniFFI)
 ```
 
 All state is file-based (no database). The `.CommitBook/` directory is self-contained per repository.
+
+### Native SDK library rename
+
+The UniFFI crate is now `commitbook-ffi` (previously `commitbook-client`),
+with Rust library name `commitbook_ffi`. Update Cargo package selections and
+script paths accordingly. Native libraries are named `libcommitbook_ffi.a`,
+`libcommitbook_ffi.dylib` (macOS), or `libcommitbook_ffi.so` (Linux/Android).
+Replace old libraries and regenerate the matching language bindings together;
+do not mix bindings from one SDK build with libraries from another.
+
+The Apple artifact remains `CommitBookEngine.xcframework`, with C module
+`CommitBookEngineFFI` and generated source `CommitBookEngine.swift`. The Kotlin
+package remains `com.zaai.commitbook.engine.ffi`; its native library name is
+`commitbook_ffi`. This SDK is separate from the Homebrew desktop executables.
 
 ### Key Modules (commitbook-engine)
 

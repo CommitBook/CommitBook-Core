@@ -7,13 +7,13 @@
 #   1. A header/modulemap mismatch that still zips cleanly but fails to import.
 #   2. An async method that traps because no tokio runtime is installed (the
 #      UDL scaffolding polls futures on the caller's thread; see
-#      crates/commitbook-client/src/runtime.rs).
+#      crates/commitbook-ffi/src/runtime.rs).
 #
 # Requires: macOS with Xcode (swiftc), and a prior successful run of
-#   ./crates/commitbook-client/scripts/build-xcframework.sh
+#   ./crates/commitbook-ffi/scripts/build-xcframework.sh
 #
 # Usage:
-#   ./crates/commitbook-client/scripts/smoke-swift.sh
+#   ./crates/commitbook-ffi/scripts/smoke-swift.sh
 
 set -euo pipefail
 
@@ -21,7 +21,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
 FRAMEWORK_NAME="CommitBookEngine"
-LIB_NAME="commitbook_client"
+LIB_NAME="commitbook_ffi"
 XC="$REPO_ROOT/target/xcframework/${FRAMEWORK_NAME}.xcframework"
 SLICE="macos-arm64_x86_64"
 
