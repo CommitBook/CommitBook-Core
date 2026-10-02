@@ -1,6 +1,6 @@
 [package]
 name = "commitbook-ffi"
-description = "Platform-agnostic UniFFI SDK exposing CommitBookEngineClient on top of commitbook-engine"
+description = "Platform-agnostic UniFFI SDK exposing CommitBookEngineFfi on top of commitbook-engine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

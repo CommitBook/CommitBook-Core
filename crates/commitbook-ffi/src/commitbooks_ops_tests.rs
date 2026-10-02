@@ -708,7 +708,7 @@ fn existing_clone_summary_uses_config_name_remote_identity_and_device_auth() {
     request.name = "Ignored input name".to_string();
     request.mode = "pat".to_string();
     let client =
-        crate::CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
+        crate::CommitBookEngineFfi::new(root.path().to_string_lossy().into_owned(), None, None)
             .unwrap();
     let summary = client
         .register_local_commitbook("owner__notes".into())

@@ -55,7 +55,7 @@ final class SmokeCredentials: GitCredentialCallback {
                                      errorMessage: "No network credential expected in smoke test")
     }
 }
-let client = try! CommitBookEngineClient(workspacesRoot: tmp,
+let client = try! CommitBookEngineFfi(workspacesRoot: tmp,
                                          conflictResolver: nil,
                                          credentialCallback: SmokeCredentials())
 

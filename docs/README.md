@@ -309,7 +309,7 @@ crates/
 
 All state is file-based (no database). The `.CommitBook/` directory is self-contained per repository.
 
-### Native SDK library rename
+### Native SDK rename
 
 The UniFFI crate is now `commitbook-ffi` (previously `commitbook-client`),
 with Rust library name `commitbook_ffi`. Update Cargo package selections and
@@ -317,6 +317,11 @@ script paths accordingly. Native libraries are named `libcommitbook_ffi.a`,
 `libcommitbook_ffi.dylib` (macOS), or `libcommitbook_ffi.so` (Linux/Android).
 Replace old libraries and regenerate the matching language bindings together;
 do not mix bindings from one SDK build with libraries from another.
+
+The public Rust/Swift/Kotlin API object is now `CommitBookEngineFfi`
+(previously `CommitBookEngineClient`). Replace the old type name in consuming
+apps and regenerate bindings from the new SDK library. Constructors, methods,
+callbacks, and errors are unchanged. No compatibility aliases are provided.
 
 The Apple artifact remains `CommitBookEngine.xcframework`, with C module
 `CommitBookEngineFFI` and generated source `CommitBookEngine.swift`. The Kotlin

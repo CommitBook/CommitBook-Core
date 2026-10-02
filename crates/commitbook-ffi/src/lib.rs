@@ -1,4 +1,4 @@
-//! `commitbook-ffi`, UniFFI SDK exposing `CommitBookEngineClient` to
+//! `commitbook-ffi`, UniFFI SDK exposing `CommitBookEngineFfi` to
 //! native iOS/macOS/Android apps. Wraps `commitbook-engine` orchestration.
 //!
 //! UDL spec: `crates/commitbook-ffi/src/commitbook.udl`.
