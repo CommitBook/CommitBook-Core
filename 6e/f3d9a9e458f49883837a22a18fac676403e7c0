@@ -1,0 +1,44 @@
+docs/README.md
+  s_dcb147397a5977::t_e8ddab5434b644 313-324
+  s_dcb147397a5977::t_8504ae9e70590a 307
+  s_dcb147397a5977::t_111611edda505a 312,325
+.claude/CLAUDE.md
+  s_dcb147397a5977::t_59c65b3473ded4 24
+crates/commitbook-ffi/Cargo.toml
+  s_dcb147397a5977::t_e8ddab5434b644 1-2,4-44
+Cargo.toml
+  s_dcb147397a5977::t_e8ddab5434b644 7
+crates/commitbook-ffi/uniffi.toml
+  s_dcb147397a5977::t_e8ddab5434b644 1-11
+crates/commitbook-ffi/scripts/smoke-swift.sh
+  s_dcb147397a5977::t_e8ddab5434b644 1-57,59-138
+.github/CONTRIBUTING.md
+  s_dcb147397a5977::t_e8ddab5434b644 37
+crates/commitbook-ffi/scripts/build-xcframework.sh
+  s_dcb147397a5977::t_e8ddab5434b644 1-165
+crates/commitbook-ffi/src/lib.rs
+  s_dcb147397a5977::t_e8ddab5434b644 2-38
+  s_dcb147397a5977::t_0cd5f9e5187e46 1
+crates/commitbook-ffi/src/auth.rs
+  s_dcb147397a5977::t_e8ddab5434b644 1-120
+Cargo.lock
+  s_dcb147397a5977::t_7f27f5665e9055 562,568-570,574,580-583,587,593,597-598,603,605
+docs/handoff/android-app-todo.md
+  s_dcb147397a5977::t_dbdd7d1a09151c 97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6ef3d9a9e458f49883837a22a18fac676403e7c0",
+  "prompts": {},
+  "sessions": {
+    "s_dcb147397a5977": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0fc96-59e0-7953-86e9-c57bbe2934fe",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
