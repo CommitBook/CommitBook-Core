@@ -54,7 +54,7 @@ jobs:
         id: commit
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # stable
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # stable
         with:
           toolchain: stable
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
@@ -70,13 +70,13 @@ jobs:
       # Single source of truth: the script builds every slice, generates the
       # UniFFI bindings, assembles the xcframework, and emits the zip + sha256.
       - name: Build XCFramework
-        run: ./crates/commitbook-client/scripts/build-xcframework.sh
+        run: ./crates/commitbook-ffi/scripts/build-xcframework.sh
 
       # Compile, link, and run a Swift consumer against the framework. Catches
       # a header/modulemap mismatch or an async method that traps, neither of
       # which fails the build itself, so never publish without this passing.
       - name: Swift smoke test
-        run: ./crates/commitbook-client/scripts/smoke-swift.sh
+        run: ./crates/commitbook-ffi/scripts/smoke-swift.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
