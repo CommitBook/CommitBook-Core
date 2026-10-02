@@ -1,0 +1,37 @@
+crates/commitbook-ffi/Cargo.toml
+  s_dcb147397a5977::t_68b9198b102b5c 3
+crates/commitbook-ffi/scripts/smoke-swift.sh
+  s_dcb147397a5977::t_d0937953beacc4 58
+crates/commitbook-ffi/src/client.rs
+  s_dcb147397a5977::t_179b7e5f40db48 11,17
+crates/commitbook-ffi/src/client_tests.rs
+  s_dcb147397a5977::t_dcf6a17b751386 19,65,74,119,123,215,241
+crates/commitbook-ffi/src/commitbook.udl
+  s_dcb147397a5977::t_972e9525bb601a 175
+crates/commitbook-ffi/src/commitbooks_ops_tests.rs
+  s_dcb147397a5977::t_992ffe75703157 711
+crates/commitbook-ffi/src/lib.rs
+  s_dcb147397a5977::t_18e3b3d5858427 1
+docs/README.md
+  s_dcb147397a5977::t_25fca5e2b7e3df 312,321-325
+docs/handoff/android-app-todo.md
+  s_dcb147397a5977::t_2e462e5fbcf1a2 45-46
+docs/handoff/apple-app-todo.md
+  s_dcb147397a5977::t_61bd798b54be06 27,54-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8dd24b4f30858d206d6e939f3bce4d6f2608fc40",
+  "prompts": {},
+  "sessions": {
+    "s_dcb147397a5977": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0fc96-59e0-7953-86e9-c57bbe2934fe",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
