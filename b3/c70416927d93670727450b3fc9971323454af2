@@ -1,0 +1,33 @@
+.github/workflows/S2-Release-GitHub.yml
+  s_40f7510aeef510::t_21588b3ec6c2ef 87
+.github/workflows/S5-Build-XCFramework.yml
+  s_40f7510aeef510::t_21588b3ec6c2ef 57
+  s_dcb147397a5977::t_e8ddab5434b644 73,79
+.github/workflows/S1-Test-CI.yml
+  s_dcb147397a5977::t_e8ddab5434b644 118-119
+  s_40f7510aeef510::t_21588b3ec6c2ef 37,51,65,83,97,144,170,185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b3c70416927d93670727450b3fc9971323454af2",
+  "prompts": {},
+  "sessions": {
+    "s_40f7510aeef510": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0f6f0-c19b-7fa1-b104-7db405175308",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_dcb147397a5977": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0fc96-59e0-7953-86e9-c57bbe2934fe",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
