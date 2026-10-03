@@ -1,0 +1,31 @@
+crates/commitbook-ffi/src/documents.rs
+  s_0e65d0749ec165::t_b31cfb39404dd9 73-75
+crates/commitbook-ffi/src/documents_tests.rs
+  s_0e65d0749ec165::t_230a794f96983b 108-124,133-162
+  s_0e65d0749ec165::t_aa45275fe92829 125-132
+  s_e530d932e69ee0::t_180f1f1f7febdc 107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "272916187d3fa7400752cfbcf80ec413354c1a31",
+  "prompts": {},
+  "sessions": {
+    "s_0e65d0749ec165": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10316-127c-7fe3-9bb1-531dad41e514",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    },
+    "s_e530d932e69ee0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10306-927c-7b10-a5db-e8643c6b5611",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
