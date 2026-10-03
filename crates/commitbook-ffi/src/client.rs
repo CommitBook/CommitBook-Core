@@ -8,13 +8,13 @@ use std::sync::Arc;
 use crate::errors::{CommitBookError, Result};
 use crate::types::*;
 
-pub struct CommitBookEngineClient {
+pub struct CommitBookEngineFfi {
     pub(crate) workspaces_root: PathBuf,
     pub(crate) conflict_resolver: Option<Arc<dyn ConflictResolverCallback>>,
     pub(crate) credential_callback: Option<Arc<dyn GitCredentialCallback>>,
 }
 
-impl CommitBookEngineClient {
+impl CommitBookEngineFfi {
     /// UniFFI-exposed constructor. UniFFI wraps the return in `Arc<>` itself.
     pub fn new(
         workspaces_root: String,

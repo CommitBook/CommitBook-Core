@@ -13,7 +13,7 @@ TARGETS = {
     'linux_arm': 'aarch64-unknown-linux-gnu',
     'linux_intel': 'x86_64-unknown-linux-gnu',
 }
-BINARIES = ('commitbook', 'cobo', 'commitbook-tui', 'commitbook-web')
+BINARIES = ('commitbook', 'cobo', 'cbook', 'commitbook-tui', 'commitbook-web')
 LICENSES = ('LICENSE', 'THIRD_PARTY_NOTICES.txt')
 BASE_URL = 'https://github.com/CommitBook/CommitBook-Core/releases/download'
 

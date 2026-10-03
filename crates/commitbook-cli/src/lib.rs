@@ -158,15 +158,15 @@ pub async fn entry() {
 }
 
 fn executable_name() -> &'static str {
-    if std::env::args_os()
+    match std::env::args_os()
         .next()
         .as_deref()
         .and_then(|arg| std::path::Path::new(arg).file_stem())
-        .is_some_and(|name| name == "cobo")
+        .and_then(|name| name.to_str())
     {
-        "cobo"
-    } else {
-        "commitbook"
+        Some("cobo") => "cobo",
+        Some("cbook") => "cbook",
+        _ => "commitbook",
     }
 }
 

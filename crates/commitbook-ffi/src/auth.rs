@@ -7,7 +7,7 @@ use crate::errors::{CommitBookError, Result};
 use crate::types::RepoInfo;
 
 const GITHUB_API: &str = "https://api.github.com";
-const USER_AGENT: &str = "commitbook-client/0.5";
+const USER_AGENT: &str = "commitbook-ffi/0.5";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 

@@ -8,3 +8,4 @@ module_name = "CommitBookEngine"
 
 [bindings.kotlin]
 package_name = "com.zaai.commitbook.engine.ffi"
+cdylib_name = "commitbook_ffi"

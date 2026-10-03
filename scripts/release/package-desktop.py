@@ -4,7 +4,7 @@ import argparse
 import tarfile
 from pathlib import Path
 
-BINARIES = ('commitbook', 'cobo', 'commitbook-tui', 'commitbook-web')
+BINARIES = ('commitbook', 'cobo', 'cbook', 'commitbook-tui', 'commitbook-web')
 LICENSES = ('LICENSE', 'THIRD_PARTY_NOTICES.txt')
 
 

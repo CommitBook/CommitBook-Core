@@ -105,6 +105,62 @@ fn save_reports_repository_lock_contention() {
 }
 
 #[test]
+fn read_refuses_in_flight_sync_and_retries_with_matching_content_and_revision() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (root, clone) = managed_clone();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (finish_tx, finish_rx) = mpsc::channel();
+    let sync_clone = clone.clone();
+    let sync = std::thread::spawn(move || {
+        let _lock = RepoLock::acquire(&sync_clone).unwrap();
+        // Pause a background update between changing the file and committing:
+        // an unlocked reader would pair the new content with the old revision.
+        std::fs::write(sync_clone.join("base.md"), "synced note\n").unwrap();
+        ready_tx.send(()).unwrap();
+        finish_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let repo = GitRepo::open(&sync_clone).unwrap();
+        repo.stage_all().unwrap();
+        repo.commit("synced note").unwrap();
+        git2::Repository::open(&sync_clone)
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+            .unwrap()
+            .to_string()
+    });
+
+    ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let during_sync = read_document(root.path(), "a1b2c3d4", "base.md");
+    // Let the writer finish before asserting, so a failing test cannot leave
+    // its worker waiting for the reader.
+    finish_tx.send(()).unwrap();
+    let synced_revision = sync.join().unwrap();
+    let error = during_sync.expect_err("must not read a partially applied sync");
+    assert!(matches!(error, CommitBookError::MergeError { .. }));
+    assert!(error.to_string().contains("Repository busy"), "{error}");
+
+    let fresh = read_document(root.path(), "a1b2c3d4", "base.md").unwrap();
+    assert_eq!(fresh.content, "synced note\n");
+    assert_eq!(fresh.revision.as_deref(), Some(synced_revision.as_str()));
+    // A successful read must release its lock so the guarded save can proceed.
+    save_document(
+        root.path(),
+        "a1b2c3d4",
+        "base.md",
+        "synced note\nlocal edit\n",
+        fresh.revision.as_deref(),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(clone.join("base.md")).unwrap(),
+        "synced note\nlocal edit\n"
+    );
+}
+
+#[test]
 fn save_refuses_to_commit_during_merge_resolution() {
     let (root, clone) = managed_clone();
     let repository = git2::Repository::open(&clone).unwrap();

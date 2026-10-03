@@ -16,7 +16,7 @@ use super::*;
 fn async_ffi_methods_run_without_ambient_tokio_runtime() {
     let tmp = tempfile::tempdir().unwrap();
     let client =
-        CommitBookEngineClient::new(tmp.path().to_string_lossy().into_owned(), None, None).unwrap();
+        CommitBookEngineFfi::new(tmp.path().to_string_lossy().into_owned(), None, None).unwrap();
 
     // A bogus id resolves to NotFound before any network call is attempted.
     // Pre-fix this line panicked instead of returning.
@@ -62,8 +62,7 @@ fn delete_never_follows_workspace_symlink() {
     crate::test_support::set_identity(outside.path());
     symlink(outside.path(), root.path().join("owner__repo")).unwrap();
     let client =
-        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
-            .unwrap();
+        CommitBookEngineFfi::new(root.path().to_string_lossy().into_owned(), None, None).unwrap();
 
     let error = client
         .delete_commitbook("a1b2c3d4".to_string(), false)
@@ -72,7 +71,7 @@ fn delete_never_follows_workspace_symlink() {
     assert!(outside.path().join(".CommitBook/config.toml").exists());
 }
 
-fn deletion_fixture() -> (tempfile::TempDir, CommitBookEngineClient, PathBuf) {
+fn deletion_fixture() -> (tempfile::TempDir, CommitBookEngineFfi, PathBuf) {
     let root = tempfile::tempdir().unwrap();
     let clone = root.path().join("owner__repo");
     let repo = git2::Repository::init(&clone).unwrap();
@@ -117,12 +116,11 @@ fn deletion_fixture() -> (tempfile::TempDir, CommitBookEngineClient, PathBuf) {
         "published fixture must start clean"
     );
     let client =
-        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
-            .unwrap();
+        CommitBookEngineFfi::new(root.path().to_string_lossy().into_owned(), None, None).unwrap();
     (root, client, clone)
 }
 
-fn assert_delete_refused(client: &CommitBookEngineClient, clone: &std::path::Path, reason: &str) {
+fn assert_delete_refused(client: &CommitBookEngineFfi, clone: &std::path::Path, reason: &str) {
     let error = client
         .delete_commitbook("a1b2c3d4".to_string(), false)
         .expect_err("unsaved work must prevent deletion");
@@ -214,9 +212,7 @@ fn constructor_rejects_symlink_workspace_root() {
     let outside = tempfile::tempdir().unwrap();
     let linked = parent.path().join("linked-root");
     symlink(outside.path(), &linked).unwrap();
-    assert!(
-        CommitBookEngineClient::new(linked.to_string_lossy().into_owned(), None, None).is_err()
-    );
+    assert!(CommitBookEngineFfi::new(linked.to_string_lossy().into_owned(), None, None).is_err());
 }
 
 #[test]
@@ -242,8 +238,7 @@ fn a_broken_clone_is_listed_separately_and_does_not_hide_the_others() {
     .unwrap();
 
     let client =
-        CommitBookEngineClient::new(root.path().to_string_lossy().into_owned(), None, None)
-            .unwrap();
+        CommitBookEngineFfi::new(root.path().to_string_lossy().into_owned(), None, None).unwrap();
     let listed: Vec<String> = client
         .list_commitbooks()
         .unwrap()

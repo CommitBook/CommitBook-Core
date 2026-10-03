@@ -32,9 +32,9 @@ See [workflow stages](../docs/workflows.md) for CI, release, and Homebrew valida
 ## Architecture and conventions
 
 - `commitbook-engine`: shared Git, config, identity, locking, sync, and review logic.
-- `commitbook-cli`: shared implementation for `commitbook` and `cobo`.
+- `commitbook-cli`: shared implementation for `commitbook`, `cobo`, and `cbook`.
 - `commitbook-tui` / `commitbook-web`: local dashboards using the engine.
-- `commitbook-client`: UniFFI SDK for app-hosted operations.
+- `commitbook-ffi`: UniFFI SDK for app-hosted operations.
 
 State is TOML plus Git; there is no database or global registry. Shared settings
 live in `.CommitBook/config.toml`. Device-local identity, credentials, proposals,

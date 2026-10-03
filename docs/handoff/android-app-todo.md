@@ -42,8 +42,8 @@ Track that work upstream. The remaining items here only become actionable once t
 
 ## 3. Implement `RealEngine.kt` (mirror of Apple's RealEngine.swift)
 
-- [ ] New file `app/src/main/java/com/commitbook/app/data/engine/RealEngine.kt`. Wraps the UniFFI-generated `CommitBookEngineClient`.
-- [ ] Construct `CommitBookEngineClient(workspacesRoot, conflictResolver, credentialCallback)` using:
+- [ ] New file `app/src/main/java/com/commitbook/app/data/engine/RealEngine.kt`. Wraps the UniFFI-generated `CommitBookEngineFfi`.
+- [ ] Construct `CommitBookEngineFfi(workspacesRoot, conflictResolver, credentialCallback)` using:
   - `workspacesRoot` = `context.filesDir / "commitbook" / "repos"`.
   - Create both directories on first run.
 - [ ] Implement `ConflictResolverCallback` in Kotlin. Its synchronous entry point starts the app's async HTTPS request and returns immediately; complete the supplied continuation with explicit content, deletion, or an error within 120 seconds. It never calls a desktop app. Pass `null` until configured and surface the engine's actionable error if an `AiResolve` sync encounters a conflict without it.
@@ -94,7 +94,7 @@ Track that work upstream. The remaining items here only become actionable once t
 
 ## Reminders for the engine repo
 
-- [ ] Add `scripts/build-android-aar.sh` analogous to `scripts/build-xcframework.sh` (lives in `crates/commitbook-client/scripts/`).
+- [ ] Add `scripts/build-android-aar.sh` analogous to `scripts/build-xcframework.sh` (lives in `crates/commitbook-ffi/scripts/`).
 - [ ] Tag conventions match iOS: `0.5.1`, `0.6.0`, no `v` prefix.
 - [ ] Both artifacts (xcframework + AAR) attached to the same release tag, so `.core-version` in both app repos can pin to the same number.
 

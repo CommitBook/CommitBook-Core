@@ -172,7 +172,7 @@ dictionary RepoInfo {
     boolean is_private;
 };
 
-interface CommitBookEngineClient {
+interface CommitBookEngineFfi {
     [Throws=CommitBookError]
     constructor(string workspaces_root, ConflictResolverCallback? conflict_resolver, GitCredentialCallback? credential_callback);
 
