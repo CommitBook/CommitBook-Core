@@ -70,6 +70,9 @@ pub fn read_document(
     path: &str,
 ) -> Result<DocumentContent> {
     let commitbook = crate::paths::find_managed_commitbook(workspaces_root, commitbook_local_id)?;
+    // Keep content and revision in one snapshot relative to syncs and saves.
+    let _lock = RepoLock::acquire(&commitbook.local_path)
+        .map_err(|error| CommitBookError::merge(format!("Repository busy: {error}")))?;
     let abs = crate::paths::safe_document_path(&commitbook.local_path, path, false)?;
     if !abs.exists() {
         return Err(CommitBookError::not_found(format!(
