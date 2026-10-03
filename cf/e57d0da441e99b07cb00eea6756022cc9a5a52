@@ -1,0 +1,22 @@
+docs/verification.md
+  s_2cbcf88ad272e7::t_43926df5e39f9e 3-12,19-27,71-74
+  s_2cbcf88ad272e7::t_0354905dbd8d6b 13-18
+docs/release-readiness.md
+  s_2cbcf88ad272e7::t_43926df5e39f9e 52-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cfe57d0da441e99b07cb00eea6756022cc9a5a52",
+  "prompts": {},
+  "sessions": {
+    "s_2cbcf88ad272e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1030c-e8d6-7ad3-887d-e1694cf8c92c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
