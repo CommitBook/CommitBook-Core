@@ -21,7 +21,7 @@ crates/
   commitbook-cli/      # Shared CLI (commitbook and cobo)
   commitbook-tui/      # Terminal dashboard (commitbook-tui)
   commitbook-web/      # Web dashboard (commitbook-web)
-  commitbook-client/   # Mobile FFI SDK (UniFFI)
+  commitbook-ffi/      # Mobile FFI SDK (UniFFI)
 ```
 
 All UI crates depend on `commitbook-engine`. No database: all state is file-based in `.CommitBook/`.

@@ -24,7 +24,7 @@ Work needed in [`CommitBook/CommitBook-Apple`](https://github.com/CommitBook/Com
 
 - [ ] In `Packages/CommitBookAppleCore/Package.swift`, change the binary target name from `CommitBookCoreFFI` to `CommitBookEngineFFI` and the path to `Binaries/CommitBookEngine.xcframework`.
 - [ ] Update the conditional that decides whether to add the binary target, should still gate on `Binaries/CommitBookEngine.xcframework` existing locally.
-- [ ] Keep the copied `Generated/CommitBookEngine.swift` under the existing `CommitBookAppleCore` source target (and gitignore it if generated artifacts are not committed); that source imports the binary target's C module and provides `CommitBookEngineClient`.
+- [ ] Keep the copied `Generated/CommitBookEngine.swift` under the existing `CommitBookAppleCore` source target (and gitignore it if generated artifacts are not committed); that source imports the binary target's C module and provides `CommitBookEngineFfi`.
 - [ ] Run `swift build` from `Packages/CommitBookAppleCore` to confirm the package compiles with the binary present.
 
 ## 3. Rename Swift types: `Workspace*` → `CommitBook*`
@@ -51,8 +51,8 @@ The engine FFI is now CommitBook-native. The app's `WorkspaceInput` / `Workspace
 
 ## 4. Implement `RealEngine.swift` against the new FFI
 
-- [ ] Replace the body of every method in `RealEngine.swift` with a call into the UniFFI-generated `CommitBookEngineClient`. Most methods are thin pass-throughs.
-- [ ] `RealEngine.makeDefault()` should construct `CommitBookEngineClient(workspacesRoot:, conflictResolver:, credentialCallback:)` with paths under the app's `Application Support` directory:
+- [ ] Replace the body of every method in `RealEngine.swift` with a call into the UniFFI-generated `CommitBookEngineFfi`. Most methods are thin pass-throughs.
+- [ ] `RealEngine.makeDefault()` should construct `CommitBookEngineFfi(workspacesRoot:, conflictResolver:, credentialCallback:)` with paths under the app's `Application Support` directory:
   - `workspacesRoot` → `<AppSupport>/CommitBook/repos/`
   - Create both directories if missing.
 - [ ] Implement `ConflictResolverCallback` in the app. Its synchronous entry point receives structured conflict sides plus a continuation: start the app's async HTTPS request, return immediately, then call `continuation.complete(...)` with explicit content, deletion, or an error within 120 seconds. It does not call a CommitBook desktop app. Pass `nil` until an AI service is configured; conflict-free `aiResolve` syncs still work, while a conflict returns an actionable configuration error and remains available for manual review.

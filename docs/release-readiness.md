@@ -4,7 +4,7 @@
 
 | Surface | Launch status |
 |---|---|
-| CLI (`commitbook`, `cobo`), TUI, local web | macOS and Linux, arm64 and x86_64 artifacts |
+| CLI (`commitbook`, `cobo`, `cbook`), TUI, local web | macOS and Linux, arm64 and x86_64 artifacts |
 | Homebrew | Published to `CommitBook/homebrew-tap` by S3 (1.0.0 onward) |
 | Native SDK | Apple XCFramework, with Swift compile/link/runtime smoke test |
 | Android | Bindings/integration work exists; no supported packaged release yet |
@@ -19,7 +19,7 @@ part of preparation. Pre-launch breaking API changes have no migration promise.
 - Linux/macOS CI and Apple target checks; XCFramework Swift smoke test.
 - Locked dependency audit and full-history redacted secret scan.
 - Matching workspace version, release tag, and exact checked/tested commit.
-- All desktop executables including `cobo`; project and third-party license texts.
+- All desktop executables including `cobo` and `cbook`; project and third-party license texts.
 - Installer checksums/layout checks and release-tool fixture tests.
 
 Use `cargo install cargo-about --version 0.9.2 --features cli --locked` for license
@@ -48,6 +48,21 @@ push protection, branch protection, and release-environment ref restrictions
 have been enabled. Hosted PR checks, the published 1.0.0 and 1.0.1 releases,
 and a live Homebrew installation have passed. The authenticated Git flow
 through the real iOS app is still unverified; no release so far has checked it.
+
+## 1.2.0 release decision
+
+Release 1.2.0 covers all four desktop targets, Homebrew, and the Apple
+XCFramework. Android packaging and crates.io publication remain deferred.
+The native SDK rename is an intentional pre-launch breaking change: consumers
+must use `commitbook-ffi` / `commitbook_ffi` and `CommitBookEngineFfi`, replacing
+native libraries and regenerating bindings together. No compatibility aliases
+are provided; see the migration guidance in [the user guide](README.md#native-sdk-rename).
+
+For 1.2.0, the maintainer accepts real-iOS authenticated Git as an explicitly
+unverified limitation, not a publication gate. The five-slice XCFramework build
+and Swift compile/link/runtime smoke test remain required. That smoke test does
+not establish authenticated Git behavior in the real app. A disposable-remote
+test in the Apple app remains follow-up work before claiming that coverage.
 
 See [workflow stages and Homebrew setup](workflows.md) for S1/S2/S3 dispatch
 commands, required credentials, coverage artifacts, and publication checks.

@@ -12,15 +12,15 @@
 #     x86_64-apple-ios, aarch64-apple-darwin, x86_64-apple-darwin
 #
 # Run from anywhere:
-#   ./crates/commitbook-client/scripts/build-xcframework.sh
+#   ./crates/commitbook-ffi/scripts/build-xcframework.sh
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
-CRATE="commitbook-client"
-LIB_NAME="commitbook_client"
+CRATE="commitbook-ffi"
+LIB_NAME="commitbook_ffi"
 FRAMEWORK_NAME="CommitBookEngine"
 # The Swift module name comes from `module_name` in uniffi.toml and is baked
 # into the generated .swift/.h/.modulemap basenames; it is not set here.

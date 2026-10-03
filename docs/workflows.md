@@ -78,7 +78,7 @@ it does not build or publish this Core artifact.
   layout and license files, then installs through the formula's public URL on a
   native macOS runner. Private or incomplete releases cannot pass this test.
 - Formula validation includes Ruby syntax, Homebrew style/audit, installation,
-  and `brew test`: all four binaries must report the release version and both
+  and `brew test`: all five binaries must report the release version and both
   license files must be installed. Only the native macOS binary is executed;
   other architectures receive checksum and archive-layout checks.
 - Only the verified formula artifact reaches the publish job. Publication is
@@ -92,7 +92,7 @@ Users install with:
 brew install commitbook/tap/commitbook
 ```
 
-This installs `commitbook`, `cobo`, `commitbook-tui`, `commitbook-web`, and the
+This installs `commitbook`, `cobo`, `cbook`, `commitbook-tui`, `commitbook-web`, and the
 license notices. No service or scheduled sync is started by installation.
 
 ## Local validation

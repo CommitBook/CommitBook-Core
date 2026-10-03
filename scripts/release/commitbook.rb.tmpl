@@ -26,13 +26,13 @@ class Commitbook < Formula
   end
 
   def install
-    bin.install "bin/commitbook", "bin/cobo", "bin/commitbook-tui", "bin/commitbook-web"
+    bin.install "bin/commitbook", "bin/cobo", "bin/cbook", "bin/commitbook-tui", "bin/commitbook-web"
     (share/"licenses/commitbook").install "share/licenses/commitbook/LICENSE",
                                           "share/licenses/commitbook/THIRD_PARTY_NOTICES.txt"
   end
 
   test do
-    %w[commitbook cobo commitbook-tui commitbook-web].each do |executable|
+    %w[commitbook cobo cbook commitbook-tui commitbook-web].each do |executable|
       assert_match version.to_s, shell_output("#{bin}/#{executable} --version")
     end
     assert_path_exists share/"licenses/commitbook/LICENSE"

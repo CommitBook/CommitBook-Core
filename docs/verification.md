@@ -1,5 +1,30 @@
 # Verification
 
+## 1.2.0 preparation
+
+The code candidate at `2729161` passed all 14 hosted PR checks:
+[S1 CI](https://github.com/CommitBook/CommitBook-Core/actions/runs/37147527145)
+and [Security Audit](https://github.com/CommitBook/CommitBook-Core/actions/runs/37147527199).
+This includes the `cbook` alias, FFI crate/interface renames, older-release
+installer compatibility, and locked SDK document reads. Publication still
+requires checks and artifacts from the exact merged release commit; these
+candidate results do not constitute published-release verification.
+
+Local preparation checks at `2729161` with the release documentation changes
+passed on 2026-10-03: 640 Rust tests, 11 release-tool tests, formatting,
+warning-free Clippy, Rust 1.91 compatibility, workflow and shell syntax checks,
+and dependency audit. The pinned redacted secret scanner found no leaks across
+1,762 available commits. That result is bounded by the scanned refs and rules.
+
+All desktop archives must contain five executables (`commitbook`, `cobo`,
+`cbook`, `commitbook-tui`, `commitbook-web`) and both license files. The Apple
+release must include the XCFramework ZIP and its checksum, with regenerated
+bindings for `CommitBookEngineFfi` and a passing Swift smoke test.
+
+The maintainer explicitly accepts real-iOS authenticated Git as unverified for
+1.2.0. The framework smoke test is required but is not a substitute for that
+real-app test. Android packaging and crates.io remain outside this release.
+
 ## Hosted releases
 
 Checked against the hosted workflow runs, the release assets, and the
@@ -43,8 +68,10 @@ release. S3 installs and tests the formula on macOS; the Linux archives get
 only checksum and layout checks.
 
 The Swift smoke test constructs a credential callback, but does not perform an
-authenticated Git operation through the real iOS app; validate that flow with
-a disposable remote before release.
+authenticated Git operation through the real iOS app. For 1.2.0 this is an
+accepted, documented limitation rather than a publication gate. Validate that
+flow with a disposable remote before claiming real-app authenticated Git
+coverage; see the [1.2.0 release decision](release-readiness.md#120-release-decision).
 
 The repository is public. Private vulnerability reporting, secret scanning,
 push protection, `main` protection, and release-environment ref restrictions
