@@ -1,0 +1,21 @@
+scripts/release/test_release.py
+  s_0e65d0749ec165::t_6dc23265dc4f6e 71,106-111,114-118,129-137,146,148,154-155,159-162
+scripts/release/install.sh
+  s_0e65d0749ec165::t_6dc23265dc4f6e 53-63,79,86,151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd821de968a1001f23a893d362a467fa3d2a3e7d",
+  "prompts": {},
+  "sessions": {
+    "s_0e65d0749ec165": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10316-127c-7fe3-9bb1-531dad41e514",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
