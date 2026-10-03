@@ -49,6 +49,21 @@ have been enabled. Hosted PR checks, the published 1.0.0 and 1.0.1 releases,
 and a live Homebrew installation have passed. The authenticated Git flow
 through the real iOS app is still unverified; no release so far has checked it.
 
+## 1.2.0 release decision
+
+Release 1.2.0 covers all four desktop targets, Homebrew, and the Apple
+XCFramework. Android packaging and crates.io publication remain deferred.
+The native SDK rename is an intentional pre-launch breaking change: consumers
+must use `commitbook-ffi` / `commitbook_ffi` and `CommitBookEngineFfi`, replacing
+native libraries and regenerating bindings together. No compatibility aliases
+are provided; see the migration guidance in [the user guide](README.md#native-sdk-rename).
+
+For 1.2.0, the maintainer accepts real-iOS authenticated Git as an explicitly
+unverified limitation, not a publication gate. The five-slice XCFramework build
+and Swift compile/link/runtime smoke test remain required. That smoke test does
+not establish authenticated Git behavior in the real app. A disposable-remote
+test in the Apple app remains follow-up work before claiming that coverage.
+
 See [workflow stages and Homebrew setup](workflows.md) for S1/S2/S3 dispatch
 commands, required credentials, coverage artifacts, and publication checks.
 
