@@ -68,7 +68,7 @@ class ReleaseTests(unittest.TestCase):
             sums = root / 'SHA256SUMS'
             sums.write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + '  fixture.tar.gz\n')
             env = dict(os.environ, COMMITBOOK_INSTALL_PREFIX=str(root / 'prefix'))
-            command = ['bash', '-c', 'source "$1"; verify_checksum "$2" fixture.tar.gz "$2/SHA256SUMS"; install_archive "$2/fixture.tar.gz" "$2/unpacked"', 'fixture', str(ROOT / 'scripts/release/install.sh'), str(root)]
+            command = ['bash', '-c', 'source "$1"; verify_checksum "$2" fixture.tar.gz "$2/SHA256SUMS"; install_archive "$2/fixture.tar.gz" "$2/unpacked" 1.2.0', 'fixture', str(ROOT / 'scripts/release/install.sh'), str(root)]
             result = subprocess.run(command, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / 'prefix/bin/cobo').is_file())
@@ -103,12 +103,19 @@ class ReleaseTests(unittest.TestCase):
                     license_file.write_text('fixture license text\n')
                     tar.add(license_file, arcname=f'share/licenses/commitbook/{name}')
             env = dict(os.environ, COMMITBOOK_INSTALL_PREFIX=str(root / 'prefix'))
-            command = ['bash', '-c', 'source "$1"; install_archive "$2/incomplete.tar.gz" "$2/unpacked"', 'fixture', str(ROOT / 'scripts/release/install.sh'), str(root)]
-            result = subprocess.run(command, env=env, capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse((root / 'prefix/bin').exists())
+            command = ['bash', '-c', 'source "$1"; install_archive "$2/incomplete.tar.gz" "$2/unpacked" "$3"', 'fixture', str(ROOT / 'scripts/release/install.sh'), str(root)]
+            for tag in ('1.2.0', '1.10.0', '2.0.0', 'v1.2.0', '1.02.0'):
+                with self.subTest(tag=tag):
+                    result = subprocess.run(command + [tag], env=env, capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse((root / 'prefix/bin').exists())
 
     def test_piped_installer_runs_with_fixture_downloads(self):
+        for tag, include_cbook in (('1.1.0', False), ('1.2.0', True), ('1.10.0', True), ('2.0.0', True)):
+            with self.subTest(tag=tag):
+                self.check_piped_installer(tag, include_cbook)
+
+    def check_piped_installer(self, tag, include_cbook):
         packager = load('package-desktop')
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -119,7 +126,15 @@ class ReleaseTests(unittest.TestCase):
             for name in packager.LICENSES:
                 (licenses / name).write_text('license fixture')
             archive = root / 'commitbook-x86_64-unknown-linux-gnu.tar.gz'
-            packager.package(binaries, licenses, archive)
+            if include_cbook:
+                packager.package(binaries, licenses, archive)
+            else:
+                with tarfile.open(archive, 'w:gz') as tar:
+                    for name in packager.BINARIES:
+                        if name != 'cbook':
+                            tar.add(binaries / name, arcname=f'bin/{name}')
+                    for name in packager.LICENSES:
+                        tar.add(licenses / name, arcname=f'share/licenses/commitbook/{name}')
             (root / 'SHA256SUMS').write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
             mocks = root / 'mocks'; mocks.mkdir()
             (mocks / 'uname').write_text('#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n')
@@ -128,20 +143,23 @@ import json, os, pathlib, shutil, sys
 args = sys.argv[1:]
 url = next(arg for arg in args if arg.startswith('https://'))
 if url.endswith('/latest'):
-    print(json.dumps({'tag_name': '0.10.0'}))
+    print(json.dumps({'tag_name': os.environ['FIXTURE_RELEASE_TAG']}))
 else:
+    assert f"/download/{os.environ['FIXTURE_RELEASE_TAG']}/" in url
     source = pathlib.Path(os.environ['FIXTURE_DOWNLOAD_ROOT']) / url.rsplit('/', 1)[1]
     shutil.copyfile(source, args[args.index('-o') + 1])
 """)
             for script in mocks.iterdir(): script.chmod(0o755)
             env = dict(os.environ, PATH=str(mocks) + os.pathsep + os.environ['PATH'],
-                       FIXTURE_DOWNLOAD_ROOT=str(root), COMMITBOOK_INSTALL_PREFIX=str(root / 'installed'))
+                       FIXTURE_DOWNLOAD_ROOT=str(root), FIXTURE_RELEASE_TAG=tag,
+                       COMMITBOOK_INSTALL_PREFIX=str(root / 'installed'))
             result = subprocess.run(['bash'], input=(ROOT / 'scripts/release/install.sh').read_text(),
                                     env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue((root / 'installed/bin/cobo').exists())
-            self.assertTrue((root / 'installed/bin/cbook').exists())
-            self.assertTrue((root / 'installed/share/licenses/commitbook/LICENSE').exists())
+            for name in packager.BINARIES:
+                self.assertEqual((root / f'installed/bin/{name}').exists(), include_cbook if name == 'cbook' else True)
+            for name in packager.LICENSES:
+                self.assertTrue((root / f'installed/share/licenses/commitbook/{name}').exists())
 
 
 if __name__ == '__main__':

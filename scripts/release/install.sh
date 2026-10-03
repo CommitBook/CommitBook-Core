@@ -50,7 +50,17 @@ verify_checksum() {
 
 # Also used by fixture tests; no networking or shell-profile changes here.
 install_archive() {
-    local archive="$1" staging="$2" name
+    local archive="$1" staging="$2" tag="${3:?Release version is required}" name
+    local -a binaries=(commitbook cobo commitbook-tui commitbook-web)
+    if [[ ! "$tag" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+        echo "Expected a bare release version, got: $tag" >&2
+        return 1
+    fi
+    # The main-branch installer can run before its corresponding release is
+    # published. cbook only ships in 1.2.0 onward; older releases have four bins.
+    if (( BASH_REMATCH[1] > 1 || (BASH_REMATCH[1] == 1 && BASH_REMATCH[2] >= 2) )); then
+        binaries+=(cbook)
+    fi
     # Reject extra paths before extraction; published archives contain only files.
     local listing
     listing="$(tar tzf "$archive")"
@@ -66,14 +76,14 @@ install_archive() {
     fi
     mkdir -p "$staging"
     tar xzf "$archive" -C "$staging"
-    for name in commitbook cobo cbook commitbook-tui commitbook-web; do
+    for name in "${binaries[@]}"; do
         [ -f "$staging/bin/$name" ] && [ ! -L "$staging/bin/$name" ] || return 1
     done
     for name in LICENSE THIRD_PARTY_NOTICES.txt; do
         [ -f "$staging/share/licenses/commitbook/$name" ] && [ ! -L "$staging/share/licenses/commitbook/$name" ] || return 1
     done
     mkdir -p "$INSTALL_DIR" "$INSTALL_PREFIX/share/licenses/commitbook"
-    for name in commitbook cobo cbook commitbook-tui commitbook-web; do
+    for name in "${binaries[@]}"; do
         install -m 755 "$staging/bin/$name" "$INSTALL_DIR/$name"
     done
     for name in LICENSE THIRD_PARTY_NOTICES.txt; do
@@ -138,7 +148,7 @@ main() {
     verify_checksum "$tmp" "$archive" "${tmp}/SHA256SUMS"
 
     echo "Extracting to ${INSTALL_DIR}..."
-    install_archive "${tmp}/${archive}" "${tmp}/unpacked"
+    install_archive "${tmp}/${archive}" "${tmp}/unpacked" "$tag"
 
     # Verify
     if command -v "${INSTALL_DIR}/commitbook" &>/dev/null; then
