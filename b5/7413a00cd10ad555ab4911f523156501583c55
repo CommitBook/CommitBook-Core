@@ -1,0 +1,21 @@
+Cargo.toml
+  s_5c17ca6585b1fc::t_1e490ad6cc2964 13
+Cargo.lock
+  s_5c17ca6585b1fc::t_63846ab68fe2ab 543,563,588,610,625
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b57413a00cd10ad555ab4911f523156501583c55",
+  "prompts": {},
+  "sessions": {
+    "s_5c17ca6585b1fc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_efc372f7dffesA9SnmXPKpTTos",
+        "model": "unknown"
+      },
+      "human_author": "Manuel <m@manuelgruber.com>"
+    }
+  }
+}
